@@ -7,7 +7,7 @@ An example of how to use nedalloc
 #include <stdlib.h>
 #include "nedmalloc.c"
 
-#define THREADS 5
+#define THREADS 2
 #define RECORDS (100000/THREADS)
 
 static int whichmalloc;
@@ -223,10 +223,15 @@ int main(void)
 		HeapSetInformation(win32heap, HeapCompatibilityInformation, &data, sizeof(data));
 		HeapQueryInformation(win32heap, HeapCompatibilityInformation, &data, sizeof(data), NULL);
 		if(2!=data)
-			abort();
-		printf("Testing win32 low frag allocator with %d threads ...\n\n", THREADS);
-		whichmalloc=2;
-		runtest();
+		{
+			printf("The win32 low frag allocator won't work under a debugger!\n");
+		}
+		else
+		{
+			printf("Testing win32 low frag allocator with %d threads ...\n\n", THREADS);
+			whichmalloc=2;
+			runtest();
+		}
 		HeapDestroy(win32heap);
 	}
 #endif
