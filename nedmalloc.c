@@ -279,7 +279,7 @@ static void *threadcache_malloc(nedpool *p, threadcache *tc, size_t *size) THROW
 	void *ret=0;
 	unsigned int bestsize;
 	unsigned int idx=size2binidx(*size);
-	size_t blksize;
+	size_t blksize=0;
 	threadcacheblk *blk, **binsptr;
 	/* Calculate best fit bin size */
 	bestsize=1<<(idx+4);
