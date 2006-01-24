@@ -211,7 +211,7 @@ static int InitCaches(nedpool *p, int from, int to) THROWSPEC
 }
 static NOINLINE void RemoveCacheEntries(nedpool *p, threadcache *tc, unsigned int age) THROWSPEC
 {
-	if(tc->mymspace>=0)
+	if(tc->freeInCache)
 	{
 		threadcacheblk **tcbptr=tc->bins;
 		int n;
