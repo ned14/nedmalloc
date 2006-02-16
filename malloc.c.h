@@ -2402,14 +2402,20 @@ static size_t traverse_and_check(mstate m);
   }\
 }
 #elif defined(_MSC_VER) && _MSC_VER>=1300
-#ifndef BitScanForward	/* Try to avoid pulling in WinNT.h */
+ #ifndef BitScanForward	/* Try to avoid pulling in WinNT.h */
+  #ifdef __cplusplus
+extern "C" {
+  #endif
 unsigned char _BitScanForward(unsigned long *index, unsigned long mask);
 unsigned char _BitScanReverse(unsigned long *index, unsigned long mask);
-#define BitScanForward _BitScanForward
-#define BitScanReverse _BitScanReverse
-#pragma intrinsic(_BitScanForward)
-#pragma intrinsic(_BitScanReverse)
-#endif
+  #ifdef __cplusplus
+}
+  #endif
+  #define BitScanForward _BitScanForward
+  #define BitScanReverse _BitScanReverse
+  #pragma intrinsic(_BitScanForward)
+  #pragma intrinsic(_BitScanReverse)
+ #endif
 #define compute_tree_index(S, I)\
 {\
   size_t X = S >> TREEBIN_SHIFT;\
