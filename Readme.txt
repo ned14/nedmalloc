@@ -1,4 +1,4 @@
-nedalloc v1.00 1st January 2006:
+nedalloc v1.01 ? 2006:
 -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
@@ -38,7 +38,7 @@ memory back to the system, especially under win32.
 Notes:
 -=-=-=
 If you want the very latest version of this allocator, get it from the
-TnFOX SVN repository at svn://svn.berlios.de/tnfox/trunk/src/nedalloc
+TnFOX SVN repository at svn://svn.berlios.de/viewcvs/tnfox/trunk/src/nedmalloc
 
 Because of how nedalloc allocates an mspace per thread, it can cause
 severe bloating of memory usage under certain allocation patterns.
@@ -89,3 +89,15 @@ As you can see, nedmalloc is slightly faster but testing shows that this
 is due to the threadcache. If disabled, one only gets ~160Mb/sec showing
 how ptmalloc2 is slightly more efficient as a raw allocator.
 
+
+ChangeLog:
+-=-=-=-=-=
+v1.01 ?:
+ * Fixed multiprocessor scaling problems by removing sources of cache sloshing
+ * Earl Chew <earl_chew <at> agilent <dot> com> sent patches for the following:
+   1. size2binidx() wasn't working for default code path (non x86)
+   2. Fixed failure to release mspace lock under certain circumstances which
+      caused a deadlock
+
+v1.00 1st January 2006:
+ * First release

@@ -11,9 +11,13 @@ An example of how to use nedalloc
 #define RECORDS (100000/THREADS)
 
 static int whichmalloc;
-static int ops[THREADS];
-static unsigned int *toalloc[THREADS];
-static void **allocs[THREADS];
+static struct threadstuff_t
+{
+	int ops;
+	unsigned int *toalloc;
+	void **allocs;
+	char cachesync[128];
+} threadstuff[THREADS];
 
 static void threadcode(int);
 
@@ -92,18 +96,18 @@ static FORCEINLINE unsigned int myrandom(unsigned int *seed)
 static void threadcode(int threadidx)
 {
 	int n;
-	unsigned int *toallocptr=toalloc[threadidx];
-	void **allocptr=allocs[threadidx];
+	unsigned int *toallocptr=threadstuff[threadidx].toalloc;
+	void **allocptr=threadstuff[threadidx].allocs;
 	unsigned int seed=threadidx;
 	usCount start;
-	//neddisablethreadcache(0);
+	/*neddisablethreadcache(0);*/
 	THREADSLEEP(100);
 	start=GetUsCount();
 	for(n=0; n<RECORDS;)
 	{
 #if 1
 		unsigned int r=myrandom(&seed);
-		if(n && (r & 65535)<32760) //<32760)
+		if(n && (r & 65535)<32760) /*<32760)*/
 		{	/* free */
 			--toallocptr;
 			--allocptr;
@@ -118,7 +122,7 @@ static void threadcode(int threadidx)
 			toallocptr++;
 			allocptr++;
 			n++;
-			ops[threadidx]++;
+			threadstuff[threadidx].ops++;
 		}
 	}
 	for(n=0; n<RECORDS; n++)
@@ -138,10 +142,10 @@ static double runtest()
 	{
 		unsigned int *toallocptr;
 		int m;
-		ops[n]=0;
+		threadstuff[n].ops=0;
 		times[n]=0;
-		toalloc[n]=toallocptr=calloc(RECORDS, sizeof(unsigned int));
-		allocs[n]=calloc(RECORDS, sizeof(void *));
+		threadstuff[n].toalloc=toallocptr=calloc(RECORDS, sizeof(unsigned int));
+		threadstuff[n].allocs=calloc(RECORDS, sizeof(void *));
 		for(m=0; m<RECORDS; m++)
 		{
 			unsigned int size=myrandom(&seed);
@@ -153,7 +157,8 @@ static double runtest()
 			else
 			{
 				size&=0x3FFF;             /* < 16Kb */
-				//size=(1<<6)<<(size & 7);  /* < 8Kb */
+				/*size&=0x1FFF;*/			  /* < 8Kb */
+				/*size=(1<<6)<<(size & 7);*/  /* < 8Kb */
 			}
 			*toallocptr++=size;
 		}
@@ -165,8 +170,8 @@ static double runtest()
 	for(n=THREADS-1; n>=0; n--)
 	{
 		THREADWAIT(threads[n]);
-		free(allocs[n]); allocs[n]=0;
-		free(toalloc[n]); toalloc[n]=0;
+		free(threadstuff[n].allocs); threadstuff[n].allocs=0;
+		free(threadstuff[n].toalloc); threadstuff[n].toalloc=0;
 		threads[n]=0;
 	}
 	{
@@ -176,7 +181,7 @@ static double runtest()
 		for(n=0; n<THREADS; n++)
 		{
 			totaltime+=times[n];
-			totalops+=ops[n];
+			totalops+=threadstuff[n].ops;
 		}
 		opspersec=1000000000000.0*totalops/totaltime*THREADS;
 		printf("This allocator achieves %lfops/sec under %d threads\n", opspersec, THREADS);
@@ -204,7 +209,7 @@ int main(void)
 	}
 #endif
 
-	if(1)
+	if(0)
 	{
 		printf("\nTesting standard allocator with %d threads ...\n", THREADS);
 		std=runtest();

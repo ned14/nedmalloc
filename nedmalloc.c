@@ -54,9 +54,8 @@ DEALINGS IN THE SOFTWARE.
 /* The number of cache entries for finer grained bins. This is (topbitpos(THREADCACHEMAX)-4)*2 */
 #define THREADCACHEMAXBINS ((13-4)*2)
 #else
-/* The number of cache entries. This is (topbitpos(THREADCACHEMAX)-4). You may find that 12
-or higher improves speed by a few percent (not sure why!) */
-#define THREADCACHEMAXBINS ((13-4)+3)
+/* The number of cache entries. This is (topbitpos(THREADCACHEMAX)-4) */
+#define THREADCACHEMAXBINS (13-4)
 #endif
 /* Point at which the free space in a thread cache is garbage collected */
 #define THREADCACHEMAXFREESPACE (512*1024)
@@ -131,13 +130,13 @@ typedef struct threadcache_t
 #ifdef DEBUG
 	unsigned int magic2;
 #endif
+	char cachesync[128];				/* Make sure it's nowhere near the next threadcache */
 } threadcache;
 struct nedpool_t
 {
 	MLOCK_T mutex;
 	void *uservalue;
 	int threads;						/* Max entries in m to use */
-	unsigned int useCount;				/* Counter incremented by malloc/free op */
 	threadcache *caches;
 	TLSVAR mycache;						/* Thread cache for this thread */
 	mstate m[MAXTHREADSINPOOL+1];		/* mspace entries for this pool */
@@ -148,10 +147,17 @@ static FORCEINLINE unsigned int size2binidx(size_t _size) THROWSPEC
 {	/* 8=1000	16=10000	20=10100	24=11000	32=100000	48=110000	4096=1000000000000 */
 	unsigned int topbit, size=(unsigned int)(_size>>4);
 	/* 16=1		20=1	24=1	32=10	48=11	64=100	96=110	128=1000	4096=100000000 */
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
-	__asm__("bsrl\t%1, %0\n\t" : "=r" (topbit) : "g" (size));
+
+#if defined(__GNUC__)
+        topbit = sizeof(size)*__CHAR_BIT__ - 1 - __builtin_clz(size);
 #elif defined(_MSC_VER) && _MSC_VER>=1300
-	_BitScanReverse((DWORD *) &topbit, size);
+	{
+            unsigned long bsrTopBit;
+
+            _BitScanReverse(&bsrTopBit, size);
+
+            topbit = bsrTopBit;
+        }
 #else
 #if 0
 	union {
@@ -176,7 +182,7 @@ static FORCEINLINE unsigned int size2binidx(size_t _size) THROWSPEC
 		x = (x + (x >> 4)) & 0x0F0F0F0F;
 		x = x + (x << 8);
 		x = x + (x << 16);
-		topbit=x >> 24;
+		topbit=31 - (x >> 24);
 	}
 #endif
 #endif
@@ -218,7 +224,7 @@ static NOINLINE void RemoveCacheEntries(nedpool *p, threadcache *tc, unsigned in
 		for(n=0; n<=THREADCACHEMAXBINS; n++, tcbptr+=2)
 		{
 			threadcacheblk **tcb=tcbptr+1;
-			for(; *tcb && p->useCount-(*tcb)->lastUsed>=age; )
+			for(; *tcb && tc->frees-(*tcb)->lastUsed>=age; )
 			{
 				threadcacheblk *f=*tcb;
 				size_t blksize=f->size; /*nedblksize(f);*/
@@ -241,9 +247,9 @@ static void DestroyCaches(nedpool *p) THROWSPEC
 	{
 		threadcache *tc;
 		int n;
-		p->useCount++;
 		for(n=0; -2!=(tc=&p->caches[n], tc->mymspace); n++)
 		{
+			tc->frees++;
 			RemoveCacheEntries(p, tc, 0);
 			assert(!tc->freeInCache);
 			tc->mymspace=-1;
@@ -330,7 +336,7 @@ static void *threadcache_malloc(nedpool *p, threadcache *tc, size_t *size) THROW
 		if(!*binsptr)
 			binsptr[1]=0;
 		assert(nedblksize(blk)>=sizeof(threadcacheblk) && nedblksize(blk)<=THREADCACHEMAX+CHUNK_OVERHEAD);
-		//printf("malloc: %p, %p, %p, %lu\n", p, tc, blk, (long) size);
+		/*printf("malloc: %p, %p, %p, %lu\n", p, tc, blk, (long) size);*/
 		ret=(void *) blk;
 	}
 	++tc->mallocs;
@@ -349,17 +355,19 @@ static void *threadcache_malloc(nedpool *p, threadcache *tc, size_t *size) THROW
 #endif
 	return ret;
 }
-static NOINLINE void ReleaseFreeInCache(nedpool *p, threadcache *tc) THROWSPEC
+static NOINLINE void ReleaseFreeInCache(nedpool *p, threadcache *tc, int mymspace) THROWSPEC
 {
-	unsigned int age=THREADCACHEMAXFREESPACE/4096;
+	unsigned int age=THREADCACHEMAXFREESPACE/8192;
+	/*ACQUIRE_LOCK(&p->m[mymspace]->mutex);*/
 	while(age && tc->freeInCache>=THREADCACHEMAXFREESPACE)
 	{
 		RemoveCacheEntries(p, tc, age);
 		/*printf("*** Removing cache entries older than %u (%u)\n", age, (unsigned int) tc->freeInCache);*/
 		age>>=1;
 	}
+	/*RELEASE_LOCK(&p->m[mymspace]->mutex);*/
 }
-static void threadcache_free(nedpool *p, threadcache *tc, void *mem, size_t size) THROWSPEC
+static void threadcache_free(nedpool *p, threadcache *tc, int mymspace, void *mem, size_t size) THROWSPEC
 {
 	unsigned int bestsize;
 	unsigned int idx=size2binidx(size);
@@ -384,7 +392,7 @@ static void threadcache_free(nedpool *p, threadcache *tc, void *mem, size_t size
 		size=bestsize;
 	binsptr=&tc->bins[idx*2];
 	assert(idx<=THREADCACHEMAXBINS);
-	tck->lastUsed=++p->useCount;
+	tck->lastUsed=++tc->frees;
 	tck->size=(unsigned int) size;
 	tck->next=*binsptr;
 	tck->prev=0;
@@ -394,12 +402,11 @@ static void threadcache_free(nedpool *p, threadcache *tc, void *mem, size_t size
 		binsptr[1]=tck;
 	assert(!*binsptr || (*binsptr)->size==tck->size);
 	*binsptr=tck;
-	//printf("free: %p, %p, %p, %lu\n", p, tc, mem, (long) size);
-	++tc->frees;
+	/*printf("free: %p, %p, %p, %lu\n", p, tc, mem, (long) size);*/
 	tc->freeInCache+=size;
 #if 1
 	if(tc->freeInCache>=THREADCACHEMAXFREESPACE)
-		ReleaseFreeInCache(p, tc);
+		ReleaseFreeInCache(p, tc, mymspace);
 #endif
 }
 
@@ -564,6 +571,13 @@ void neddisablethreadcache(nedpool *p) THROWSPEC
 	}
 }
 
+#define GETMSPACE(m,p,tc,ms,s,action)           \
+  do                                            \
+  {                                             \
+    mstate m = GetMSpace((p),(tc),(ms),(s));    \
+    action;                                     \
+    RELEASE_LOCK(&m->mutex);                    \
+  } while (0)
 
 static FORCEINLINE mstate GetMSpace(nedpool *p, threadcache *tc, int mymspace, size_t size) THROWSPEC
 {	/* Returns a locked and ready for use mspace */
@@ -615,8 +629,8 @@ void * nedpmalloc(nedpool *p, size_t size) THROWSPEC
 #endif
 	if(!ret)
 	{	/* Use this thread's mspace */
-		mstate m=GetMSpace(p, tc, mymspace, size);
-		ret=mspace_malloc(m, size);
+        GETMSPACE(m, p, tc, mymspace, size,
+                  ret=mspace_malloc(m, size));
 	}
 	return ret;
 }
@@ -636,8 +650,8 @@ void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC
 #endif
 	if(!ret)
 	{	/* Use this thread's mspace */
-		mstate m=GetMSpace(p, tc, mymspace, rsize);
-		ret=mspace_calloc(m, 1, rsize);
+        GETMSPACE(m, p, tc, mymspace, rsize,
+                  ret=mspace_calloc(m, 1, rsize));
 	}
 	return ret;
 }
@@ -656,7 +670,7 @@ void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC
 		{
 			memcpy(ret, mem, memsize<size ? memsize : size);
 			if(memsize<=THREADCACHEMAX)
-				threadcache_free(p, tc, mem, memsize);
+				threadcache_free(p, tc, mymspace, mem, memsize);
 			else
 				mspace_free(0, mem);
 		}
@@ -664,8 +678,8 @@ void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC
 #endif
 	if(!ret)
 	{	/* Use this thread's mspace */
-		mstate m=GetMSpace(p, tc, mymspace, size);
-		ret=mspace_realloc(m, mem, size);
+        GETMSPACE(m, p, tc, mymspace, size,
+                  ret=mspace_realloc(m, mem, size));
 	}
 	return ret;
 }
@@ -681,7 +695,7 @@ void   nedpfree(nedpool *p, void *mem) THROWSPEC
 	memsize=nedblksize(mem);
 	assert(memsize);
 	if(mem && tc && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
-		threadcache_free(p, tc, mem, memsize);
+		threadcache_free(p, tc, mymspace, mem, memsize);
 	else
 #endif
 		mspace_free(0, mem);
@@ -693,8 +707,8 @@ void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes) THROWSPEC
 	int mymspace;
 	GetThreadCache(&p, &tc, &mymspace, &bytes);
 	{	/* Use this thread's mspace */
-		mstate m=GetMSpace(p, tc, mymspace, bytes);
-		ret=mspace_memalign(m, alignment, bytes);
+        GETMSPACE(m, p, tc, mymspace, bytes,
+                  ret=mspace_memalign(m, alignment, bytes));
 	}
 	return ret;
 }
@@ -758,10 +772,8 @@ void **nedpindependent_calloc(nedpool *p, size_t elemsno, size_t elemsize, void 
 	threadcache *tc;
 	int mymspace;
 	GetThreadCache(&p, &tc, &mymspace, &elemsize);
-	{
-		mstate m=GetMSpace(p, tc, mymspace, elemsno*elemsize);
-		ret=mspace_independent_calloc(m, elemsno, elemsize, chunks);
-	}
+    GETMSPACE(m, p, tc, mymspace, elemsno*elemsize,
+              ret=mspace_independent_calloc(m, elemsno, elemsize, chunks));
 	return ret;
 }
 void **nedpindependent_comalloc(nedpool *p, size_t elems, size_t *sizes, void **chunks) THROWSPEC
@@ -770,10 +782,8 @@ void **nedpindependent_comalloc(nedpool *p, size_t elems, size_t *sizes, void **
 	threadcache *tc;
 	int mymspace;
 	GetThreadCache(&p, &tc, &mymspace, 0);
-	{
-		mstate m=GetMSpace(p, tc, mymspace, 0);
-		ret=mspace_independent_comalloc(m, elems, sizes, chunks);
-	}
+	GETMSPACE(m, p, tc, mymspace, 0,
+              ret=mspace_independent_comalloc(m, elems, sizes, chunks));
 	return ret;
 }
 

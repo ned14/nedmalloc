@@ -116,8 +116,8 @@ EXTSPEC struct mallinfo nedmallinfo(void) THROWSPEC;
 #endif
 EXTSPEC int    nedmallopt(int parno, int value) THROWSPEC;
 EXTSPEC int    nedmalloc_trim(size_t pad) THROWSPEC;
-EXTSPEC void   nedmalloc_stats() THROWSPEC;
-EXTSPEC size_t nedmalloc_footprint() THROWSPEC;
+EXTSPEC void   nedmalloc_stats(void) THROWSPEC;
+EXTSPEC size_t nedmalloc_footprint(void) THROWSPEC;
 EXTSPEC MALLOCATTR void **nedindependent_calloc(size_t elemsno, size_t elemsize, void **chunks) THROWSPEC;
 EXTSPEC MALLOCATTR void **nedindependent_comalloc(size_t elems, size_t *sizes, void **chunks) THROWSPEC;
 
