@@ -1344,7 +1344,7 @@ static int dev_zero_fd = -1; /* Cached file descriptor for /dev/zero. */
 
 /* Win32 MMAP via VirtualAlloc */
 static FORCEINLINE void* win32mmap(size_t size) {
-  void* ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN, PAGE_READWRITE);
+  void* ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
   return (ptr != 0)? ptr: MFAIL;
 }
 
@@ -1526,7 +1526,7 @@ static FORCEINLINE int pthread_init_lock (MLOCK_T *sl) {
 }
 
 static FORCEINLINE int pthread_islocked (MLOCK_T *sl) {
-#if 1  /* If this code doesn't work on your processor, try the alternative */
+#if 0  /* This will be faster on SMP systems which enforce cache consistency */
   return sl->c!=0;
 #else
   /* Doing this correctly portably means inefficient code :( */
@@ -2212,12 +2212,12 @@ struct malloc_state {
   size_t     footprint;
   size_t     max_footprint;
   flag_t     mflags;
+  char       cachesync[128];
 #if USE_LOCKS
   MLOCK_T    mutex;     /* locate lock among fields that rarely change */
 #endif /* USE_LOCKS */
   msegment   seg;
   void*      nedpool;   /* Points back to nedpool owning this mstate */
-  char       cachesync[128];
 };
 
 typedef struct malloc_state*    mstate;

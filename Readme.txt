@@ -1,5 +1,5 @@
-nedalloc v1.01 ? 2006:
--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+nedalloc v1.01 24th February 2006:
+-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
 
@@ -67,32 +67,23 @@ THREADCACHEMAX to zero.
 
 Speed comparisons:
 -=-=-=-=-=-=-=-=-=
-1. The enclosed test.c is designed to be a representative synthetic
+See Benchmarks.xls for details.
+
+The enclosed test.c is designed to be a representative synthetic
 memory allocator test. It works by randomly mixing allocations with frees
 with half of the allocation sizes being a two power multiple less than
 512 bytes (to mimic C++ stack instantiated objects) and the other half
-being a simple random value less than 16Kb. See Benchmarks.xls for
-details.
+being a simple random value less than 16Kb. 
 
-
-2. Results from Tn's TestIO benchmark. This is a heavily multithreaded
-and memory intensive benchmark with a lot of branching and other stuff
-modern processors don't like so much. These figures are for SVN rev 532.
-As you'll note, the memory allocator isn't that much of a bottleneck here.
-
-Microsoft Windows XP SP2 on x86 uniprocessor
-Win32 allocator: 109.4Mb/sec
-ptmalloc2:       164.3Mb/sec
-nedmalloc:       166.7Mb/sec
-
-As you can see, nedmalloc is slightly faster but testing shows that this
-is due to the threadcache. If disabled, one only gets ~160Mb/sec showing
-how ptmalloc2 is slightly more efficient as a raw allocator.
-
+The real world code results are from Tn's TestIO benchmark. This is a
+heavily multithreaded and memory intensive benchmark with a lot of branching
+and other stuff modern processors don't like so much. As you'll note, the
+test doesn't show the benefits of the threadcache mostly due to the saturation
+of the memory bus being the limiting factor.
 
 ChangeLog:
 -=-=-=-=-=
-v1.01 ?:
+v1.01 24th February 2006:
  * Fixed multiprocessor scaling problems by removing sources of cache sloshing
  * Earl Chew <earl_chew <at> agilent <dot> com> sent patches for the following:
    1. size2binidx() wasn't working for default code path (non x86)
