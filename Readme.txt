@@ -1,10 +1,10 @@
-nedalloc v1.01 24th February 2006:
+nedalloc v1.02 ?:
 -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
 
 Enclosed is nedalloc, an alternative malloc implementation for multiple
-threads without lock contention based on dlmalloc v2.8.3. It is more
+threads without lock contention based on dlmalloc v2.8.4. It is more
 or less a newer implementation of ptmalloc2, the standard allocator in
 Linux (which is based on dlmalloc v2.7.0) but also contains a per-thread
 cache for maximum CPU scalability.
@@ -29,11 +29,6 @@ Configure using the instructions in nedmalloc.h. Run and enjoy.
 To test, compile test.c. It will run a comparison between your system
 allocator and nedalloc and tell you how much faster nedalloc is. It also
 serves as an example of usage.
-
-Known Bugs:
--=-=-=-=-=-
-dlmalloc v2.8.3 currently has a problem where it doesn't properly release
-memory back to the system, especially under win32.
 
 Notes:
 -=-=-=
@@ -83,6 +78,10 @@ of the memory bus being the limiting factor.
 
 ChangeLog:
 -=-=-=-=-=
+v1.02 ?:
+ * Integrated dlmalloc v2.8.4, fixing the win32 memory release problem and
+improving performance still further
+
 v1.01 24th February 2006:
  * Fixed multiprocessor scaling problems by removing sources of cache sloshing
  * Earl Chew <earl_chew <at> agilent <dot> com> sent patches for the following:

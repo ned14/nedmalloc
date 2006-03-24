@@ -29,7 +29,7 @@ static DWORD WINAPI _threadcode(LPVOID a)
 }
 #define THREADVAR HANDLE
 #define THREADINIT(v, id) (*v=CreateThread(NULL, 0, _threadcode, (LPVOID)(size_t) id, 0, NULL))
-#define THREADSLEEP(v) Sleep(v)
+#define THREADSLEEP(v) SleepEx(v, FALSE)
 #define THREADWAIT(v) (WaitForSingleObject(v, INFINITE), 0)
 
 typedef unsigned __int64 usCount;
