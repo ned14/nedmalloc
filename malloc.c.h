@@ -1442,9 +1442,15 @@ static int dev_zero_fd = -1; /* Cached file descriptor for /dev/zero. */
 #define DIRECT_MMAP(s)       CALL_MMAP(s)
 #else /* WIN32 */
 
+static SIZE_T win32largepagesize;
+
 /* Win32 MMAP via VirtualAlloc */
 static FORCEINLINE void* win32mmap(size_t size) {
-  void* ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+  void* ptr = 0;
+  if(size && !(size & (win32largepagesize-1)))
+    ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT|MEM_LARGE_PAGES, PAGE_READWRITE);
+  if(!ptr)
+    ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
   return (ptr != 0)? ptr: MFAIL;
 }
 
@@ -2832,7 +2838,35 @@ static int init_mparams(void) {
       SYSTEM_INFO system_info;
       GetSystemInfo(&system_info);
       mparams.page_size = system_info.dwPageSize;
-      mparams.granularity = system_info.dwAllocationGranularity;
+      mparams.granularity = ((DEFAULT_GRANULARITY != 0)?
+                           DEFAULT_GRANULARITY : system_info.dwAllocationGranularity);
+      if(!win32largepagesize)
+      { /* Do we have large page support? */
+        SIZE_T (*GetLargePageMinimum)(void);
+        GetLargePageMinimum = (SIZE_T (*)(void)) GetProcAddress(GetModuleHandle(TEXT("kernel32.dll")), "GetLargePageMinimum");
+        if(!GetLargePageMinimum)
+          win32largepagesize = MAX_SIZE_T;
+        else
+          win32largepagesize = GetLargePageMinimum();
+
+        /* For older versions of Windows, we need to enable lock page privilege */
+        {
+          HANDLE adjh;
+          if(OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &adjh))
+          {
+            DWORD retlen=0;
+            TOKEN_PRIVILEGES tp={ 1 };
+            if(LookupPrivilegeValue(0, SE_LOCK_MEMORY_NAME, &tp.Privileges[0].Luid))
+            {
+              tp.Privileges[0].Attributes=SE_PRIVILEGE_ENABLED;
+              AdjustTokenPrivileges(adjh, FALSE, &tp, sizeof(tp), NULL, &retlen);
+              if(GetLastError()!=S_OK)
+                fprintf(stderr, "WARNING: Failed to enable SeLockMemoryPrivilege - large page support will not be available!\n");
+            }
+            CloseHandle(adjh);
+          }
+        }
+      }
     }
 #endif /* WIN32 */
 
