@@ -1447,8 +1447,8 @@ static SIZE_T win32largepagesize;
 /* Win32 MMAP via VirtualAlloc */
 static FORCEINLINE void* win32mmap(size_t size) {
   void* ptr = 0;
-  if(size && !(size & (win32largepagesize-1)))
-    ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT|MEM_LARGE_PAGES, PAGE_READWRITE);
+  /*if(size && !(size & (win32largepagesize-1)))
+    ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT|MEM_LARGE_PAGES, PAGE_READWRITE);*/
   if(!ptr)
     ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
   return (ptr != 0)? ptr: MFAIL;
