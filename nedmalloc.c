@@ -489,6 +489,7 @@ static NOINLINE mstate FindMSpace(nedpool *p, threadcache *tc, int *lastUsed, si
 	}
 	/* Let it lock on the last one it used */
 badexit:
+	ACQUIRE_LOCK(&p->m[*lastUsed]->mutex);
 	return p->m[*lastUsed];
 found:
 	*lastUsed=n;
