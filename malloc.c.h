@@ -478,6 +478,7 @@ MAX_RELEASE_CHECK_RATE   default: 255 unless not HAVE_MMAP
 #endif  /* WIN32 */
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
+#define _WIN32_WINNT 0x600
 #include <windows.h>
 #define HAVE_MMAP 1
 #define HAVE_MORECORE 0
@@ -541,7 +542,7 @@ MAX_RELEASE_CHECK_RATE   default: 255 unless not HAVE_MMAP
 #endif  /* USE_LOCKS */
 #ifndef USE_SPIN_LOCKS
 #if USE_LOCKS && (defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))) || (defined(_MSC_VER) && _MSC_VER>=1310)
-#define USE_SPIN_LOCKS 1
+#define USE_SPIN_LOCKS 0 //1
 #else
 #define USE_SPIN_LOCKS 0
 #endif /* USE_LOCKS && ... */
@@ -1737,9 +1738,23 @@ static MLOCK_T morecore_mutex = {0, PTHREAD_MUTEX_INITIALIZER };
 /* Win32 critical sections */
 #define MLOCK_T         CRITICAL_SECTION
 #define CURRENT_THREAD  GetCurrentThreadId()
-#define INITIAL_LOCK(s) (!InitializeCriticalSectionAndSpinCount((s), 4000)
-#define ACQUIRE_LOCK(s) ( (!((s))->DebugInfo ? INITIAL_LOCK((s)) : 0), !EnterCriticalSection((s)), 0)
-#define RELEASE_LOCK(s) ( LeaveCriticalSection((s)), 0 )
+#define INITIAL_LOCK(s) (!InitializeCriticalSectionAndSpinCount((s), 0x80000000|4000))
+
+static FORCEINLINE int win32_acquirelock(MLOCK_T *sl)
+{
+	if(!sl->DebugInfo)
+		if(!INITIAL_LOCK(sl)) return 1;
+	EnterCriticalSection(sl);
+	return 0;
+}
+static FORCEINLINE int win32_releaselock(MLOCK_T *sl)
+{
+	LeaveCriticalSection(sl);
+	return 0;
+}
+
+#define ACQUIRE_LOCK(s) win32_acquirelock(s)
+#define RELEASE_LOCK(s) win32_releaselock(s)
 #define TRY_LOCK(s)     ( TryEnterCriticalSection((s)) )
 #define IS_LOCKED(s)    ( (s)->LockCount >= 0 )
 #define NULL_LOCK_INITIALIZER

@@ -81,6 +81,7 @@ ChangeLog:
 v1.02 ?:
  * Integrated dlmalloc v2.8.4, fixing the win32 memory release problem and
 improving performance still further
+ * Fixed win32 critical section implementation
 
 v1.01 24th February 2006:
  * Fixed multiprocessor scaling problems by removing sources of cache sloshing
