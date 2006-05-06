@@ -542,7 +542,7 @@ MAX_RELEASE_CHECK_RATE   default: 255 unless not HAVE_MMAP
 #endif  /* USE_LOCKS */
 #ifndef USE_SPIN_LOCKS
 #if USE_LOCKS && (defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))) || (defined(_MSC_VER) && _MSC_VER>=1310)
-#define USE_SPIN_LOCKS 0 //1
+#define USE_SPIN_LOCKS 1
 #else
 #define USE_SPIN_LOCKS 0
 #endif /* USE_LOCKS && ... */
