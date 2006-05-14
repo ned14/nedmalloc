@@ -1555,7 +1555,7 @@ static FORCEINLINE int pthread_acquire_lock (MLOCK_T *sl) {
     int spins = 0;
     for (;;) {
       int ret;
-      __asm__ __volatile__ ("lock cmpxchgl %2,(%1)" : "=a" (ret) : "r" (&sl->l), "r" (1), "a" (0));
+      __asm__ __volatile__ ("lock/cmpxchgl %2,(%1)" : "=a" (ret) : "r" (&sl->l), "r" (1), "a" (0));
       if(!ret) {
         assert(!sl->threadid);
         sl->threadid=CURRENT_THREAD;
@@ -1566,11 +1566,11 @@ static FORCEINLINE int pthread_acquire_lock (MLOCK_T *sl) {
 #if defined (__SVR4) && defined (__sun) /* solaris */
         thr_yield();
 #else 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__APPLE__)
         sched_yield();
 #else  /* no-op yield on unknown systems */
         ; 
-#endif /* __linux__ || __FreeBSD__ */
+#endif /* __linux__ || __FreeBSD__ || __APPLE__ */
 #endif /* solaris */
       }
     }
@@ -1590,7 +1590,7 @@ static FORCEINLINE void pthread_release_lock (MLOCK_T *sl) {
 
 static FORCEINLINE int pthread_try_lock (MLOCK_T *sl) {
   int ret;
-  __asm__ __volatile__ ("lock cmpxchgl %2,(%1)" : "=a" (ret) : "r" (&sl->l), "r" (1), "a" (0));
+  __asm__ __volatile__ ("lock/cmpxchgl %2,(%1)" : "=a" (ret) : "r" (&sl->l), "r" (1), "a" (0));
   if(!ret){
     assert(!sl->threadid);
     sl->threadid=CURRENT_THREAD;
