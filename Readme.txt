@@ -1,5 +1,5 @@
-nedalloc v1.02 ?:
--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+nedalloc v1.02 15th May 2006:
+-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
 
@@ -13,9 +13,9 @@ It is licensed under the Boost Software License which basically means
 you can do anything you like with it. This does not apply to the malloc.c.h
 file which remains copyright to others.
 
-It has been tested on win32 (x86), win64 (x64), Linux (x64) and
-FreeBSD (x64). It works very well on all of these and is very significantly
-faster than the system allocator on all of these platforms.
+It has been tested on win32 (x86), win64 (x64), Linux (x64), FreeBSD (x64)
+and Apple MacOS X (x86). It works very well on all of these and is very
+significantly faster than the system allocator on all of these platforms.
 
 By literally dropping in this allocator as a replacement for your system
 allocator, you can see real world improvements of up to three times in normal
@@ -78,12 +78,15 @@ of the memory bus being the limiting factor.
 
 ChangeLog:
 -=-=-=-=-=
-v1.02 ?:
+v1.02 15th May 2006:
  * Integrated dlmalloc v2.8.4, fixing the win32 memory release problem and
-improving performance still further
- * Fixed win32 critical section implementation
- * Wasn't locking mspace if all mspaces were locked
-
+improving performance still further. Speed is now up to twice the speed of
+v1.01 (average is 67% faster).
+ * Fixed win32 critical section implementation. Thanks to Pavel Kuznetsov
+for reporting this.
+ * Wasn't locking mspace if all mspaces were locked. Thanks to Pavel Kuznetsov
+for reporting this.
+ * Added Apple Mac OS X support.
 
 v1.01 24th February 2006:
  * Fixed multiprocessor scaling problems by removing sources of cache sloshing
