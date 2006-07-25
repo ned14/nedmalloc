@@ -1,5 +1,5 @@
-nedalloc v1.02 15th May 2006:
--=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+nedalloc v1.03 10th July 2006:
+-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
 
@@ -78,10 +78,14 @@ of the memory bus being the limiting factor.
 
 ChangeLog:
 -=-=-=-=-=
+v1.03 10th July 2006:
+ * Fixed memory corruption bug in threadcache code which only appeared with >4
+threads and in heavy use of the threadcache.
+
 v1.02 15th May 2006:
  * Integrated dlmalloc v2.8.4, fixing the win32 memory release problem and
-improving performance still further. Speed is now up to twice the speed of
-v1.01 (average is 67% faster).
+improving performance still further. Speed is now up to twice the speed of v1.01
+(average is 67% faster).
  * Fixed win32 critical section implementation. Thanks to Pavel Kuznetsov
 for reporting this.
  * Wasn't locking mspace if all mspaces were locked. Thanks to Pavel Kuznetsov
