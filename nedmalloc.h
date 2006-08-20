@@ -76,6 +76,9 @@ ACQUIRE_LOCK, RELEASE_LOCK, TRY_LOCK, IS_LOCKED and NULL_LOCK_INITIALIZER.
  #define nedmalloc_footprint     malloc_footprint
  #define nedindependent_calloc   independent_calloc
  #define nedindependent_comalloc independent_comalloc
+ #ifdef _MSC_VER
+  #define nedblksize              _msize
+ #endif
 #endif
 
 #ifndef NO_MALLINFO
