@@ -7,10 +7,11 @@ An example of how to use nedalloc
 #include <stdlib.h>
 #include "nedmalloc.c"
 
-#define THREADS 2
+#define THREADS 5
 #define RECORDS (100000/THREADS)
 
 static int whichmalloc;
+static int doRealloc;
 static struct threadstuff_t
 {
 	int ops;
@@ -55,12 +56,17 @@ static void *win32malloc(size_t size)
 {
 	return HeapAlloc(win32heap, 0, size);
 }
+static void *win32realloc(void *p, size_t size)
+{
+	return HeapReAlloc(win32heap, 0, p, size);
+}
 static void win32free(void *mem)
 {
 	HeapFree(win32heap, 0, mem);
 }
 
 static void *(*const mallocs[])(size_t size)={ malloc, nedmalloc, win32malloc };
+static void *(*const reallocs[])(void *p, size_t size)={ realloc, nedrealloc, win32realloc };
 static void (*const frees[])(void *mem)={ free, nedfree, win32free };
 #else
 static void *_threadcode(void *a)
@@ -82,6 +88,7 @@ static FORCEINLINE usCount GetUsCount()
 }
 
 static void *(*const mallocs[])(size_t size)={ malloc, nedmalloc };
+static void *(*const reallocs[])(void *p, size_t size)={ realloc, nedrealloc };
 static void (*const frees[])(void *mem)={ free, nedfree };
 #endif
 static usCount times[THREADS];
@@ -107,7 +114,7 @@ static void threadcode(int threadidx)
 	{
 #if 1
 		unsigned int r=myrandom(&seed);
-		if(n && (r & 65535)<32760) /*<32760)*/
+		if(allocptr>threadstuff[threadidx].allocs && (r & 65535)<32760) /*<32760)*/
 		{	/* free */
 			--toallocptr;
 			--allocptr;
@@ -118,14 +125,21 @@ static void threadcode(int threadidx)
 		else
 #endif
 		{
-            *allocptr=mallocs[whichmalloc](*toallocptr);
-			toallocptr++;
-			allocptr++;
+			if(doRealloc && allocptr>threadstuff[threadidx].allocs && (r & 1))
+			{
+	            allocptr[-1]=reallocs[whichmalloc](allocptr[-1], *toallocptr);
+			}
+			else
+			{
+	            allocptr[0]=mallocs[whichmalloc](*toallocptr);
+				allocptr++;
+			}
 			n++;
+			toallocptr++;
 			threadstuff[threadidx].ops++;
 		}
 	}
-	for(n=0; n<RECORDS; n++)
+	while(allocptr>threadstuff[threadidx].allocs)
 	{
 		frees[whichmalloc](*--allocptr);
 	}
@@ -137,6 +151,7 @@ static double runtest()
 {
 	unsigned int seed=1;
 	int n;
+	double opspersec=0;
 	THREADVAR threads[THREADS];
 	for(n=0; n<THREADS; n++)
 	{
@@ -163,6 +178,7 @@ static double runtest()
 			*toallocptr++=size;
 		}
 	}
+#if 1
 	for(n=0; n<THREADS; n++)
 	{
 		THREADINIT(&threads[n], n);
@@ -170,12 +186,9 @@ static double runtest()
 	for(n=THREADS-1; n>=0; n--)
 	{
 		THREADWAIT(threads[n]);
-		free(threadstuff[n].allocs); threadstuff[n].allocs=0;
-		free(threadstuff[n].toalloc); threadstuff[n].toalloc=0;
 		threads[n]=0;
 	}
 	{
-		double opspersec;
 		usCount totaltime=0;
 		int totalops=0;
 		for(n=0; n<THREADS; n++)
@@ -185,8 +198,26 @@ static double runtest()
 		}
 		opspersec=1000000000000.0*totalops/totaltime*THREADS;
 		printf("This allocator achieves %lfops/sec under %d threads\n", opspersec, THREADS);
-		return opspersec;
 	}
+#else
+	/* Quick realloc() test */
+	doRealloc=1;
+	for(n=0; n<THREADS; n++)
+	{
+		THREADINIT(&threads[n], n);
+	}
+	for(n=THREADS-1; n>=0; n--)
+	{
+		THREADWAIT(threads[n]);
+		threads[n]=0;
+	}
+#endif
+	for(n=THREADS-1; n>=0; n--)
+	{
+		free(threadstuff[n].allocs); threadstuff[n].allocs=0;
+		free(threadstuff[n].toalloc); threadstuff[n].toalloc=0;
+	}
+	return opspersec;
 }
 
 int main(void)

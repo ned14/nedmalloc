@@ -1,4 +1,4 @@
-nedalloc v1.03 10th July 2006:
+nedalloc v1.04 ?:
 -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
@@ -78,6 +78,27 @@ of the memory bus being the limiting factor.
 
 ChangeLog:
 -=-=-=-=-=
+v1.04 ?:
+ * Fixed a bug with the new optimised implementation that failed to lock
+on a realloc under certain conditions.
+ * Fixed lack of thread synchronisation in InitPool() causing pool corruption
+
+v1.04alpha_svn915 7th October 2006:
+ * Fixed failure to unlock thread cache list if allocating a new list failed.
+Thanks to Dmitry Chichkov for reporting this. Futher thanks to Aleksey Sanin.
+ * Fixed realloc(0, <size>) segfaulting. Thanks to Dmitry Chichkov for
+reporting this.
+ * Made config defines #ifndef so they can be overriden by the build system.
+Thanks to Aleksey Sanin for suggesting this.
+ * Fixed deadlock in nedprealloc() due to unnecessary locking of preferred
+thread mspace when mspace_realloc() always uses the original block's mspace
+anyway. Thanks to Aleksey Sanin for reporting this.
+ * Made some speed improvements by hacking mspace_malloc() to no longer lock
+its mspace, thus allowing the recursive mutex implementation to be removed
+with an associated speed increase. Thanks to Aleksey Sanin for suggesting this.
+ * Fixed a bug where allocating mspaces overran its max limit. Thanks to
+Aleksey Sanin for reporting this.
+
 v1.03 10th July 2006:
  * Fixed memory corruption bug in threadcache code which only appeared with >4
 threads and in heavy use of the threadcache.
