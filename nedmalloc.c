@@ -473,6 +473,16 @@ static void threadcache_free(nedpool *p, threadcache *tc, int mymspace, void *me
 	unsigned int idx=size2binidx(size);
 	threadcacheblk **binsptr, *tck=(threadcacheblk *) mem;
 	assert(size>=sizeof(threadcacheblk) && size<=THREADCACHEMAX+CHUNK_OVERHEAD);
+#ifdef DEBUG
+	{	/* Make sure this is a valid memory block */
+	    mchunkptr p  = mem2chunk(mem);
+	    mstate fm = get_mstate_for(p);
+	    if (!ok_magic(fm)) {
+	      USAGE_ERROR_ACTION(fm, p);
+	      return;
+	    }
+	}
+#endif
 #ifdef FULLSANITYCHECKS
 	tcfullsanitycheck(tc);
 #endif

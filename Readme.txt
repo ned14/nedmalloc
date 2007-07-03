@@ -1,3 +1,7 @@
+Write test which randomly mallocs, frees, reallocs and launches and
+destroys threads. Check it returns memory to the system correctly.
+
+
 nedalloc v1.04 ?:
 -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
@@ -84,6 +88,8 @@ on a realloc under certain conditions.
  * Fixed lack of thread synchronisation in InitPool() causing pool corruption
  * Fixed a memory leak of thread cache contents on disabling. Thanks to Earl
 Chew for reporting this.
+ * Added a sanity check for freed blocks being valid.
+ * Reworked test.c into being a torture test.
 
 v1.04alpha_svn915 7th October 2006:
  * Fixed failure to unlock thread cache list if allocating a new list failed.

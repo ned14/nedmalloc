@@ -1,6 +1,6 @@
 /* test.c
 An example of how to use nedalloc
-(C) 2005 Niall Douglas
+(C) 2005-2007 Niall Douglas
 */
 
 #include <stdio.h>
@@ -9,6 +9,7 @@ An example of how to use nedalloc
 
 #define THREADS 5
 #define RECORDS (100000/THREADS)
+#define TORTURETEST 1
 
 static int whichmalloc;
 static int doRealloc;
@@ -17,7 +18,9 @@ static struct threadstuff_t
 	int ops;
 	unsigned int *toalloc;
 	void **allocs;
-	char cachesync[128];
+	char cachesync1[128];
+	int done;
+	char cachesync2[128];
 } threadstuff[THREADS];
 
 static void threadcode(int);
@@ -107,13 +110,46 @@ static void threadcode(int threadidx)
 	void **allocptr=threadstuff[threadidx].allocs;
 	unsigned int seed=threadidx;
 	usCount start;
+	threadstuff[threadidx].done=0;
 	/*neddisablethreadcache(0);*/
 	THREADSLEEP(100);
 	start=GetUsCount();
+#ifdef TORTURETEST
+	/* A randomised malloc/realloc/free test (torture test) */
+	for(n=0; n<RECORDS*100; n++)
+	{
+		unsigned int r=myrandom(&seed), i;
+		i=(int)(r % RECORDS);
+		if(!allocptr[i])
+		{
+			allocptr[i]=mallocs[whichmalloc](r & 0x1FFF);
+			threadstuff[threadidx].ops++;
+		}
+		else if(r & (1<<31))
+		{
+			allocptr[i]=reallocs[whichmalloc](allocptr[i], r & 0x1FFF);
+			threadstuff[threadidx].ops++;
+		}
+		else
+		{
+			frees[whichmalloc](allocptr[i]);
+			allocptr[i]=0;
+		}
+	}
+	for(n=0; n<RECORDS; n++)
+	{
+		if(allocptr[n])
+		{
+			frees[whichmalloc](allocptr[n]);
+			allocptr[n]=0;
+		}
+	}
+#else
+	/* A simple stack which allocates and deallocates off the top (speed test) */
 	for(n=0; n<RECORDS;)
 	{
 #if 1
-		unsigned int r=myrandom(&seed);
+		r=myrandom(&seed);
 		if(allocptr>threadstuff[threadidx].allocs && (r & 65535)<32760) /*<32760)*/
 		{	/* free */
 			--toallocptr;
@@ -143,14 +179,16 @@ static void threadcode(int threadidx)
 	{
 		frees[whichmalloc](*--allocptr);
 	}
-	times[threadidx]=GetUsCount()-start;
+#endif
+	times[threadidx]+=GetUsCount()-start;
 	neddisablethreadcache(0);
+	threadstuff[threadidx].done=1;
 }
 
 static double runtest()
 {
 	unsigned int seed=1;
-	int n;
+	int n, i;
 	double opspersec=0;
 	THREADVAR threads[THREADS];
 	for(n=0; n<THREADS; n++)
@@ -178,6 +216,37 @@ static double runtest()
 			*toallocptr++=size;
 		}
 	}
+#ifdef TORTURETEST
+	for(n=0; n<THREADS; n++)
+	{
+		THREADINIT(&threads[n], n);
+	}
+	for(i=0; i<32; i++)
+	{
+		int found=-1;
+		do
+		{
+			for(n=0; n<THREADS; n++)
+			{
+				THREADSLEEP(100);
+				if(threadstuff[n].done)
+				{
+					found=n;
+					break;
+				}
+			}
+		} while(found<0);
+		THREADWAIT(threads[found]);
+		threads[found]=0;
+		THREADINIT(&threads[found], found);
+		printf("Relaunched thread %d\n", found);
+	}
+	for(n=THREADS-1; n>=0; n--)
+	{
+		THREADWAIT(threads[n]);
+		threads[n]=0;
+	}
+#else
 #if 1
 	for(n=0; n<THREADS; n++)
 	{
@@ -187,17 +256,6 @@ static double runtest()
 	{
 		THREADWAIT(threads[n]);
 		threads[n]=0;
-	}
-	{
-		usCount totaltime=0;
-		int totalops=0;
-		for(n=0; n<THREADS; n++)
-		{
-			totaltime+=times[n];
-			totalops+=threadstuff[n].ops;
-		}
-		opspersec=1000000000000.0*totalops/totaltime*THREADS;
-		printf("This allocator achieves %lfops/sec under %d threads\n", opspersec, THREADS);
 	}
 #else
 	/* Quick realloc() test */
@@ -212,6 +270,18 @@ static double runtest()
 		threads[n]=0;
 	}
 #endif
+#endif
+	{
+		usCount totaltime=0;
+		int totalops=0;
+		for(n=0; n<THREADS; n++)
+		{
+			totaltime+=times[n];
+			totalops+=threadstuff[n].ops;
+		}
+		opspersec=1000000000000.0*totalops/totaltime*THREADS;
+		printf("This allocator achieves %lfops/sec under %d threads\n", opspersec, THREADS);
+	}
 	for(n=THREADS-1; n>=0; n--)
 	{
 		free(threadstuff[n].allocs); threadstuff[n].allocs=0;
