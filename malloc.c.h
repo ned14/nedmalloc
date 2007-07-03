@@ -1645,7 +1645,7 @@ static MLOCK_T malloc_global_mutex = { 0, 0, 0};
 
 static FORCEINLINE int pthread_acquire_lock (MLOCK_T *sl) {
   int spins = 0;
-  volatile int* lp = &sl->l;
+  volatile unsigned int* lp = &sl->l;
   for (;;) {
     if (*lp != 0) {
       if (sl->threadid == CURRENT_THREAD) {
@@ -1688,7 +1688,7 @@ static FORCEINLINE void pthread_release_lock (MLOCK_T *sl) {
   assert(sl->threadid == CURRENT_THREAD);
   if (--sl->c == 0) {
     sl->threadid = 0;
-    volatile int* lp = &sl->l;
+    volatile unsigned int* lp = &sl->l;
     int prev = 0;
     int ret;
     __asm__ __volatile__ ("lock; xchgl %0, %1"
@@ -1699,7 +1699,7 @@ static FORCEINLINE void pthread_release_lock (MLOCK_T *sl) {
 }
 
 static FORCEINLINE int pthread_try_lock (MLOCK_T *sl) {
-  volatile int* lp = &sl->l;
+  volatile unsigned int* lp = &sl->l;
   if (*lp != 0) {
       if (sl->threadid == CURRENT_THREAD) {
         ++sl->c;
