@@ -1,8 +1,4 @@
-Write test which randomly mallocs, frees, reallocs and launches and
-destroys threads. Check it returns memory to the system correctly.
-
-
-nedalloc v1.04 ?:
+nedalloc v1.04 14th July 2007:
 -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
@@ -52,7 +48,7 @@ MAXTHREADSINPOOL to one.
 You will suffer memory leakage unless you call neddisablethreadcache()
 per pool for every thread which exits. This is because nedalloc cannot
 portably know when a thread exits and thus when its thread cache can
-be returned for use by other code.
+be returned for use by other code. Don't forget pool zero, the system pool.
 
 For C++ type allocation patterns (where the same sizes of memory are
 regularly allocated and deallocated as objects are created and destroyed),
@@ -68,7 +64,8 @@ Speed comparisons:
 -=-=-=-=-=-=-=-=-=
 See Benchmarks.xls for details.
 
-The enclosed test.c is designed to be a representative synthetic
+The enclosed test.c can do two things: it can be a torture test or a speed
+test. The speed test is designed to be a representative synthetic
 memory allocator test. It works by randomly mixing allocations with frees
 with half of the allocation sizes being a two power multiple less than
 512 bytes (to mimic C++ stack instantiated objects) and the other half
@@ -82,7 +79,7 @@ of the memory bus being the limiting factor.
 
 ChangeLog:
 -=-=-=-=-=
-v1.04 ?:
+v1.04 14th July 2007:
  * Fixed a bug with the new optimised implementation that failed to lock
 on a realloc under certain conditions.
  * Fixed lack of thread synchronisation in InitPool() causing pool corruption
@@ -90,6 +87,7 @@ on a realloc under certain conditions.
 Chew for reporting this.
  * Added a sanity check for freed blocks being valid.
  * Reworked test.c into being a torture test.
+ * Fixed GCC assembler optimisation misspecification
 
 v1.04alpha_svn915 7th October 2006:
  * Fixed failure to unlock thread cache list if allocating a new list failed.
