@@ -365,7 +365,7 @@ static NOINLINE threadcache *AllocCache(nedpool *p) THROWSPEC
 	for(end=0; p->m[end]; end++);
 	tc->mymspace=tc->threadid % end;
 	RELEASE_LOCK(&p->mutex);
-	TLSSET(p->mycache, (void *)(size_t)(n+1));
+	if(TLSSET(p->mycache, (void *)(size_t)(n+1))) abort();
 	return tc;
 }
 
@@ -563,7 +563,7 @@ err:
 	}
 	if(p->mycache)
 	{
-		TLSFREE(p->mycache);
+		if(TLSFREE(p->mycache)) abort();
 		p->mycache=0;
 	}
 	RELEASE_MALLOC_GLOBAL_LOCK();
@@ -617,7 +617,7 @@ found:
 		tc->mymspace=n;
 	else
 	{
-		TLSSET(p->mycache, (void *)(size_t)(-(n+1)));
+		if(TLSSET(p->mycache, (void *)(size_t)(-(n+1)))) abort();
 	}
 	return p->m[n];
 }
@@ -644,7 +644,7 @@ void neddestroypool(nedpool *p) THROWSPEC
 		p->m[n]=0;
 	}
 	RELEASE_LOCK(&p->mutex);
-	TLSFREE(p->mycache);
+	if(TLSFREE(p->mycache)) abort();
 	nedpfree(0, p);
 }
 
@@ -685,7 +685,7 @@ void neddisablethreadcache(nedpool *p) THROWSPEC
 	mycache=(int)(size_t) TLSGET(p->mycache);
 	if(!mycache)
 	{	/* Set to mspace 0 */
-		TLSSET(p->mycache, (void *)-1);
+		if(TLSSET(p->mycache, (void *)-1)) abort();
 	}
 	else if(mycache>0)
 	{	/* Set to last used mspace */
@@ -694,7 +694,7 @@ void neddisablethreadcache(nedpool *p) THROWSPEC
 		printf("Threadcache utilisation: %lf%% in cache with %lf%% lost to other threads\n",
 			100.0*tc->successes/tc->mallocs, 100.0*((double) tc->mallocs-tc->frees)/tc->mallocs);
 #endif
-		TLSSET(p->mycache, (void *)(size_t)(-tc->mymspace));
+		if(TLSSET(p->mycache, (void *)(size_t)(-tc->mymspace))) abort();
 		tc->frees++;
 		RemoveCacheEntries(p, tc, 0);
 		assert(!tc->freeInCache);
@@ -741,7 +741,7 @@ static FORCEINLINE void GetThreadCache(nedpool **p, threadcache **tc, int *mymsp
 		*tc=AllocCache(*p);
 		if(!*tc)
 		{	/* Disable */
-			TLSSET((*p)->mycache, (void *)-1);
+			if(TLSSET((*p)->mycache, (void *)-1)) abort();
 			*mymspace=0;
 		}
 		else

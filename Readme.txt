@@ -1,4 +1,4 @@
-nedalloc v1.04 14th July 2007:
+nedalloc v1.05 ?:
 -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
@@ -79,6 +79,10 @@ of the memory bus being the limiting factor.
 
 ChangeLog:
 -=-=-=-=-=
+v1.05 ?:
+ * Added error check for TLSSET() and TLSFREE() macros. Thanks to Markus Elfring
+for reporting this.
+
 v1.04 14th July 2007:
  * Fixed a bug with the new optimised implementation that failed to lock
 on a realloc under certain conditions.
