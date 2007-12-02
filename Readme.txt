@@ -80,8 +80,10 @@ of the memory bus being the limiting factor.
 ChangeLog:
 -=-=-=-=-=
 v1.05 ?:
- * Added error check for TLSSET() and TLSFREE() macros. Thanks to Markus Elfring
-for reporting this.
+ * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to
+Markus Elfring for reporting this.
+ * { 1043 } Fixed a segfault when freeing memory allocated using
+nedindependent_comalloc(). Thanks to Pavel Vozenilek for reporting this.
 
 v1.04 14th July 2007:
  * Fixed a bug with the new optimised implementation that failed to lock
