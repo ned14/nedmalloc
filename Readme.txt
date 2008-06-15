@@ -1,4 +1,4 @@
-nedalloc v1.05 ?:
+nedalloc v1.05 15th June 2008:
 -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
@@ -79,7 +79,7 @@ of the memory bus being the limiting factor.
 
 ChangeLog:
 -=-=-=-=-=
-v1.05 ?:
+v1.05 15th June 2008:
  * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to
 Markus Elfring for reporting this.
  * { 1043 } Fixed a segfault when freeing memory allocated using
