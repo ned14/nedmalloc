@@ -86,7 +86,13 @@ ACQUIRE_LOCK, RELEASE_LOCK, TRY_LOCK, IS_LOCKED and NULL_LOCK_INITIALIZER.
 #endif
 
 #if !NO_MALLINFO
+#if defined(__cplusplus)
+extern "C" {
+#endif
 struct mallinfo;
+#if defined(__cplusplus)
+}
+#endif
 #endif
 
 #if defined(__cplusplus)

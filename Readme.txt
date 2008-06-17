@@ -1,4 +1,4 @@
-nedalloc v1.05 15th June 2008:
+nedalloc v1.06 ?:
 -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
@@ -79,6 +79,10 @@ of the memory bus being the limiting factor.
 
 ChangeLog:
 -=-=-=-=-=
+v1.06 ?:
+ * { 1079 } Fixed misdeclaration of struct mallinfo as C++ type. Thanks to
+James Mansion for reporting this.
+
 v1.05 15th June 2008:
  * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to
 Markus Elfring for reporting this.
