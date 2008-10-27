@@ -9,7 +9,7 @@ An example of how to use nedalloc
 
 #define THREADS 5
 #define RECORDS (100000/THREADS)
-#define TORTURETEST 1
+#define TORTURETEST 0
 
 static int whichmalloc;
 static int doRealloc;
