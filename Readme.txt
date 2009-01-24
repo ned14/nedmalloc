@@ -80,6 +80,7 @@ of the memory bus being the limiting factor.
 ChangeLog:
 -=-=-=-=-=
 v1.06 ?:
+ * { 1082 } Fixed dlmalloc bug which caused header corruption to mmap() allocations when running under multiple threads
  * { 1079 } Fixed misdeclaration of struct mallinfo as C++ type. Thanks to
 James Mansion for reporting this.
 
