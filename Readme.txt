@@ -24,7 +24,10 @@ code!
 To use:
 -=-=-=-
 Drop in nedmalloc.h, nedmalloc.c and malloc.c.h into your project.
-Configure using the instructions in nedmalloc.h. Run and enjoy.
+Configure using the instructions in nedmalloc.h. Make sure that you call
+neddisablethreadcache() for every pool you use on thread exit, and don't
+forget neddisablethreadcache(0) for the system pool if necessary. Run and
+enjoy!
 
 To test, compile test.c. It will run a comparison between your system
 allocator and nedalloc and tell you how much faster nedalloc is. It also
@@ -49,6 +52,11 @@ You will suffer memory leakage unless you call neddisablethreadcache()
 per pool for every thread which exits. This is because nedalloc cannot
 portably know when a thread exits and thus when its thread cache can
 be returned for use by other code. Don't forget pool zero, the system pool.
+
+Equally if you use nedmalloc from a DLL which you later kick out of
+memory, you will leak memory if you don't disable all thread caches for
+all pools (as per the preceding paragraph), destroy all thread pools
+using neddestroypool() and destroy the system pool using neddestroysyspool().
 
 For C++ type allocation patterns (where the same sizes of memory are
 regularly allocated and deallocated as objects are created and destroyed),
@@ -80,9 +88,16 @@ of the memory bus being the limiting factor.
 ChangeLog:
 -=-=-=-=-=
 v1.06 ?:
- * { 1082 } Fixed dlmalloc bug which caused header corruption to mmap() allocations when running under multiple threads
  * { 1079 } Fixed misdeclaration of struct mallinfo as C++ type. Thanks to
 James Mansion for reporting this.
+ * { 1082 } Fixed dlmalloc bug which caused header corruption to mmap()
+allocations when running under multiple threads
+ * { 1088 } Fixed assertion failure for nedblksize() with latest dlmalloc.
+Thanks to Anteru for reporting this.
+ * { 1088 } Added neddestroysyspool(). Thanks to Lars Wehmeyer for
+suggesting this.
+ * { 1088 } Fixed thread id high bit set bug causing SIGABRT on Mac OS X.
+Thanks to Chris Dillman for reporting this.
 
 v1.05 15th June 2008:
  * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to

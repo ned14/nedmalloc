@@ -1342,8 +1342,8 @@ extern void*     sbrk(ptrdiff_t);
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
-LONG __cdecl _InterlockedCompareExchange(LPLONG volatile Dest, LONG Exchange, LONG Comp);
-LONG __cdecl _InterlockedExchange(LPLONG volatile Target, LONG Value);
+LONG __cdecl _InterlockedCompareExchange(LONG volatile *Dest, LONG Exchange, LONG Comp);
+LONG __cdecl _InterlockedExchange(LONG volatile *Target, LONG Value);
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
@@ -3024,8 +3024,9 @@ static int init_mparams(void) {
 
 /* support for mallopt */
 static int change_mparam(int param_number, int value) {
+  size_t val;
   ensure_initialization();
-  size_t val = (value == -1)? MAX_SIZE_T : (size_t)value;
+  val = (value == -1)? MAX_SIZE_T : (size_t)value;
   switch(param_number) {
   case M_TRIM_THRESHOLD:
     mparams.trim_threshold = val;

@@ -36,6 +36,7 @@ DEALINGS IN THE SOFTWARE.
 #include "nedmalloc.h"
 #ifdef WIN32
  #include <malloc.h>
+ #include <stddef.h>
 #endif
 #define MSPACES 1
 #define ONLY_MSPACES 1
@@ -43,6 +44,11 @@ DEALINGS IN THE SOFTWARE.
  #define USE_LOCKS 1
 #endif
 #define FOOTERS 1           /* Need to enable footers so frees lock the right mspace */
+#if defined(DEBUG) && !defined(_DEBUG)
+ #define _DEBUG
+#elif !defined(NDEBUG) && !defined(DEBUG) && !defined(_DEBUG)
+ #define NDEBUG
+#endif
 #undef DEBUG				/* dlmalloc wants DEBUG either 0 or 1 */
 #ifdef _DEBUG
  #define DEBUG 1
@@ -63,6 +69,9 @@ DEALINGS IN THE SOFTWARE.
 #include "malloc.c.h"
 #ifdef NDEBUG               /* Disable assert checking on release builds */
  #undef DEBUG
+#endif
+#if defined(__GNUC__) && defined(DEBUG)
+#warning DEBUG is defined so allocator will run with assert checking! Define NDEBUG to run at full speed.
 #endif
 
 /* The maximum concurrent threads in a pool possible */
@@ -140,8 +149,9 @@ size_t nedblksize(void *mem) THROWSPEC
 	if(mem)
 	{
 		mchunkptr p=mem2chunk(mem);
-		assert(cinuse(p));	/* If this fails, someone tried to free a block twice */
-		if(cinuse(p))
+		mstate fm = get_mstate_for(p);
+		assert(ok_magic(fm));	/* If this fails, someone tried to free a block twice */
+		if(ok_magic(fm))
 			return chunksize(p)-overhead_for(p);
 	}
 	return 0;
@@ -366,7 +376,7 @@ static NOINLINE threadcache *AllocCache(nedpool *p) THROWSPEC
 #endif
 	tc->threadid=(long)(size_t)CURRENT_THREAD;
 	for(end=0; p->m[end]; end++);
-	tc->mymspace=tc->threadid % end;
+	tc->mymspace=abs(tc->threadid) % end;
 	RELEASE_LOCK(&p->mutex);
 	if(TLSSET(p->mycache, (void *)(size_t)(n+1))) abort();
 	return tc;
@@ -649,6 +659,25 @@ void neddestroypool(nedpool *p) THROWSPEC
 	RELEASE_LOCK(&p->mutex);
 	if(TLSFREE(p->mycache)) abort();
 	nedpfree(0, p);
+}
+void neddestroysyspool() THROWSPEC
+{
+	nedpool *p=&syspool;
+	int n;
+	ACQUIRE_LOCK(&p->mutex);
+	DestroyCaches(p);
+	for(n=0; p->m[n]; n++)
+	{
+		destroy_mspace(p->m[n]);
+		p->m[n]=0;
+	}
+	/* Render syspool unusable */
+	for(n=0; n<THREADCACHEMAXCACHES; n++)
+		p->caches[n]=(threadcache *) 0xdeadbeef;
+	for(n=0; n<MAXTHREADSINPOOL+1; n++)
+		p->m[n]=(mstate) 0xdeadbeef;
+	if(TLSFREE(p->mycache)) abort();
+	RELEASE_LOCK(&p->mutex);
 }
 
 void nedpsetvalue(nedpool *p, void *v) THROWSPEC

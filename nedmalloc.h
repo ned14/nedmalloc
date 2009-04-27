@@ -130,6 +130,13 @@ EXTSPEC size_t nedmalloc_footprint(void) THROWSPEC;
 EXTSPEC MALLOCATTR void **nedindependent_calloc(size_t elemsno, size_t elemsize, void **chunks) THROWSPEC;
 EXTSPEC MALLOCATTR void **nedindependent_comalloc(size_t elems, size_t *sizes, void **chunks) THROWSPEC;
 
+/* Destroys the system memory pool used by the functions above.
+Useful for when you have nedmalloc in a DLL you're about to unload.
+If you call ANY nedmalloc functions after calling this you will
+get a fatal exception!
+*/
+EXTSPEC void neddestroysyspool() THROWSPEC;
+
 /* These are the pool functions */
 struct nedpool_t;
 typedef struct nedpool_t nedpool;
@@ -157,7 +164,8 @@ Optionally can also retrieve pool.
 EXTSPEC void *nedgetvalue(nedpool **p, void *mem) THROWSPEC;
 
 /* Disables the thread cache for the calling thread, returning any existing cache
-data to the central pool.
+data to the central pool. Remember to ALWAYS call with zero if you used the
+system pool.
 */
 EXTSPEC void neddisablethreadcache(nedpool *p) THROWSPEC;
 
