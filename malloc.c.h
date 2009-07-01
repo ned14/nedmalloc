@@ -4,7 +4,7 @@
   http://creativecommons.org/licenses/publicdomain.  Send questions,
   comments, complaints, performance data, etc to dl@cs.oswego.edu
 
-* Version pre-2.8.4 Sun Aug 17 17:37:39 2008  Doug Lea  (dl at gee)
+* Version 2.8.4 Wed May 27 09:56:23 2009  Doug Lea  (dl at gee)
 
    Note: There may be an updated version of this malloc obtainable at
            ftp://gee.cs.oswego.edu/pub/misc/malloc.c
@@ -322,7 +322,7 @@ MORECORE                  default: sbrk
   size_t (sometimes declared as "intptr_t").  It doesn't much matter
   though. Internally, we only call it with arguments less than half
   the max value of a size_t, which should work across all reasonable
-  possibilities, although sometimes generating compiler warnings.  
+  possibilities, although sometimes generating compiler warnings.
 
 MORECORE_CONTIGUOUS       default: 1 (true) if HAVE_MORECORE
   If true, take advantage of fact that consecutive calls to MORECORE
@@ -855,8 +855,8 @@ void* dlvalloc(size_t);
   (parameter-number, parameter-value) pair.  mallopt then sets the
   corresponding parameter to the argument value if it can (i.e., so
   long as the value is meaningful), and returns 1 if successful else
-  0.  To workaround the fact that mallopt is specified to use int, 
-  not size_t parameters, the value -1 is specially treated as the 
+  0.  To workaround the fact that mallopt is specified to use int,
+  not size_t parameters, the value -1 is specially treated as the
   maximum unsigned size_t value.
 
   SVID/XPG/ANSI defines four standard param numbers for mallopt,
@@ -1315,7 +1315,14 @@ int mspace_mallopt(int, int);
 #endif /* USE_BUILTIN_FFS */
 #if HAVE_MMAP
 #ifndef LACKS_SYS_MMAN_H
+/* On some versions of linux, mremap decl in mman.h needs __USE_GNU set */
+#if (defined(linux) && !defined(__USE_GNU))
+#define __USE_GNU 1
 #include <sys/mman.h>    /* for mmap */
+#undef __USE_GNU
+#else
+#include <sys/mman.h>    /* for mmap */
+#endif /* linux */
 #endif /* LACKS_SYS_MMAN_H */
 #ifndef LACKS_FCNTL_H
 #include <fcntl.h>
@@ -1572,7 +1579,7 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
     #endif /* DIRECT_MMAP */
 #else  /* HAVE_MMAP */
     #define USE_MMAP_BIT            (SIZE_T_ZERO)
-    
+
     #define MMAP(s)                 MFAIL
     #define MUNMAP(a, s)            (-1)
     #define DIRECT_MMAP(s)          MFAIL
@@ -1614,7 +1621,7 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
   threads.  This does not protect against direct calls to MORECORE
   by other threads not using this lock, so there is still code to
   cope the best we can on interference.
-  
+
   Per-mspace locks surround calls to malloc, free, etc.  To enable use
   in layered extensions, per-mspace locks are reentrant.
 
@@ -1669,9 +1676,9 @@ static FORCEINLINE int pthread_acquire_lock (MLOCK_T *sl) {
       int cmp = 0;
       int val = 1;
       int ret;
-      __asm__ __volatile__  ("lock; cmpxchgl %1, %2"             
-                             : "=a" (ret)               
-                             : "r" (val), "m" (*(lp)), "0"(cmp) 
+      __asm__ __volatile__  ("lock; cmpxchgl %1, %2"
+                             : "=a" (ret)
+                             : "r" (val), "m" (*(lp)), "0"(cmp)
                              : "memory", "cc");
       if (!ret) {
         assert(!sl->threadid);
@@ -1721,9 +1728,9 @@ static FORCEINLINE int pthread_try_lock (MLOCK_T *sl) {
     int cmp = 0;
     int val = 1;
     int ret;
-    __asm__ __volatile__  ("lock; cmpxchgl %1, %2"             
-                           : "=a" (ret)               
-                           : "r" (val), "m" (*(lp)), "0"(cmp) 
+    __asm__ __volatile__  ("lock; cmpxchgl %1, %2"
+                           : "=a" (ret)
+                           : "r" (val), "m" (*(lp)), "0"(cmp)
                            : "memory", "cc");
     if (!ret) {
       assert(!sl->threadid);
@@ -1858,7 +1865,7 @@ static void init_malloc_global_mutex() {
     if (stat > 0)
       return;
     /* transition to < 0 while initializing, then to > 0) */
-    if (stat == 0 && 
+    if (stat == 0 &&
         interlockedcompareexchange(&malloc_global_mutex_status, -1, 0) == 0) {
       InitializeCriticalSection(&malloc_global_mutex);
       interlockedexchange(&malloc_global_mutex_status,1);
@@ -2478,7 +2485,7 @@ struct malloc_params {
 static struct malloc_params mparams;
 
 /* Ensure mparams initialized */
-#define ensure_initialization() (mparams.magic != 0 || init_mparams())
+#define ensure_initialization() (void)(mparams.magic != 0 || init_mparams())
 
 #if !ONLY_MSPACES
 
@@ -2808,7 +2815,7 @@ static size_t traverse_and_check(mstate m);
 #elif USE_BUILTIN_FFS
 #define compute_bit2idx(X, I) I = ffs(X)-1
 
-#else 
+#else
 #define compute_bit2idx(X, I)\
 {\
   unsigned int Y = X - 1;\
@@ -2949,7 +2956,7 @@ static int init_mparams(void) {
     size_t magic;
     size_t psize;
     size_t gsize;
-   
+
 #ifndef WIN32
     psize = malloc_getpagesize;
     gsize = ((DEFAULT_GRANULARITY != 0)? DEFAULT_GRANULARITY : psize);
@@ -3005,7 +3012,7 @@ static int init_mparams(void) {
         magic = *((size_t *) buf);
         close(fd);
       }
-      else 
+      else
 #endif /* USE_DEV_RANDOM */
 #ifdef WIN32
         magic = (size_t)(GetTickCount() ^ (size_t)0x55555555U);
@@ -3647,7 +3654,7 @@ static void internal_malloc_stats(mstate m) {
   the mmapped region stored in the prev_foot field of the chunk. This
   allows reconstruction of the required argument to MUNMAP when freed,
   and also allows adjustment of the returned chunk to meet alignment
-  requirements (especially in memalign).  
+  requirements (especially in memalign).
 */
 
 /* Malloc using mmap */
@@ -3665,7 +3672,7 @@ static void* mmap_alloc(mstate m, size_t nb) {
       chunk_plus_offset(p, psize)->head = FENCEPOST_HEAD;
       chunk_plus_offset(p, psize+SIZE_T_SIZE)->head = 0;
 
-      if (mm < m->least_addr)
+      if (m->least_addr == 0 || mm < m->least_addr)
         m->least_addr = mm;
       if ((m->footprint += mmsize) > m->max_footprint)
         m->max_footprint = m->footprint;
@@ -3885,9 +3892,9 @@ static void* sys_alloc(mstate m, size_t nb) {
     3. A call to MORECORE that cannot usually contiguously extend memory.
        (disabled if not HAVE_MORECORE)
 
-   In all cases, we need to request enough bytes from system to ensure 
-   we can malloc nb bytes upon success, so pad with enough space for 
-   top_foot, plus alignment-pad to make sure we don't lose bytes if 
+   In all cases, we need to request enough bytes from system to ensure
+   we can malloc nb bytes upon success, so pad with enough space for
+   top_foot, plus alignment-pad to make sure we don't lose bytes if
    not on boundary, and round this up to a granularity unit.
   */
 
@@ -3987,7 +3994,9 @@ static void* sys_alloc(mstate m, size_t nb) {
       m->max_footprint = m->footprint;
 
     if (!is_initialized(m)) { /* first-time initialization */
-      m->seg.base = m->least_addr = tbase;
+      if (m->least_addr == 0 || tbase < m->least_addr)
+        m->least_addr = tbase;
+      m->seg.base = tbase;
       m->seg.size = tsize;
       m->seg.sflags = mmap_flag;
       m->magic = mparams.magic;
@@ -4327,6 +4336,11 @@ static void* internal_realloc(mstate m, void* oldmem, size_t bytes) {
       POSTACTION(m);
       return 0;
     }
+#if DEBUG
+    if (newp != 0) {
+      check_inuse_chunk(m, newp); /* Check requires lock */
+    }
+#endif
 
     POSTACTION(m);
 
@@ -4334,7 +4348,6 @@ static void* internal_realloc(mstate m, void* oldmem, size_t bytes) {
       if (extra != 0) {
         internal_free(m, extra);
       }
-      check_inuse_chunk(m, newp);
       return chunk2mem(newp);
     }
     else {
@@ -5488,7 +5501,7 @@ int mspace_mallopt(int param_number, int value) {
 
 /* -----------------------------------------------------------------------
 History:
-    V2.8.4 (not yet released)
+    V2.8.4 Wed May 27 09:56:23 2009  Doug Lea  (dl at gee)
       * Use zeros instead of prev foot for is_mmapped
       * Add mspace_track_large_chunks; thanks to Jean Brouwers
       * Fix set_inuse in internal_realloc; thanks to Jean Brouwers
@@ -5681,5 +5694,4 @@ History:
          structure of old version,  but most details differ.)
 
 */
-
 
