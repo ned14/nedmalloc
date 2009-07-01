@@ -173,6 +173,8 @@ static void threadcode(int threadidx)
 			n++;
 			toallocptr++;
 			threadstuff[threadidx].ops++;
+			/*if(!(threadstuff[threadidx].ops & 0xff))
+				nedtrimthreadcache(0,0);*/
 		}
 	}
 	while(allocptr>threadstuff[threadidx].allocs)
@@ -310,7 +312,7 @@ int main(void)
 	}
 #endif
 
-	if(0)
+	if(1)
 	{
 		printf("\nTesting standard allocator with %d threads ...\n", THREADS);
 		std=runtest();

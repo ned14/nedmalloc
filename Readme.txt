@@ -98,6 +98,11 @@ Thanks to Anteru for reporting this.
 suggesting this.
  * { 1088 } Fixed thread id high bit set bug causing SIGABRT on Mac OS X.
 Thanks to Chris Dillman for reporting this.
+ * { 1094 } Integrated dlmalloc v2.8.4 final.
+ * { 1095 } Added nedtrimthreadcache(). Thanks to Hayim Hendeles for
+suggesting this.
+ * { 1095 } Fixed silly assertion of null pointer dereference. Thanks to
+Ullrich Heinemann for reporting this.
 
 v1.05 15th June 2008:
  * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to
