@@ -72,6 +72,7 @@ static void *(*const mallocs[])(size_t size)={ malloc, nedmalloc, win32malloc };
 static void *(*const reallocs[])(void *p, size_t size)={ realloc, nedrealloc, win32realloc };
 static void (*const frees[])(void *mem)={ free, nedfree, win32free };
 #else
+#include <sys/time.h>
 static void *_threadcode(void *a)
 {
 	threadcode((int)(size_t) a);

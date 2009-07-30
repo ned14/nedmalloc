@@ -103,6 +103,8 @@ Thanks to Chris Dillman for reporting this.
 suggesting this.
  * { 1095 } Fixed silly assertion of null pointer dereference. Thanks to
 Ullrich Heinemann for reporting this.
+ * { 1096 } Fixed lots of level 4 warnings on MSVC. Thanks to Anteru for
+suggesting this.
 
 v1.05 15th June 2008:
  * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to
