@@ -14,15 +14,24 @@ you can do anything you like with it. This does not apply to the malloc.c.h
 file which remains copyright to others.
 
 It has been tested on win32 (x86), win64 (x64), Linux (x64), FreeBSD (x64)
-and Apple MacOS X (x86). It works very well on all of these and is very
-significantly faster than the system allocator on all of these platforms.
+and Apple Mac OS X (x86). It works very well on all of these and is very
+significantly faster than the system allocator on Windows and FreeBSD. If
+you are using a recent Apple Mac OS X then you probably won't see much
+improvement (and kudos to Apple for adopting an excellent allocator).
 
 By literally dropping in this allocator as a replacement for your system
 allocator, you can see real world improvements of up to three times in normal
 code!
 
-To use:
--=-=-=-
+Table of Contents:
+  A: How to use
+  B: Notes
+  C: Speed Comparisons
+  D: Troubleshooting
+  E: Changelog
+
+A. To use:
+-=-=-=-=-=
 Drop in nedmalloc.h, nedmalloc.c and malloc.c.h into your project.
 Configure using the instructions in nedmalloc.h. Make sure that you call
 neddisablethreadcache() for every pool you use on thread exit, and don't
@@ -33,8 +42,8 @@ To test, compile test.c. It will run a comparison between your system
 allocator and nedalloc and tell you how much faster nedalloc is. It also
 serves as an example of usage.
 
-Notes:
--=-=-=
+B. Notes:
+-=-=-=-=-
 If you want the very latest version of this allocator, get it from the
 TnFOX SVN repository at svn://svn.berlios.de/viewcvs/tnfox/trunk/src/nedmalloc
 
@@ -68,8 +77,8 @@ printing in release mode) then you should disable the thread cache for
 that thread. You can compile out the threadcache code by setting
 THREADCACHEMAX to zero.
 
-Speed comparisons:
--=-=-=-=-=-=-=-=-=
+C. Speed comparisons:
+-=-=-=-=-=-=-=-=-=-=-
 See Benchmarks.xls for details.
 
 The enclosed test.c can do two things: it can be a torture test or a speed
@@ -85,8 +94,74 @@ and other stuff modern processors don't like so much. As you'll note, the
 test doesn't show the benefits of the threadcache mostly due to the saturation
 of the memory bus being the limiting factor.
 
-ChangeLog:
--=-=-=-=-=
+D. Troubleshooting:
+-=-=-=-=-==-=-=-=-=
+I get a quite a few bug reports about code not working properly under nedmalloc.
+I do not wish to sound presumptuous, however in an overwhelming majority of cases the
+problem is in your application code and not nedmalloc (see below for all the bugs
+reported and fixed since 2006). Some of the largest corporations and IT deployments
+in the world use nedmalloc, and it has been very heavily stress tested on everything
+from 32 processor SMP clusters right through to root DNS servers, ATM machine networks
+and embedded operating systems requiring a very high uptime.
+
+In particular, just because it just happens to appear to work under the system
+allocator does not mean that your application is not riddled with memory corruption
+and non-ANSI usage of the API! And usually this is not your code's fault, but rather
+the third party libraries being used.
+
+Even though debugging an application for memory errors is a true black art made
+possible only with a great deal of patience, intuition and skill, here is a checklist
+for things to do before reporting a bug in nedmalloc:
+
+1. Make SURE you try nedmalloc from SVN HEAD. For around six months of 2007 I kept
+getting the same report of a bug long fixed in SVN HEAD.
+
+2. Make use of nedmalloc's internal debug routines. Try turning on full sanity
+checks by #define FULLSANITYCHECKS 1. Also make use of all the assertion checking
+performed when DEBUG is defined. A lot of bug reports are made before running under
+a debug build where an assertion trip clearly showed the problem. Lastly, try
+changing the thread cache by #defining THREADCACHEMAX - this fundamentally changes
+how the memory allocator behaves: if everything is fine with the thread cache fully
+on or fully off, then this strongly suggests the source of your problem.
+
+3. Make SURE you are matching allocations and frees belonging to nedmalloc.
+nedmalloc does not patch itself in to replace the system allocator (if you want that,
+try the Hoard memory allocator) because it is intended to coexist with any or
+all other memory allocators. Attempting to free a block not allocated by nedmalloc
+will end badly, similarly passing one of nedmalloc's blocks to another allocator
+will likely also end badly. I have inserted as many assertion and debug checks for
+this possibility as I can think of (further suggestions are welcome), but no system
+can ever be watertight. If you're using C++, I would use its strong template type
+system to have the compiler guarantee membership of a memory pointer - see the Boost
+libraries, or indeed my own TnFOX portability toolkit (http://www.nedprod.com/TnFOX/).
+
+4. If you're still having problems, or more likely your code runs absolutely fine
+under debug builds but trips up under release which suggests a timing bug, it is
+time to deploy heavyweight tools. Under Linux, you should use valgrind. Under Windows,
+there is an excellent commercial tool called Glowcode (http://www.glowcode.com/).
+Any programming team serious on quality should ALWAYS run their projects through
+these tools before each and every release anyway - you would be amazed at what you
+miss during all other testing.
+
+5. Lastly, in the worst case scenario, consider hiring in a memory debugging
+expert. There are quite a few on the market and they often are authors of memory
+allocators. Wolfram Gloger (the author of ptmalloc) provides consulting services.
+My own consulting company ned Productions Ltd. may be able to provide such a
+service depending on our current workload.
+
+I hope that these tips help. And I urge anyone considering simply dropping
+back to the system allocator as a quick fix to reconsider: squashing memory bugs
+often brings with it significant extra benefits in performance and reliability.
+It may cost a lot extra now but it usually will save itself many times its cost
+over the next few years. I know of one large multinational corporation who saved
+hundreds of millions of dollars due to the debugging of their system software
+performed when trying to get it working with nedmalloc - they found one bug in
+nedmalloc but over a hundred in their own code, and in the process improved
+performance threefold which saved an expensive hardware upgrade and deployment.
+Fixing memory bugs now tends to be worth it in the long run.
+
+E. ChangeLog:
+-=-=-=-=-=-=-
 v1.06 ?:
  * { 1079 } Fixed misdeclaration of struct mallinfo as C++ type. Thanks to
 James Mansion for reporting this.
