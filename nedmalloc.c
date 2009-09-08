@@ -152,7 +152,20 @@ size_t nedblksize(void *mem) THROWSPEC
 #else
 	if(mem)
 	{
+		/* We try to return zero here if it isn't one of our own blocks, however
+		the current block annotation scheme used by dlmalloc makes it impossible
+		to be absolutely sure of avoiding a segfault.
+
+		mchunkptr->prev_foot = mem-(2*size_t) = mstate ^ mparams.magic for PRECEDING block;
+		mchunkptr->head      = mem-(1*size_t) = 8 multiple size of this block with bottom three bits = FLAG_BITS
+		*/
 		mchunkptr p=mem2chunk(mem);
+		if(!is_inuse(p)) return 0;
+		/* The following isn't safe but is probably true: unlikely to allocate
+		a 2Gb block on a 32bit system or a 8Eb block on a 64 bit system */
+		if(p->head & 1<<(SIZE_T_BITSIZE-SIZE_T_ONE)) return 0;
+		/* We have now reduced our chances of being wrong to 0.5^4 = 6.25%.
+		We could start comparing prev_foot's for similarity but it starts getting slow. */
 		mstate fm = get_mstate_for(p);
 		assert(ok_magic(fm));	/* If this fails, someone tried to free a block twice */
 		if(ok_magic(fm))
@@ -491,14 +504,8 @@ static void threadcache_free(nedpool *p, threadcache *tc, int mymspace, void *me
 	threadcacheblk **binsptr, *tck=(threadcacheblk *) mem;
 	assert(size>=sizeof(threadcacheblk) && size<=THREADCACHEMAX+CHUNK_OVERHEAD);
 #ifdef DEBUG
-	{	/* Make sure this is a valid memory block */
-	    mchunkptr p  = mem2chunk(mem);
-	    mstate fm = get_mstate_for(p);
-	    if (!ok_magic(fm)) {
-	      USAGE_ERROR_ACTION(fm, p);
-	      return;
-	    }
-	}
+	/* Make sure this is a valid memory block */
+	assert(nedblksize(mem));
 #endif
 #ifdef FULLSANITYCHECKS
 	tcfullsanitycheck(tc);
@@ -860,6 +867,11 @@ NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPE
 	{	/* Use the thread cache */
 		size_t memsize=nedblksize(mem);
 		assert(memsize);
+		if(!memsize)
+		{
+			fprintf(stderr, "nedprealloc() called with a block not created by nedmalloc!\n");
+			abort();
+		}
 		if((ret=threadcache_malloc(p, tc, &size)))
 		{
 			memcpy(ret, mem, memsize<size ? memsize : size);
@@ -894,6 +906,11 @@ void   nedpfree(nedpool *p, void *mem) THROWSPEC
 #if THREADCACHEMAX
 	memsize=nedblksize(mem);
 	assert(memsize);
+	if(!memsize)
+	{
+		fprintf(stderr, "nedpfree() called with a block not created by nedmalloc!\n");
+		abort();
+	}
 	if(mem && tc && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
 		threadcache_free(p, tc, mymspace, mem, memsize);
 	else

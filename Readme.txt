@@ -180,6 +180,8 @@ suggesting this.
 Ullrich Heinemann for reporting this.
  * { 1096 } Fixed lots of level 4 warnings on MSVC. Thanks to Anteru for
 suggesting this.
+ * { 1098 } Improved non-nedmalloc block detection to 6.25% probability
+of being wrong. Thanks to Advanced Research Associates for sponsoring this.
 
 v1.05 15th June 2008:
  * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to
