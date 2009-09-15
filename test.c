@@ -9,7 +9,7 @@ An example of how to use nedalloc
 
 #define THREADS 5
 #define RECORDS (100000/THREADS)
-#define TORTURETEST 0
+/*#define TORTURETEST*/
 
 static int whichmalloc;
 static int doRealloc;
@@ -109,7 +109,7 @@ static void threadcode(int threadidx)
 	int n;
 	unsigned int *toallocptr=threadstuff[threadidx].toalloc;
 	void **allocptr=threadstuff[threadidx].allocs;
-	unsigned int seed=threadidx;
+	unsigned int r, seed=threadidx;
 	usCount start;
 	threadstuff[threadidx].done=0;
 	/*neddisablethreadcache(0);*/
@@ -119,7 +119,8 @@ static void threadcode(int threadidx)
 	/* A randomised malloc/realloc/free test (torture test) */
 	for(n=0; n<RECORDS*100; n++)
 	{
-		unsigned int r=myrandom(&seed), i;
+		unsigned int i;
+		r=myrandom(&seed);
 		i=(int)(r % RECORDS);
 		if(!allocptr[i])
 		{

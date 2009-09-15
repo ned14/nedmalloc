@@ -1,5 +1,5 @@
 /* nedalloc, an alternative malloc implementation for multiple threads without
-lock contention based on dlmalloc v2.8.3. (C) 2005 Niall Douglas
+lock contention based on dlmalloc v2.8.3. (C) 2005-2009 Niall Douglas
 
 Boost Software License - Version 1.0 - August 17th, 2003
 
@@ -45,6 +45,16 @@ to extern.
 USE_LOCKS can be 2 if you want to define your own MLOCK_T, INITIAL_LOCK,
 ACQUIRE_LOCK, RELEASE_LOCK, TRY_LOCK, IS_LOCKED and NULL_LOCK_INITIALIZER.
 
+USE_MAGIC_HEADERS causes nedalloc to allocate an extra three sizeof(size_t)
+to each block. nedpfree() and nedprealloc() can then automagically know when
+to free a system allocated block. Enabling this typically adds 20-50% to
+application memory usage.
+
+USE_ALLOCATOR can be one of these settings:
+  0: System allocator (nedmalloc now simply acts as a threadcache).
+     WARNING: Intended for DEBUG USE ONLY - not all functions work correctly.
+  1: dlmalloc
+
 */
 
 #include <stddef.h>   /* for size_t */
@@ -64,6 +74,9 @@ ACQUIRE_LOCK, RELEASE_LOCK, TRY_LOCK, IS_LOCKED and NULL_LOCK_INITIALIZER.
 #endif
 
 #ifdef REPLACE_SYSTEM_ALLOCATOR
+ #if USE_ALLOCATOR==0
+  #error Cannot combine using the system allocator with replacing the system allocator
+ #endif
  #define nedmalloc               malloc
  #define nedcalloc               calloc
  #define nedrealloc              realloc
@@ -81,8 +94,20 @@ ACQUIRE_LOCK, RELEASE_LOCK, TRY_LOCK, IS_LOCKED and NULL_LOCK_INITIALIZER.
  #endif
 #endif
 
+#ifndef USE_MAGIC_HEADERS
+ #define USE_MAGIC_HEADERS 0
+#endif
+
+#ifndef USE_ALLOCATOR
+ #define USE_ALLOCATOR 1 /* dlmalloc */
+#endif
+
+#if !USE_ALLOCATOR && !USE_MAGIC_HEADERS
+#error If you are using the system allocator then you MUST use magic headers
+#endif
+
 #ifndef NO_MALLINFO
-#define NO_MALLINFO 0
+ #define NO_MALLINFO 0
 #endif
 
 #if !NO_MALLINFO
@@ -109,7 +134,8 @@ extern "C" {
 /* These are the global functions */
 
 /* Gets the usable size of an allocated block. Note this will always be bigger than what was
-asked for due to rounding etc.
+asked for due to rounding etc. Tries to return zero if this is not a nedmalloc block (though
+one could see a segfault up to 12.5% of the time).
 */
 EXTSPEC size_t nedblksize(void *mem) THROWSPEC;
 

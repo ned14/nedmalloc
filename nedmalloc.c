@@ -1,5 +1,5 @@
 /* Alternative malloc implementation for multiple threads without
-lock contention based on dlmalloc. (C) 2005-2006 Niall Douglas
+lock contention based on dlmalloc. (C) 2005-2009 Niall Douglas
 
 Boost Software License - Version 1.0 - August 17th, 2003
 
@@ -42,8 +42,11 @@ DEALINGS IN THE SOFTWARE.
  #include <malloc.h>
  #include <stddef.h>
 #endif
-#define MSPACES 1
-#define ONLY_MSPACES 1
+#if USE_ALLOCATOR==1
+ #define MSPACES 1
+ #define ONLY_MSPACES 1
+#endif
+#define USE_DL_PREFIX 1
 #ifndef USE_LOCKS
  #define USE_LOCKS 1
 #endif
@@ -127,15 +130,6 @@ static LPVOID ChkedTlsGetValue(DWORD idx)
  #define TLSSET(k, a)	pthread_setspecific(k, a)
 #endif
 
-#if 0
-/* Only enable if testing with valgrind. Causes misoperation */
-#define mspace_malloc(p, s) malloc(s)
-#define mspace_realloc(p, m, s) realloc(m, s)
-#define mspace_calloc(p, n, s) calloc(n, s)
-#define mspace_free(p, m) free(m)
-#endif
-
-
 #if defined(__cplusplus)
 #if !defined(NO_NED_NAMESPACE)
 namespace nedalloc {
@@ -144,35 +138,176 @@ extern "C" {
 #endif
 #endif
 
+static void *unsupported_operation(const char *opname) THROWSPEC
+{
+	fprintf(stderr, "The operation %s is not supported under this build configuration\n", opname);
+	abort();
+	return 0;
+}
+static size_t mspacecounter=(size_t) 0xdeadbeef;
+
+static FORCEINLINE void *CallMalloc(void *mspace, size_t size, size_t alignment) THROWSPEC
+{
+	void *ret=0;
+#if USE_MAGIC_HEADERS
+	size_t *_ret=0;
+	size+=alignment+3*sizeof(size_t);
+#endif
+#if USE_ALLOCATOR==0
+	ret=malloc(size);
+#elif USE_ALLOCATOR==1
+	ret=mspace_malloc((mstate) mspace, size);
+#endif
+	if(!ret) return 0;
+#if USE_MAGIC_HEADERS
+	_ret=(size_t *) ret;
+	ret=(void *)(_ret+3);
+	if(alignment) ret=(void *)(((size_t) ret+alignment-1)&~(alignment-1));
+	for(; _ret<(size_t *)ret-2; _ret++) *_ret=*(size_t *)"NEDMALOC";
+	_ret[0]=(size_t) mspace;
+	_ret[1]=size;
+#endif
+	return ret;
+}
+
+static FORCEINLINE void *CallCalloc(void *mspace, size_t no, size_t size, size_t alignment) THROWSPEC
+{
+	void *ret=0;
+#if USE_MAGIC_HEADERS
+	size_t *_ret=0;
+	size+=alignment+3*sizeof(size_t);
+#endif
+#if USE_ALLOCATOR==0
+	ret=calloc(no, size);
+#elif USE_ALLOCATOR==1
+	ret=mspace_calloc((mstate) mspace, no, size);
+#endif
+	if(!ret) return 0;
+#if USE_MAGIC_HEADERS
+	_ret=(size_t *) ret;
+	ret=(void *)(_ret+3);
+	if(alignment) ret=(void *)(((size_t) ret+alignment-1)&~(alignment-1));
+	for(; _ret<(size_t *)ret-2; _ret++) *_ret=*(size_t *) "NEDMALOC";
+	_ret[0]=(size_t) mspace;
+	_ret[1]=size;
+#endif
+	return ret;
+}
+
+static FORCEINLINE void *CallRealloc(void *mspace, void *mem, size_t size) THROWSPEC
+{
+	void *ret=0;
+#if USE_MAGIC_HEADERS
+	mstate oldmspace=0;
+	size_t *_ret=0, *_mem=(size_t *) mem-3, oldsize=0;
+	if(_mem[0]!=*(size_t *) "NEDMALOC")
+	{	/* Transfer */
+		if((ret=CallMalloc(mspace, size, 0)))
+		{	/* It's probably safe to copy size bytes from mem - can't do much different */
+#if defined(DEBUG)
+			printf("*** nedmalloc frees system allocated block %p\n", mem);
+#endif
+			memcpy(ret, mem, size);
+			free(mem);
+		}
+		return ret;
+	}
+	size+=3*sizeof(size_t);
+	oldmspace=(mstate) _mem[1];
+	oldsize=_mem[2];
+	for(; *_mem==*(size_t *) "NEDMALOC"; *_mem--=0);
+	mem=(void *)(++_mem);
+#endif
+#if USE_ALLOCATOR==0
+	ret=realloc(mem, size);
+#elif USE_ALLOCATOR==1
+	ret=mspace_realloc((mstate) mspace, mem, size);
+#endif
+	if(!ret)
+	{	/* Put it back the way it was */
+#if USE_MAGIC_HEADERS
+		for(; *_mem==0; *_mem++=*(size_t *) "NEDMALOC");
+#endif
+		return 0;
+	}
+#if USE_MAGIC_HEADERS
+	_ret=(size_t *) ret;
+	ret=(void *)(_ret+3);
+	for(; _ret<(size_t *)ret-2; _ret++) *_ret=*(size_t *) "NEDMALOC";
+	_ret[0]=(size_t) mspace;
+	_ret[1]=size;
+#endif
+	return ret;
+}
+
+static FORCEINLINE void CallFree(void *mspace, void *mem) THROWSPEC
+{
+#if USE_MAGIC_HEADERS
+	mstate oldmspace=0;
+	size_t *_mem=(size_t *) mem-3, oldsize=0;
+	if(_mem[0]!=*(size_t *) "NEDMALOC")
+	{
+#if defined(DEBUG)
+		printf("*** nedmalloc frees system allocated block %p\n", mem);
+#endif
+		free(mem);
+		return;
+	}
+	oldmspace=(mstate) _mem[1];
+	oldsize=_mem[2];
+	for(; *_mem==*(size_t *) "NEDMALOC"; *_mem--=0);
+	mem=(void *)(++_mem);
+#endif
+#if USE_ALLOCATOR==0
+	free(mem);
+#elif USE_ALLOCATOR==1
+	mspace_free((mstate) mspace, mem);
+#endif
+}
+
 size_t nedblksize(void *mem) THROWSPEC
 {
-#if 0
-	/* Only enable if testing with valgrind. Causes misoperation */
-	return THREADCACHEMAX;
-#else
 	if(mem)
 	{
-		/* We try to return zero here if it isn't one of our own blocks, however
-		the current block annotation scheme used by dlmalloc makes it impossible
-		to be absolutely sure of avoiding a segfault.
+#if USE_MAGIC_HEADERS
+		size_t *_mem=(size_t *) mem-3;
+		if(_mem[0]==*(size_t *) "NEDMALOC")
+		{
+			mstate mspace=(mstate) _mem[1];
+			size_t size=_mem[2];
+			return size-3*sizeof(size_t);
+		}
+		else return 0;
+#else
+#if USE_ALLOCATOR==0
+		/* Fail everything */
+		return 0;
+#elif USE_ALLOCATOR==1
+		{
+			/* We try to return zero here if it isn't one of our own blocks, however
+			the current block annotation scheme used by dlmalloc makes it impossible
+			to be absolutely sure of avoiding a segfault.
 
-		mchunkptr->prev_foot = mem-(2*size_t) = mstate ^ mparams.magic for PRECEDING block;
-		mchunkptr->head      = mem-(1*size_t) = 8 multiple size of this block with bottom three bits = FLAG_BITS
-		*/
-		mchunkptr p=mem2chunk(mem);
-		if(!is_inuse(p)) return 0;
-		/* The following isn't safe but is probably true: unlikely to allocate
-		a 2Gb block on a 32bit system or a 8Eb block on a 64 bit system */
-		if(p->head & 1<<(SIZE_T_BITSIZE-SIZE_T_ONE)) return 0;
-		/* We have now reduced our chances of being wrong to 0.5^4 = 6.25%.
-		We could start comparing prev_foot's for similarity but it starts getting slow. */
-		mstate fm = get_mstate_for(p);
-		assert(ok_magic(fm));	/* If this fails, someone tried to free a block twice */
-		if(ok_magic(fm))
-			return chunksize(p)-overhead_for(p);
+			mchunkptr->prev_foot = mem-(2*size_t) = mstate ^ mparams.magic for PRECEDING block;
+			mchunkptr->head      = mem-(1*size_t) = 8 multiple size of this block with bottom three bits = FLAG_BITS
+			*/
+			mchunkptr p=mem2chunk(mem);
+			mstate fm=0;
+			if(!is_inuse(p)) return 0;
+			/* The following isn't safe but is probably true: unlikely to allocate
+			a 2Gb block on a 32bit system or a 8Eb block on a 64 bit system */
+			if(p->head & 1<<(SIZE_T_BITSIZE-SIZE_T_ONE)) return 0;
+			/* We have now reduced our chances of being wrong to 0.5^4 = 6.25%.
+			We could start comparing prev_foot's for similarity but it starts getting slow. */
+			fm = get_mstate_for(p);
+			assert(ok_magic(fm));	/* If this fails, someone tried to free a block twice */
+			if(ok_magic(fm))
+				return chunksize(p)-overhead_for(p);
+		}
+#endif
+#endif
 	}
 	return 0;
-#endif
 }
 
 void nedsetvalue(void *v) THROWSPEC					{ nedpsetvalue((nedpool *) 0, v); }
@@ -339,7 +474,7 @@ static NOINLINE void RemoveCacheEntries(nedpool *p, threadcache *tc, unsigned in
 					*tcbptr=0;
 				tc->freeInCache-=blksize;
 				assert((long) tc->freeInCache>=0);
-				mspace_free(0, f);
+				CallFree(0, f);
 				/*tcsanitycheck(tcbptr);*/
 			}
 		}
@@ -363,7 +498,7 @@ static void DestroyCaches(nedpool *p) THROWSPEC
 				assert(!tc->freeInCache);
 				tc->mymspace=-1;
 				tc->threadid=0;
-				mspace_free(0, tc);
+				CallFree(0, tc);
 				p->caches[n]=0;
 			}
 		}
@@ -381,7 +516,7 @@ static NOINLINE threadcache *AllocCache(nedpool *p) THROWSPEC
 		RELEASE_LOCK(&p->mutex);
 		return 0;
 	}
-	tc=p->caches[n]=(threadcache *) mspace_calloc(p->m[0], 1, sizeof(threadcache));
+	tc=p->caches[n]=(threadcache *) CallCalloc(p->m[0], 1, sizeof(threadcache), 0);
 	if(!tc)
 	{
 		RELEASE_LOCK(&p->mutex);
@@ -570,8 +705,12 @@ static NOINLINE int InitPool(nedpool *p, size_t capacity, int threads) THROWSPEC
 	if(p->threads) goto done;
 	if(INITIAL_LOCK(&p->mutex)) goto err;
 	if(TLSALLOC(&p->mycache)) goto err;
+#if USE_ALLOCATOR==0
+	p->m[0]=(mstate) mspacecounter++;
+#elif USE_ALLOCATOR==1
 	if(!(p->m[0]=(mstate) create_mspace(capacity, 1))) goto err;
 	p->m[0]->extp=p;
+#endif
 	p->threads=(threads<1 || threads>MAXTHREADSINPOOL) ? MAXTHREADSINPOOL : threads;
 done:
 	RELEASE_MALLOC_GLOBAL_LOCK();
@@ -582,7 +721,9 @@ err:
 	DestroyCaches(p);
 	if(p->m[0])
 	{
+#if USE_ALLOCATOR==1
 		destroy_mspace(p->m[0]);
+#endif
 		p->m[0]=0;
 	}
 	if(p->mycache)
@@ -610,8 +751,12 @@ static NOINLINE mstate FindMSpace(nedpool *p, threadcache *tc, int *lastUsed, si
 	if(end<p->threads)
 	{
 		mstate temp;
+#if USE_ALLOCATOR==0
+		temp=(mstate) mspacecounter++;
+#elif USE_ALLOCATOR==1
 		if(!(temp=(mstate) create_mspace(size, 1)))
 			goto badexit;
+#endif
 		/* Now we're ready to modify the lists, we lock */
 		ACQUIRE_LOCK(&p->mutex);
 		while(p->m[end] && end<p->threads)
@@ -619,7 +764,9 @@ static NOINLINE mstate FindMSpace(nedpool *p, threadcache *tc, int *lastUsed, si
 		if(end>=p->threads)
 		{	/* Drat, must destroy it now */
 			RELEASE_LOCK(&p->mutex);
-			destroy_mspace((mspace) temp);
+#if USE_ALLOCATOR==1
+			destroy_mspace((mstate) temp);
+#endif
 			goto badexit;
 		}
 		/* We really want to make sure this goes into memory now but we
@@ -664,7 +811,9 @@ void neddestroypool(nedpool *p) THROWSPEC
 	DestroyCaches(p);
 	for(n=0; p->m[n]; n++)
 	{
+#if USE_ALLOCATOR==1
 		destroy_mspace(p->m[n]);
+#endif
 		p->m[n]=0;
 	}
 	RELEASE_LOCK(&p->mutex);
@@ -679,7 +828,9 @@ void neddestroysyspool() THROWSPEC
 	DestroyCaches(p);
 	for(n=0; p->m[n]; n++)
 	{
+#if USE_ALLOCATOR==1
 		destroy_mspace(p->m[n]);
+#endif
 		p->m[n]=0;
 	}
 	/* Render syspool unusable */
@@ -745,7 +896,7 @@ void nedtrimthreadcache(nedpool *p, int disable) THROWSPEC
 		{
 			tc->mymspace=-1;
 			tc->threadid=0;
-			mspace_free(0, p->caches[mycache-1]);
+			CallFree(0, p->caches[mycache-1]);
 			p->caches[mycache-1]=0;
 		}
 	}
@@ -755,20 +906,22 @@ void neddisablethreadcache(nedpool *p) THROWSPEC
 	nedtrimthreadcache(p, 1);
 }
 
-#define GETMSPACE(m,p,tc,ms,s,action)           \
-  do                                            \
-  {                                             \
-    mstate m = GetMSpace((p),(tc),(ms),(s));    \
-    action;                                     \
-    RELEASE_LOCK(&m->mutex);                    \
+#define GETMSPACE(m,p,tc,ms,s,action)                 \
+  do                                                  \
+  {                                                   \
+    mstate m = GetMSpace((p),(tc),(ms),(s));          \
+    action;                                           \
+	if(USE_ALLOCATOR==1) { RELEASE_LOCK(&m->mutex); } \
   } while (0)
 
 static FORCEINLINE mstate GetMSpace(nedpool *p, threadcache *tc, int mymspace, size_t size) THROWSPEC
 {	/* Returns a locked and ready for use mspace */
 	mstate m=p->m[mymspace];
 	assert(m);
-	if(!TRY_LOCK(&p->m[mymspace]->mutex)) m=FindMSpace(p, tc, &mymspace, size);\
+#if USE_ALLOCATOR==1
+	if(!TRY_LOCK(&p->m[mymspace]->mutex)) m=FindMSpace(p, tc, &mymspace, size);
 	/*assert(IS_LOCKED(&p->m[mymspace]->mutex));*/
+#endif
 	return m;
 }
 static FORCEINLINE void GetThreadCache(nedpool **p, threadcache **tc, int *mymspace, size_t *size) THROWSPEC
@@ -830,7 +983,7 @@ NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size) THROWSPEC
 	if(!ret)
 	{	/* Use this thread's mspace */
         GETMSPACE(m, p, tc, mymspace, size,
-                  ret=mspace_malloc(m, size));
+                  ret=CallMalloc(m, size, 0));
 	}
 	return ret;
 }
@@ -851,7 +1004,7 @@ NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC
 	if(!ret)
 	{	/* Use this thread's mspace */
         GETMSPACE(m, p, tc, mymspace, rsize,
-                  ret=mspace_calloc(m, 1, rsize));
+                  ret=CallCalloc(m, 1, rsize, 0));
 	}
 	return ret;
 }
@@ -866,26 +1019,28 @@ NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPE
 	if(tc && size && size<=THREADCACHEMAX)
 	{	/* Use the thread cache */
 		size_t memsize=nedblksize(mem);
+#if !USE_MAGIC_HEADERS
 		assert(memsize);
 		if(!memsize)
 		{
 			fprintf(stderr, "nedprealloc() called with a block not created by nedmalloc!\n");
 			abort();
 		}
+#endif
 		if((ret=threadcache_malloc(p, tc, &size)))
 		{
 			memcpy(ret, mem, memsize<size ? memsize : size);
-			if(memsize<=THREADCACHEMAX)
+			if(memsize && memsize<=THREADCACHEMAX)
 				threadcache_free(p, tc, mymspace, mem, memsize);
 			else
-				mspace_free(0, mem);
+				CallFree(0, mem);
 		}
 	}
 #endif
 	if(!ret)
 	{	/* Reallocs always happen in the mspace they happened in, so skip
 		locking the preferred mspace for this thread */
-		ret=mspace_realloc(0, mem, size);
+		ret=CallRealloc(0, mem, size);
 	}
 	return ret;
 }
@@ -905,17 +1060,19 @@ void   nedpfree(nedpool *p, void *mem) THROWSPEC
 	GetThreadCache(&p, &tc, &mymspace, 0);
 #if THREADCACHEMAX
 	memsize=nedblksize(mem);
+#if !USE_MAGIC_HEADERS
 	assert(memsize);
 	if(!memsize)
 	{
 		fprintf(stderr, "nedpfree() called with a block not created by nedmalloc!\n");
 		abort();
 	}
-	if(mem && tc && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
+#endif
+	if(mem && tc && memsize && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
 		threadcache_free(p, tc, mymspace, mem, memsize);
 	else
 #endif
-		mspace_free(0, mem);
+		CallFree(0, mem);
 }
 NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes) THROWSPEC
 {
@@ -925,7 +1082,7 @@ NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes)
 	GetThreadCache(&p, &tc, &mymspace, &bytes);
 	{	/* Use this thread's mspace */
         GETMSPACE(m, p, tc, mymspace, bytes,
-                  ret=mspace_memalign(m, alignment, bytes));
+                  ret=CallMalloc(m, bytes, alignment));
 	}
 	return ret;
 }
@@ -937,6 +1094,7 @@ struct mallinfo nedpmallinfo(nedpool *p) THROWSPEC
 	if(!p) { p=&syspool; if(!syspool.threads) InitPool(&syspool, 0, -1); }
 	for(n=0; p->m[n]; n++)
 	{
+#if USE_ALLOCATOR==1
 		struct mallinfo t=mspace_mallinfo(p->m[n]);
 		ret.arena+=t.arena;
 		ret.ordblks+=t.ordblks;
@@ -945,13 +1103,18 @@ struct mallinfo nedpmallinfo(nedpool *p) THROWSPEC
 		ret.uordblks+=t.uordblks;
 		ret.fordblks+=t.fordblks;
 		ret.keepcost+=t.keepcost;
+#endif
 	}
 	return ret;
 }
 #endif
 int    nedpmallopt(nedpool *p, int parno, int value) THROWSPEC
 {
+#if USE_ALLOCATOR==1
 	return mspace_mallopt(parno, value);
+#else
+	return 0;
+#endif
 }
 int    nedpmalloc_trim(nedpool *p, size_t pad) THROWSPEC
 {
@@ -959,7 +1122,9 @@ int    nedpmalloc_trim(nedpool *p, size_t pad) THROWSPEC
 	if(!p) { p=&syspool; if(!syspool.threads) InitPool(&syspool, 0, -1); }
 	for(n=0; p->m[n]; n++)
 	{
+#if USE_ALLOCATOR==1
 		ret+=mspace_trim(p->m[n], pad);
+#endif
 	}
 	return ret;
 }
@@ -969,7 +1134,9 @@ void   nedpmalloc_stats(nedpool *p) THROWSPEC
 	if(!p) { p=&syspool; if(!syspool.threads) InitPool(&syspool, 0, -1); }
 	for(n=0; p->m[n]; n++)
 	{
+#if USE_ALLOCATOR==1
 		mspace_malloc_stats(p->m[n]);
+#endif
 	}
 }
 size_t nedpmalloc_footprint(nedpool *p) THROWSPEC
@@ -979,7 +1146,9 @@ size_t nedpmalloc_footprint(nedpool *p) THROWSPEC
 	if(!p) { p=&syspool; if(!syspool.threads) InitPool(&syspool, 0, -1); }
 	for(n=0; p->m[n]; n++)
 	{
+#if USE_ALLOCATOR==1
 		ret+=mspace_footprint(p->m[n]);
+#endif
 	}
 	return ret;
 }
@@ -989,8 +1158,13 @@ NEDMALLOCPTRATTR void **nedpindependent_calloc(nedpool *p, size_t elemsno, size_
 	threadcache *tc;
 	int mymspace;
 	GetThreadCache(&p, &tc, &mymspace, &elemsize);
+#if USE_ALLOCATOR==0
+    GETMSPACE(m, p, tc, mymspace, elemsno*elemsize,
+              ret=unsupported_operation("independent_calloc"));
+#elif USE_ALLOCATOR==1
     GETMSPACE(m, p, tc, mymspace, elemsno*elemsize,
               ret=mspace_independent_calloc(m, elemsno, elemsize, chunks));
+#endif
 	return ret;
 }
 NEDMALLOCPTRATTR void **nedpindependent_comalloc(nedpool *p, size_t elems, size_t *sizes, void **chunks) THROWSPEC
@@ -1003,8 +1177,13 @@ NEDMALLOCPTRATTR void **nedpindependent_comalloc(nedpool *p, size_t elems, size_
     for(i=0; i<elems; i++)
         adjustedsizes[i]=sizes[i]<sizeof(threadcacheblk) ? sizeof(threadcacheblk) : sizes[i];
 	GetThreadCache(&p, &tc, &mymspace, 0);
+#if USE_ALLOCATOR==0
+	GETMSPACE(m, p, tc, mymspace, 0,
+              ret=unsupported_operation("independent_comalloc"));
+#elif USE_ALLOCATOR==1
 	GETMSPACE(m, p, tc, mymspace, 0,
               ret=mspace_independent_comalloc(m, elems, adjustedsizes, chunks));
+#endif
 	return ret;
 }
 

@@ -182,6 +182,11 @@ Ullrich Heinemann for reporting this.
 suggesting this.
  * { 1098 } Improved non-nedmalloc block detection to 6.25% probability
 of being wrong. Thanks to Advanced Research Associates for sponsoring this.
+ * { 1099 } Added USE_MAGIC_HEADERS which allows nedmalloc to handle freeing
+a system allocated block. Added USE_ALLOCATOR which allows the changing of
+which backend allocator to use (with choices between the system allocator and
+dlmalloc - choosing the system allocator is intended for debug situations only
+e.g. valgrind). Thanks to Advanced Research Associates for sponsoring this.
 
 v1.05 15th June 2008:
  * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to
