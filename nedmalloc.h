@@ -60,7 +60,11 @@ USE_ALLOCATOR can be one of these settings:
 #include <stddef.h>   /* for size_t */
 
 #ifndef EXTSPEC
- #define EXTSPEC extern
+ #ifdef NEDMALLOC_DLL_EXPORTS
+  #define EXTSPEC extern __declspec(dllexport)
+ #else
+  #define EXTSPEC extern
+ #endif
 #endif
 
 #if defined(_MSC_VER) && _MSC_VER>=1400
