@@ -2675,7 +2675,7 @@ static size_t traverse_and_check(mstate m);
 /* ---------------------------- Indexing Bins ---------------------------- */
 
 #define is_small(s)         (((s) >> SMALLBIN_SHIFT) < NSMALLBINS)
-#define small_index(s)      ((s)  >> SMALLBIN_SHIFT)
+#define small_index(s)      (bindex_t)((s)  >> SMALLBIN_SHIFT)
 #define small_index2size(i) ((i)  << SMALLBIN_SHIFT)
 #define MIN_SMALL_INDEX     (small_index(MIN_CHUNK_SIZE))
 
@@ -2723,7 +2723,7 @@ static size_t traverse_and_check(mstate m);
     I = NTREEBINS-1;\
   else {\
     unsigned int K;\
-    _BitScanReverse((DWORD *) &K, X);\
+    _BitScanReverse((DWORD *) &K, (DWORD) X);\
     I =  (bindex_t)((K << 1) + ((S >> (K + (TREEBIN_SHIFT-1)) & 1)));\
   }\
 }
