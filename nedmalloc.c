@@ -296,7 +296,7 @@ size_t nedblksize(void *mem) THROWSPEC
 			if(!is_inuse(p)) return 0;
 			/* The following isn't safe but is probably true: unlikely to allocate
 			a 2Gb block on a 32bit system or a 8Eb block on a 64 bit system */
-			if(p->head & 1<<(SIZE_T_BITSIZE-SIZE_T_ONE)) return 0;
+			if(p->head & ((size_t)1)<<(SIZE_T_BITSIZE-SIZE_T_ONE)) return 0;
 			/* We have now reduced our chances of being wrong to 0.5^4 = 6.25%.
 			We could start comparing prev_foot's for similarity but it starts getting slow. */
 			fm = get_mstate_for(p);

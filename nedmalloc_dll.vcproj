@@ -67,6 +67,7 @@
 				LinkIncremental="2"
 				GenerateDebugInformation="true"
 				SubSystem="2"
+				LargeAddressAware="2"
 				TargetMachine="1"
 			/>
 			<Tool
@@ -140,6 +141,7 @@
 				LinkIncremental="1"
 				GenerateDebugInformation="true"
 				SubSystem="2"
+				LargeAddressAware="2"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
 				TargetMachine="1"
@@ -215,6 +217,8 @@
 				LinkIncremental="2"
 				GenerateDebugInformation="true"
 				SubSystem="2"
+				LargeAddressAware="2"
+				TerminalServerAware="0"
 				TargetMachine="17"
 			/>
 			<Tool
@@ -289,8 +293,11 @@
 				LinkIncremental="1"
 				GenerateDebugInformation="true"
 				SubSystem="2"
+				LargeAddressAware="2"
+				TerminalServerAware="0"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
+				RandomizedBaseAddress="2"
 				TargetMachine="17"
 			/>
 			<Tool
