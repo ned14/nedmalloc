@@ -5,11 +5,19 @@ An example of how to use nedalloc
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "nedmalloc.c"
+#include "nedmalloc.h"
 
 #define THREADS 5
 #define RECORDS (100000/THREADS)
 /*#define TORTURETEST*/
+#define USE_NEDMALLOC_DLL
+
+#ifndef USE_NEDMALLOC_DLL
+#include "nedmalloc.c"
+#else
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 static int whichmalloc;
 static int doRealloc;
@@ -294,9 +302,13 @@ static double runtest()
 	return opspersec;
 }
 
+int linkInNedmallocDLL(void);
 int main(void)
 {
 	double std=0, ned=0;
+#ifdef USE_NEDMALLOC_DLL
+	linkInNedmallocDLL();
+#endif
 
 #if 0
 	{

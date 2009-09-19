@@ -38,9 +38,10 @@ free etc. instead of nedmalloc, nedfree etc. You may or may not want this.
 NO_NED_NAMESPACE prevents the functions from being defined in the nedalloc
 namespace when in C++ (uses the global namespace instead).
 
-EXTSPEC can be defined to be __declspec(dllexport) or
+NEDMALLOCEXTSPEC can be defined to be __declspec(dllexport) or
 __attribute__ ((visibility("default"))) or whatever you like. It defaults
-to extern.
+to extern unless NEDMALLOC_DLL_EXPORTS is set as it would be when building
+nedmalloc.dll.
 
 USE_LOCKS can be 2 if you want to define your own MLOCK_T, INITIAL_LOCK,
 ACQUIRE_LOCK, RELEASE_LOCK, TRY_LOCK, IS_LOCKED and NULL_LOCK_INITIALIZER.
@@ -59,11 +60,11 @@ USE_ALLOCATOR can be one of these settings:
 
 #include <stddef.h>   /* for size_t */
 
-#ifndef EXTSPEC
+#ifndef NEDMALLOCEXTSPEC
  #ifdef NEDMALLOC_DLL_EXPORTS
-  #define EXTSPEC extern __declspec(dllexport)
+  #define NEDMALLOCEXTSPEC extern __declspec(dllexport)
  #else
-  #define EXTSPEC extern
+  #define NEDMALLOCEXTSPEC extern
  #endif
 #endif
 
@@ -139,33 +140,33 @@ extern "C" {
 
 /* Gets the usable size of an allocated block. Note this will always be bigger than what was
 asked for due to rounding etc. Tries to return zero if this is not a nedmalloc block (though
-one could see a segfault up to 12.5% of the time).
+one could see a segfault up to 6.25% of the time).
 */
-EXTSPEC size_t nedblksize(void *mem) THROWSPEC;
+NEDMALLOCEXTSPEC size_t nedblksize(void *mem) THROWSPEC;
 
-EXTSPEC void nedsetvalue(void *v) THROWSPEC;
+NEDMALLOCEXTSPEC void nedsetvalue(void *v) THROWSPEC;
 
-EXTSPEC NEDMALLOCPTRATTR void * nedmalloc(size_t size) THROWSPEC;
-EXTSPEC NEDMALLOCPTRATTR void * nedcalloc(size_t no, size_t size) THROWSPEC;
-EXTSPEC NEDMALLOCPTRATTR void * nedrealloc(void *mem, size_t size) THROWSPEC;
-EXTSPEC void   nedfree(void *mem) THROWSPEC;
-EXTSPEC NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedmalloc(size_t size) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedcalloc(size_t no, size_t size) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedrealloc(void *mem, size_t size) THROWSPEC;
+NEDMALLOCEXTSPEC void   nedfree(void *mem) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC;
 #if !NO_MALLINFO
-EXTSPEC struct mallinfo nedmallinfo(void) THROWSPEC;
+NEDMALLOCEXTSPEC struct mallinfo nedmallinfo(void) THROWSPEC;
 #endif
-EXTSPEC int    nedmallopt(int parno, int value) THROWSPEC;
-EXTSPEC int    nedmalloc_trim(size_t pad) THROWSPEC;
-EXTSPEC void   nedmalloc_stats(void) THROWSPEC;
-EXTSPEC size_t nedmalloc_footprint(void) THROWSPEC;
-EXTSPEC NEDMALLOCPTRATTR void **nedindependent_calloc(size_t elemsno, size_t elemsize, void **chunks) THROWSPEC;
-EXTSPEC NEDMALLOCPTRATTR void **nedindependent_comalloc(size_t elems, size_t *sizes, void **chunks) THROWSPEC;
+NEDMALLOCEXTSPEC int    nedmallopt(int parno, int value) THROWSPEC;
+NEDMALLOCEXTSPEC int    nedmalloc_trim(size_t pad) THROWSPEC;
+NEDMALLOCEXTSPEC void   nedmalloc_stats(void) THROWSPEC;
+NEDMALLOCEXTSPEC size_t nedmalloc_footprint(void) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void **nedindependent_calloc(size_t elemsno, size_t elemsize, void **chunks) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void **nedindependent_comalloc(size_t elems, size_t *sizes, void **chunks) THROWSPEC;
 
 /* Destroys the system memory pool used by the functions above.
 Useful for when you have nedmalloc in a DLL you're about to unload.
 If you call ANY nedmalloc functions after calling this you will
 get a fatal exception!
 */
-EXTSPEC void neddestroysyspool() THROWSPEC;
+NEDMALLOCEXTSPEC void neddestroysyspool() THROWSPEC;
 
 /* These are the pool functions */
 struct nedpool_t;
@@ -178,52 +179,50 @@ will *normally* be accessing the pool concurrently. Setting this to zero means i
 extends on demand, but be careful of this as it can rapidly consume system resources
 where bursts of concurrent threads use a pool at once.
 */
-EXTSPEC NEDMALLOCPTRATTR nedpool *nedcreatepool(size_t capacity, int threads) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR nedpool *nedcreatepool(size_t capacity, int threads) THROWSPEC;
 
 /* Destroys a memory pool previously created by nedcreatepool().
 */
-EXTSPEC void neddestroypool(nedpool *p) THROWSPEC;
+NEDMALLOCEXTSPEC void neddestroypool(nedpool *p) THROWSPEC;
 
 /* Sets a value to be associated with a pool. You can retrieve this value by passing
 any memory block allocated from that pool.
 */
-EXTSPEC void nedpsetvalue(nedpool *p, void *v) THROWSPEC;
+NEDMALLOCEXTSPEC void nedpsetvalue(nedpool *p, void *v) THROWSPEC;
 /* Gets a previously set value using nedpsetvalue() or zero if memory is unknown.
 Optionally can also retrieve pool.
 */
-EXTSPEC void *nedgetvalue(nedpool **p, void *mem) THROWSPEC;
+NEDMALLOCEXTSPEC void *nedgetvalue(nedpool **p, void *mem) THROWSPEC;
 
 /* Trims the thread cache for the calling thread, returning any existing cache
 data to the central pool. Remember to ALWAYS call with zero if you used the
 system pool. Setting disable to non-zero replicates neddisablethreadcache().
 */
-EXTSPEC void nedtrimthreadcache(nedpool *p, int disable) THROWSPEC;
+NEDMALLOCEXTSPEC void nedtrimthreadcache(nedpool *p, int disable) THROWSPEC;
 
 /* Disables the thread cache for the calling thread, returning any existing cache
 data to the central pool. Remember to ALWAYS call with zero if you used the
 system pool.
 */
-EXTSPEC void neddisablethreadcache(nedpool *p) THROWSPEC;
+NEDMALLOCEXTSPEC void neddisablethreadcache(nedpool *p) THROWSPEC;
 
-EXTSPEC NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size) THROWSPEC;
-EXTSPEC NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC;
-EXTSPEC NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC;
-EXTSPEC void   nedpfree(nedpool *p, void *mem) THROWSPEC;
-EXTSPEC NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC;
+NEDMALLOCEXTSPEC void   nedpfree(nedpool *p, void *mem) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes) THROWSPEC;
 #if !NO_MALLINFO
-EXTSPEC struct mallinfo nedpmallinfo(nedpool *p) THROWSPEC;
+NEDMALLOCEXTSPEC struct mallinfo nedpmallinfo(nedpool *p) THROWSPEC;
 #endif
-EXTSPEC int    nedpmallopt(nedpool *p, int parno, int value) THROWSPEC;
-EXTSPEC int    nedpmalloc_trim(nedpool *p, size_t pad) THROWSPEC;
-EXTSPEC void   nedpmalloc_stats(nedpool *p) THROWSPEC;
-EXTSPEC size_t nedpmalloc_footprint(nedpool *p) THROWSPEC;
-EXTSPEC NEDMALLOCPTRATTR void **nedpindependent_calloc(nedpool *p, size_t elemsno, size_t elemsize, void **chunks) THROWSPEC;
-EXTSPEC NEDMALLOCPTRATTR void **nedpindependent_comalloc(nedpool *p, size_t elems, size_t *sizes, void **chunks) THROWSPEC;
+NEDMALLOCEXTSPEC int    nedpmallopt(nedpool *p, int parno, int value) THROWSPEC;
+NEDMALLOCEXTSPEC int    nedpmalloc_trim(nedpool *p, size_t pad) THROWSPEC;
+NEDMALLOCEXTSPEC void   nedpmalloc_stats(nedpool *p) THROWSPEC;
+NEDMALLOCEXTSPEC size_t nedpmalloc_footprint(nedpool *p) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void **nedpindependent_calloc(nedpool *p, size_t elemsno, size_t elemsize, void **chunks) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void **nedpindependent_comalloc(nedpool *p, size_t elems, size_t *sizes, void **chunks) THROWSPEC;
 
 #if defined(__cplusplus)
 }
 #endif
-
-#undef EXTSPEC
 
 #endif

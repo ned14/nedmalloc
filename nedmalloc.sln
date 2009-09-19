@@ -4,6 +4,9 @@ Microsoft Visual Studio Solution File, Format Version 10.00
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_dll", "nedmalloc_dll.vcproj", "{47044B33-6C5A-40B6-901F-D80CA003CD8C}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_tester", "nedmalloc_tester.vcproj", "{B89384F5-360B-4AB2-8F43-2F5F98A947FE}"
+	ProjectSection(ProjectDependencies) = postProject
+		{47044B33-6C5A-40B6-901F-D80CA003CD8C} = {47044B33-6C5A-40B6-901F-D80CA003CD8C}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
