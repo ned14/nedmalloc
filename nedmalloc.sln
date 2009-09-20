@@ -8,6 +8,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_tester", "nedmall
 		{47044B33-6C5A-40B6-901F-D80CA003CD8C} = {47044B33-6C5A-40B6-901F-D80CA003CD8C}
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_loader", "nedmalloc_loader.vcproj", "{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -32,6 +34,12 @@ Global
 		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Release|Win32.Build.0 = Release|Win32
 		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Release|x64.ActiveCfg = Release|x64
 		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Release|x64.Build.0 = Release|x64
+		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Debug|Win32.ActiveCfg = Debug|Win32
+		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Debug|Win32.Build.0 = Debug|Win32
+		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Debug|x64.ActiveCfg = Debug|Win32
+		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Release|Win32.ActiveCfg = Release|Win32
+		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Release|Win32.Build.0 = Release|Win32
+		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Release|x64.ActiveCfg = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

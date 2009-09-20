@@ -38,7 +38,16 @@ DEALINGS IN THE SOFTWARE.
 #include <windows.h>
 #include <psapi.h>
 #include "DbgHelp.h"
-#undef ERROR
+#include "winpatcher_errorh.h"
+
+
+/* TODO list:
+
+* Patch LoadLibrary et al to patch any newly loaded DLLs
+* Patch GetProcAddress to return the patched address
+* Write our own implementation of DbgHelp's ImageDirectoryEntryToData() as to avoid
+  it using the system allocator.
+*/
 
 #if defined(__cplusplus)
 #if !defined(NO_WINPATCHER_NAMESPACE)
@@ -94,18 +103,7 @@ The answer is in a concept called binding. When the binding process rewrites the
 The INT, which is a duplicate copy of the information, is just the ticket.
 */
 
-typedef enum StatusCode_t
-{
-	ERROR=-1,
-	SUCCESS=0
-} StatusCode;
-typedef struct Status_t
-{
-	StatusCode code;				/* <0 = error, >=0 success */
-	TCHAR msg[65];
-} Status;
-#define MKSTATUS(ret, codev) ( ret.code=codev, ret )
-#define MKSTATUSWIN(ret) (ret.code=-(int)GetLastError(), FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), 0, ret.msg, (sizeof(ret.msg)-sizeof(TCHAR))/sizeof(TCHAR), NULL), ret )
+
 typedef struct ModuleListItem_t
 {
 	const char *into;
@@ -146,7 +144,7 @@ static PROC DeindirectAddress(PROC _addr) THROWSPEC
 	unsigned char *addr=(unsigned char *) *_addr;
 #if defined(_M_IX86)
 	if(0xe9==addr[0])
-	{	/* We're seeing a jmp rel32 inserted under incremental linking */
+	{	/* We're seeing a jmp rel32 inserted under Edit & Continue */
 		unsigned int offset=*(unsigned int *)(addr+1);
 		addr+=offset+5;
 	}
@@ -155,7 +153,12 @@ static PROC DeindirectAddress(PROC _addr) THROWSPEC
 		addr=(char *)(**(unsigned int **)(addr+2));
 	}
 #elif defined(_M_X64)
-#error To be implemented
+	if(0xff==addr[0] && 0x25==addr[1])
+	{	/* This is a jmp qword ptr, so dword[2:6] is the offset to where to load the address from */
+		unsigned int offset=*(unsigned int *)(addr+2);
+		addr+=offset+6;
+		addr=(char *)(*(size_t *)(addr));
+	}
 #endif
 	return (PROC) addr;
 }
@@ -184,13 +187,13 @@ static void DebugPrint(const char *fmt, ...) THROWSPEC
 	 fnToReplace: Address of function to replace
 	 fnNew: Replacement address
 */
-static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *importModuleName, SymbolListItem *sli) THROWSPEC
+static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *importModuleName, SymbolListItem *sli, int patchin) THROWSPEC
 {
 	Status ret = { SUCCESS };
 	ULONG size;
 	PIMAGE_THUNK_DATA thunk = 0;
 	PIMAGE_IMPORT_DESCRIPTOR desc = 0;
-	PROC replaceaddr = DeindirectAddress(sli->replace.addr);
+	PROC replaceaddr = patchin ? sli->replace.addr : sli->with.addr, withaddr = patchin ? sli->with.addr : sli->replace.addr;
 
 	/* Find the import table of the module loaded at hmodCaller */
 	desc = (PIMAGE_IMPORT_DESCRIPTOR) ImageDirectoryEntryToData(moduleBase, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &size);
@@ -219,16 +222,28 @@ static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *import
 
 		if (found) {
 			/* The addresses match; change the import section address. */
+			MEMORY_BASIC_INFORMATION mbi={0};
 #if defined(_DEBUG)
 			{
 				char moduleBaseName[_MAX_PATH+2];
 				GetModuleBaseNameA(GetCurrentProcess(), moduleBase, moduleBaseName, sizeof(moduleBaseName)-1);
 				DebugPrint("Replacing function pointer %p (%s:%s) with %p (%s) at %p in module %p (%s)\n",
-					*fn, importModuleName, sli->replace.name, sli->with.addr, sli->with.name, fn, moduleBase, moduleBaseName);
+					*fn, importModuleName, sli->replace.name, withaddr, sli->with.name, fn, moduleBase, moduleBaseName);
 			}
 #endif
-			if(!WriteProcessMemory(GetCurrentProcess(), fn, &sli->with.addr, sizeof(sli->with.addr), NULL))
+			/*if(!WriteProcessMemory(GetCurrentProcess(), fn, &withaddr, sizeof(withaddr), NULL))
+				return MKSTATUSWIN(ret);*/
+			if(!VirtualQuery(fn, &mbi, sizeof(mbi)))
 				return MKSTATUSWIN(ret);
+			if(!(mbi.Protect & PAGE_READWRITE))
+			{
+#if defined(_DEBUG)
+				DebugPrint("Setting PAGE_WRITECOPY on module %p, region %p length %u\n", moduleBase, mbi.BaseAddress, mbi.RegionSize);
+#endif
+				if(!VirtualProtect(mbi.BaseAddress, mbi.RegionSize, PAGE_WRITECOPY, &mbi.Protect))
+					return MKSTATUSWIN(ret);
+			}
+			*fn=withaddr;
 			return MKSTATUS(ret, SUCCESS+1);
 		}
 	}
@@ -239,7 +254,7 @@ static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *import
      Returns: The number of entries modified
      moduleBase: The PE module to patch
 */
-static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli) THROWSPEC
+static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli, int patchin) THROWSPEC
 {
 	Status ret={SUCCESS};
 	int count=0;
@@ -252,7 +267,10 @@ static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli
 			{
 				sli->replace.moduleBase=0;
 				if(!GetModuleHandleExA(0, module->into, &sli->replace.moduleBase))
-					return MKSTATUSWIN(ret);
+				{	/* Not loaded so move to next one */
+					ret=MKSTATUSWIN(ret);
+					continue;
+				}
 				if(!(sli->replace.addr=GetProcAddress(sli->replace.moduleBase, sli->replace.name)))
 					return MKSTATUSWIN(ret);
 				if(!module->from)
@@ -268,7 +286,7 @@ static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli
 					if(!(sli->with.addr=GetProcAddress(withBase, sli->with.name)))
 						return MKSTATUSWIN(ret);
 				}
-				if((ret=ModifyModuleImportTableForI(moduleBase, module->from, sli), ret.code)<0)
+				if((ret=ModifyModuleImportTableForI(moduleBase, module->into, sli, patchin), ret.code)<0)
 					return ret;
 			}
 		}
@@ -278,11 +296,12 @@ static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli
 			{
 				if(!sli->replace.addr || !sli->with.addr)
 					abort();	/* If you are not specifying modules you must specify symbols */
-				sli->replace.moduleBase=ModuleFromAddress(DeindirectAddress(sli->replace.addr));
+				sli->replace.addr=DeindirectAddress(sli->replace.addr);
+				sli->replace.moduleBase=ModuleFromAddress(sli->replace.addr);
 				if(!GetModuleBaseNameA(GetCurrentProcess(), sli->replace.moduleBase, sli->replace.moduleName, sizeof(sli->replace.moduleName)-1))
 					return MKSTATUSWIN(ret);
 			}
-			if((ret=ModifyModuleImportTableForI(moduleBase, sli->replace.moduleName, sli), ret.code)<0)
+			if((ret=ModifyModuleImportTableForI(moduleBase, sli->replace.moduleName, sli, patchin), ret.code)<0)
 				return ret;
 		}
 	}
@@ -292,8 +311,8 @@ static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli
 /* Modifies all symbols in all loaded modules
      Returns: The number of entries modified
 */
-NEDMALLOCEXTSPEC Status WinPatcher(SymbolListItem *symbollist) THROWSPEC;
-Status WinPatcher(SymbolListItem *symbollist) THROWSPEC
+NEDMALLOCEXTSPEC Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC;
+Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC
 {
 	int count=0;
 	Status ret={SUCCESS};
@@ -304,16 +323,16 @@ Status WinPatcher(SymbolListItem *symbollist) THROWSPEC
 		return MKSTATUSWIN(ret);
 	for(module=modulelist; module<modulelist+(modulelistlenneeded/sizeof(HMODULE)); module++)
 	{
-#if defined(_DEBUG)
-		{
-			char moduleBaseName[_MAX_PATH+2];
-			GetModuleBaseNameA(GetCurrentProcess(), *module, moduleBaseName, sizeof(moduleBaseName)-1);
-			DebugPrint("Scanning module %p (%s) for things to patch ...\n", *module, moduleBaseName);
-		}
-#endif
+		char moduleBaseName[_MAX_PATH+2];
+		GetModuleBaseNameA(GetCurrentProcess(), *module, moduleBaseName, sizeof(moduleBaseName)-1);
 		if(*module==myModuleBase)
 			continue;	/* Not us or we'd break our patch table */
-		if((ret=ModifyModuleImportTableFor(*module, symbollist), ret.code)<0)
+		if(!lstrcmpiA(moduleBaseName, "DbgHelp.dll") || !lstrcmpiA(moduleBaseName, "version.dll"))
+			continue;	/* Not DbgHelp.dll either as by us using ImageDirectoryEntryToData() above we cause a memory allocation */
+#if defined(_DEBUG)
+		DebugPrint("Scanning module %p (%s) for things to %s ...\n", *module, moduleBaseName, patchin ? "patch" : "depatch");
+#endif
+		if((ret=ModifyModuleImportTableFor(*module, symbollist, patchin), ret.code)<0)
 			return ret;
 		count+=ret.code;
 	}
@@ -343,23 +362,59 @@ Status WinPatcher(SymbolListItem *symbollist) THROWSPEC
    dynamic linker used and to patch that instead. This helps when the implementing
    module is not constant, but it does require that the enclosing DLL is using the
    same version as everything else in the process.
+
+   Note that not specifying modules introduces x86 or x64 dependent code and specific
+   assumptions about how MSVC implements the PE image spec. The only fully portable
+   method is to specify modules, plus specifying modules covers executables not built
+   using the same version of MSVCRT.
 */
 static const ModuleListItem modules[]={
+	/* Release and Debug MSVC6 CRTs */
+	{ "MSVCRT.DLL", 0 }, { "MSVCRTD.DLL", 0 },
+	/* Release and Debug MSVC7.0 CRTs */
+	{ "MSVCR70.DLL", 0 }, { "MSVCR70D.DLL", 0 },
+	/* Release and Debug MSVC7.1 CRTs */
+	{ "MSVCR71.DLL", 0 }, { "MSVCR71D.DLL", 0 },
+	/* Release and Debug MSVC8 CRTs */
+	{ "MSVCR80.DLL", 0 }, { "MSVCR80D.DLL", 0 },
 	/* Release and Debug MSVC9 CRTs */
 	{ "MSVCR90.DLL", 0 }, { "MSVCR90D.DLL", 0 },
 	{ 0, 0 }
 };
 static SymbolListItem nedmallocpatchtable[]={
-	{ { "malloc",  0, "", (PROC) malloc  }, 0, { "nedmalloc",  (PROC) nedmalloc  } },
-	{ { "calloc",  0, "", (PROC) calloc  }, 0, { "nedcalloc",  (PROC) nedcalloc  } },
-	{ { "realloc", 0, "", (PROC) realloc }, 0, { "nedrealloc", (PROC) nedrealloc } },
-	{ { "free",    0, "", (PROC) free    }, 0, { "nedfree",    (PROC) nedfree    } },
+	{ { "malloc",  0, "", (PROC) malloc  }, modules, { "nedmalloc",  (PROC) nedmalloc  } },
+	{ { "calloc",  0, "", (PROC) calloc  }, modules, { "nedcalloc",  (PROC) nedcalloc  } },
+	{ { "realloc", 0, "", (PROC) realloc }, modules, { "nedrealloc", (PROC) nedrealloc } },
+	{ { "free",    0, "", (PROC) free    }, modules, { "nedfree",    (PROC) nedfree    } },
 	{ { 0, 0, "", 0 }, 0, { 0, 0 } }
 };
-NEDMALLOCEXTSPEC int linkInNedmallocDLL(void) THROWSPEC;
-int linkInNedmallocDLL(void) THROWSPEC
-{	/* This purely exists to force inclusion of the nedmalloc DLL */
-	return 0;
+NEDMALLOCEXTSPEC int PatchInNedmallocDLL(void) THROWSPEC;
+int PatchInNedmallocDLL(void) THROWSPEC
+{
+	Status ret={SUCCESS};
+	ret=WinPatcher(nedmallocpatchtable, 1);
+	if(ret.code<0)
+	{
+#if defined(_DEBUG)
+		DebugPrint("DLL Process Attach Failed with error code %d (%s)\n", ret.code, ret.msg);
+#endif
+		return FALSE;
+	}
+	return TRUE;
+}
+NEDMALLOCEXTSPEC int DepatchInNedmallocDLL(void) THROWSPEC;
+int DepatchInNedmallocDLL(void) THROWSPEC
+{
+	Status ret={SUCCESS};
+	ret=WinPatcher(nedmallocpatchtable, 0);
+	if(ret.code<0)
+	{
+#if defined(_DEBUG)
+		DebugPrint("DLL Process Detach Failed with error code %d (%s)\n", ret.code, ret.msg);
+#endif
+		return FALSE;
+	}
+	return TRUE;
 }
 
 /* The DLL entry function for nedmalloc. This is called by the dynamic linker
@@ -370,21 +425,19 @@ _DllMainCRTStartup(
         DWORD   dwReason,
         LPVOID  lpreserved
         );
-BOOL APIENTRY DllPreMainCRTStartup(HMODULE myModuleBase, DWORD dllcode, LPVOID *isTheDynamicLinker)
+//#pragma optimize("", off)
+/* We split DllPreMainCRTStartup to avoid an annoying bug on the x64 compiler in /O2
+whereby it inserts a security cookie check before we've initialised support for it, thus
+provoking a failure */
+static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWORD dllcode, LPVOID *isTheDynamicLinker)
 {
 	BOOL ret=TRUE;
 	if(DLL_PROCESS_ATTACH==dllcode)
 	{
-		Status ret={SUCCESS};
-		__security_init_cookie();	/* For /GS support */
-		ret=WinPatcher(nedmallocpatchtable);
-		if(ret.code<0)
-		{
-#if defined(_DEBUG)
-			DebugPrint("DLL Process Attach Failed with error code %d (%s)\n", ret.code, ret.msg);
-#endif
+#ifdef REPLACE_SYSTEM_ALLOCATOR
+		if(!PatchInNedmallocDLL())
 			return FALSE;
-		}
+#endif
 	}
 	/* Invoke the CRT's handler which does atexit() etc */
 	ret=_DllMainCRTStartup(myModuleBase, dllcode, isTheDynamicLinker);
@@ -392,7 +445,21 @@ BOOL APIENTRY DllPreMainCRTStartup(HMODULE myModuleBase, DWORD dllcode, LPVOID *
 	{	/* Destroy the thread cache for the system pool at least */
 		neddisablethreadcache(0);
 	}
+	else if(DLL_PROCESS_DETACH==dllcode)
+	{
+#ifdef REPLACE_SYSTEM_ALLOCATOR
+		if(!DepatchInNedmallocDLL())
+			return FALSE;
+#endif
+	}
 	return ret;
+}
+
+BOOL APIENTRY DllPreMainCRTStartup(HMODULE myModuleBase, DWORD dllcode, LPVOID *isTheDynamicLinker)
+{
+	if(DLL_PROCESS_ATTACH==dllcode)
+		__security_init_cookie();	/* For /GS support */
+	return DllPreMainCRTStartup2(myModuleBase, dllcode, isTheDynamicLinker);
 }
 
 #if defined(__cplusplus)

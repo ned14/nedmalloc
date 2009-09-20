@@ -78,27 +78,6 @@ USE_ALLOCATOR can be one of these settings:
  #define NEDMALLOCPTRATTR
 #endif
 
-#ifdef REPLACE_SYSTEM_ALLOCATOR
- #if USE_ALLOCATOR==0
-  #error Cannot combine using the system allocator with replacing the system allocator
- #endif
- #define nedmalloc               malloc
- #define nedcalloc               calloc
- #define nedrealloc              realloc
- #define nedfree                 free
- #define nedmemalign             memalign
- #define nedmallinfo             mallinfo
- #define nedmallopt              mallopt
- #define nedmalloc_trim          malloc_trim
- #define nedmalloc_stats         malloc_stats
- #define nedmalloc_footprint     malloc_footprint
- #define nedindependent_calloc   independent_calloc
- #define nedindependent_comalloc independent_comalloc
- #ifdef _MSC_VER
-  #define nedblksize              _msize
- #endif
-#endif
-
 #ifndef USE_MAGIC_HEADERS
  #define USE_MAGIC_HEADERS 0
 #endif
@@ -110,6 +89,30 @@ USE_ALLOCATOR can be one of these settings:
 #if !USE_ALLOCATOR && !USE_MAGIC_HEADERS
 #error If you are using the system allocator then you MUST use magic headers
 #endif
+
+#ifdef REPLACE_SYSTEM_ALLOCATOR
+ #if USE_ALLOCATOR==0
+  #error Cannot combine using the system allocator with replacing the system allocator
+ #endif
+ #ifndef WIN32	/* We have a dedidicated patcher for Windows */
+  #define nedmalloc               malloc
+  #define nedcalloc               calloc
+  #define nedrealloc              realloc
+  #define nedfree                 free
+  #define nedmemalign             memalign
+  #define nedmallinfo             mallinfo
+  #define nedmallopt              mallopt
+  #define nedmalloc_trim          malloc_trim
+  #define nedmalloc_stats         malloc_stats
+  #define nedmalloc_footprint     malloc_footprint
+  #define nedindependent_calloc   independent_calloc
+  #define nedindependent_comalloc independent_comalloc
+  #ifdef _MSC_VER
+   #define nedblksize              _msize
+  #endif
+ #endif
+#endif
+
 
 #ifndef NO_MALLINFO
  #define NO_MALLINFO 0

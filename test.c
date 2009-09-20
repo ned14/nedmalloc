@@ -302,12 +302,12 @@ static double runtest()
 	return opspersec;
 }
 
-int linkInNedmallocDLL(void);
+int PatchInNedmallocDLL(void);
 int main(void)
 {
 	double std=0, ned=0;
 #ifdef USE_NEDMALLOC_DLL
-	linkInNedmallocDLL();
+	PatchInNedmallocDLL();
 #endif
 
 #if 0

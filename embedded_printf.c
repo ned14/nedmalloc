@@ -210,7 +210,6 @@ void tfp_format(void* putp,putcf putf,const char *fmt, va_list va)
 						w=8;
 						if(sizeof(size_t)>4)
 						{
-							w=16;
 							ui2a((unsigned int)((pointer>>32) & 0xffffffff), 16, 0, bf);
 							putchw(putp,putf,w,lz,bf);
 						}

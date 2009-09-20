@@ -44,7 +44,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_USRDLL;_UNICODE;NEDMALLOC_DLL_EXPORTS;USE_DEBUGGER_OUTPUT"
+				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_USRDLL;_UNICODE;NEDMALLOC_DLL_EXPORTS;REPLACE_SYSTEM_ALLOCATOR;USE_DEBUGGER_OUTPUT"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
@@ -120,7 +120,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_USRDLL;_UNICODE;NEDMALLOC_DLL_EXPORTS"
+				InlineFunctionExpansion="0"
+				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_USRDLL;_UNICODE;NEDMALLOC_DLL_EXPORTS;REPLACE_SYSTEM_ALLOCATOR;USE_DEBUGGER_OUTPUT"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
@@ -141,7 +142,7 @@
 				Name="VCLinkerTool"
 				AdditionalDependencies="psapi.lib dbghelp.lib"
 				OutputFile="$(OutDir)\nedmalloc.dll"
-				LinkIncremental="1"
+				LinkIncremental="2"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				LargeAddressAware="2"
@@ -198,9 +199,11 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;_UNICODE;NEDMALLOC_DLL_EXPORTS"
+				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;_UNICODE;NEDMALLOC_DLL_EXPORTS;REPLACE_SYSTEM_ALLOCATOR"
+				StringPooling="true"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
+				EnableEnhancedInstructionSet="1"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
 				DebugInformationFormat="3"
@@ -275,9 +278,11 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				AdditionalOptions="&#x0D;&#x0A;"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;_UNICODE;NEDMALLOC_DLL_EXPORTS"
+				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;_UNICODE;NEDMALLOC_DLL_EXPORTS;REPLACE_SYSTEM_ALLOCATOR"
+				StringPooling="true"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
@@ -367,6 +372,10 @@
 			</File>
 			<File
 				RelativePath=".\nedmalloc.h"
+				>
+			</File>
+			<File
+				RelativePath=".\winpatcher_errorh.h"
 				>
 			</File>
 		</Filter>
