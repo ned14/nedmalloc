@@ -37,7 +37,6 @@ DEALINGS IN THE SOFTWARE.
 #define WIN32_LEAN_AND_MEAN 1
 #include <windows.h>
 #include <psapi.h>
-#include "DbgHelp.h"
 #include "winpatcher_errorh.h"
 
 
@@ -177,8 +176,38 @@ static void DebugPrint(const char *fmt, ...) THROWSPEC
 	putc(&s,0);
 	va_end(va);
 	OutputDebugStringA(buffer);
+	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buffer, strchr(buffer, 0)-buffer, NULL, NULL);
 #endif
 }
+
+/* Our own implementation of DbgHelp's ImageDirectoryEntryToData()
+DbgHelp unfortunately calls malloc() during its DllMain which is a
+big no-no in our situation */
+PVOID MyImageDirectoryEntryToData(PVOID Base, BOOLEAN MappedAsImage, USHORT DirectoryEntry, PULONG Size )
+{
+	IMAGE_DOS_HEADER *dosheader=(IMAGE_DOS_HEADER *) Base;
+	IMAGE_NT_HEADERS *peheader=0;
+	void *ret=0;
+	size_t offset=0;
+	if(Size) *Size=0;
+	if(dosheader->e_magic==*(USHORT *)"MZ")
+		peheader=(IMAGE_NT_HEADERS *)((char *)dosheader+dosheader->e_lfanew);
+	else
+		peheader=(IMAGE_NT_HEADERS *) dosheader;
+	if(peheader->Signature!=IMAGE_NT_SIGNATURE)
+	{
+		SetLastError(ERROR_INVALID_DATA);
+		return 0;
+	}
+	offset=peheader->OptionalHeader.DataDirectory[DirectoryEntry].VirtualAddress;
+	if(offset)
+	{
+		ret=(void *)((char *) Base+offset);
+		if(Size) *Size=peheader->OptionalHeader.DataDirectory[DirectoryEntry].Size;
+	}
+	return ret;
+}
+
 
 /* Modifies the import table of a loaded module
      Returns: The number of entries modified
@@ -196,7 +225,7 @@ static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *import
 	PROC replaceaddr = patchin ? sli->replace.addr : sli->with.addr, withaddr = patchin ? sli->with.addr : sli->replace.addr;
 
 	/* Find the import table of the module loaded at hmodCaller */
-	desc = (PIMAGE_IMPORT_DESCRIPTOR) ImageDirectoryEntryToData(moduleBase, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &size);
+	desc = (PIMAGE_IMPORT_DESCRIPTOR) MyImageDirectoryEntryToData(moduleBase, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &size);
 	if (!desc)
 		return MKSTATUS(ret, SUCCESS);  /* This module has no import section */
 
@@ -227,7 +256,7 @@ static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *import
 			{
 				char moduleBaseName[_MAX_PATH+2];
 				GetModuleBaseNameA(GetCurrentProcess(), moduleBase, moduleBaseName, sizeof(moduleBaseName)-1);
-				DebugPrint("Replacing function pointer %p (%s:%s) with %p (%s) at %p in module %p (%s)\n",
+				DebugPrint("Winpatcher: Replacing function pointer %p (%s:%s) with %p (%s) at %p in module %p (%s)\n",
 					*fn, importModuleName, sli->replace.name, withaddr, sli->with.name, fn, moduleBase, moduleBaseName);
 			}
 #endif
@@ -238,7 +267,7 @@ static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *import
 			if(!(mbi.Protect & PAGE_READWRITE))
 			{
 #if defined(_DEBUG)
-				DebugPrint("Setting PAGE_WRITECOPY on module %p, region %p length %u\n", moduleBase, mbi.BaseAddress, mbi.RegionSize);
+				DebugPrint("Winpatcher: Setting PAGE_WRITECOPY on module %p, region %p length %u\n", moduleBase, mbi.BaseAddress, mbi.RegionSize);
 #endif
 				if(!VirtualProtect(mbi.BaseAddress, mbi.RegionSize, PAGE_WRITECOPY, &mbi.Protect))
 					return MKSTATUSWIN(ret);
@@ -327,10 +356,8 @@ Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC
 		GetModuleBaseNameA(GetCurrentProcess(), *module, moduleBaseName, sizeof(moduleBaseName)-1);
 		if(*module==myModuleBase)
 			continue;	/* Not us or we'd break our patch table */
-		if(!lstrcmpiA(moduleBaseName, "DbgHelp.dll") || !lstrcmpiA(moduleBaseName, "version.dll"))
-			continue;	/* Not DbgHelp.dll either as by us using ImageDirectoryEntryToData() above we cause a memory allocation */
 #if defined(_DEBUG)
-		DebugPrint("Scanning module %p (%s) for things to %s ...\n", *module, moduleBaseName, patchin ? "patch" : "depatch");
+		DebugPrint("Winpatcher: Scanning module %p (%s) for things to %s ...\n", *module, moduleBaseName, patchin ? "patch" : "depatch");
 #endif
 		if((ret=ModifyModuleImportTableFor(*module, symbollist, patchin), ret.code)<0)
 			return ret;
@@ -382,10 +409,10 @@ static const ModuleListItem modules[]={
 	{ 0, 0 }
 };
 static SymbolListItem nedmallocpatchtable[]={
-	{ { "malloc",  0, "", (PROC) malloc  }, modules, { "nedmalloc",  (PROC) nedmalloc  } },
-	{ { "calloc",  0, "", (PROC) calloc  }, modules, { "nedcalloc",  (PROC) nedcalloc  } },
-	{ { "realloc", 0, "", (PROC) realloc }, modules, { "nedrealloc", (PROC) nedrealloc } },
-	{ { "free",    0, "", (PROC) free    }, modules, { "nedfree",    (PROC) nedfree    } },
+	{ { "malloc",  0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc",  (PROC) nedmalloc  } },
+	{ { "calloc",  0, "", 0/*(PROC) calloc */ }, modules, { "nedcalloc",  (PROC) nedcalloc  } },
+	{ { "realloc", 0, "", 0/*(PROC) realloc*/ }, modules, { "nedrealloc", (PROC) nedrealloc } },
+	{ { "free",    0, "", 0/*(PROC) free   */ }, modules, { "nedfree",    (PROC) nedfree    } },
 	{ { 0, 0, "", 0 }, 0, { 0, 0 } }
 };
 NEDMALLOCEXTSPEC int PatchInNedmallocDLL(void) THROWSPEC;
@@ -396,7 +423,7 @@ int PatchInNedmallocDLL(void) THROWSPEC
 	if(ret.code<0)
 	{
 #if defined(_DEBUG)
-		DebugPrint("DLL Process Attach Failed with error code %d (%s)\n", ret.code, ret.msg);
+		DebugPrint("Winpatcher: DLL Process Attach Failed with error code %d (%s) at %s:%d\n", ret.code, ret.msg, ret.sourcefile, ret.sourcelineno);
 #endif
 		return FALSE;
 	}
@@ -410,7 +437,7 @@ int DepatchInNedmallocDLL(void) THROWSPEC
 	if(ret.code<0)
 	{
 #if defined(_DEBUG)
-		DebugPrint("DLL Process Detach Failed with error code %d (%s)\n", ret.code, ret.msg);
+		DebugPrint("Winpatcher: DLL Process Detach Failed with error code %d (%s) at %s:%d\n", ret.code, ret.msg, ret.sourcefile, ret.sourcelineno);
 #endif
 		return FALSE;
 	}

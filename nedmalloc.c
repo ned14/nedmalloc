@@ -140,7 +140,7 @@ extern "C" {
 
 static void *unsupported_operation(const char *opname) THROWSPEC
 {
-	fprintf(stderr, "The operation %s is not supported under this build configuration\n", opname);
+	fprintf(stderr, "nedmalloc: The operation %s is not supported under this build configuration\n", opname);
 	abort();
 	return 0;
 }
@@ -666,7 +666,7 @@ static void threadcache_free(nedpool *p, threadcache *tc, int mymspace, void *me
 	assert(idx<=THREADCACHEMAXBINS);
 	if(tck==*binsptr)
 	{
-		fprintf(stderr, "Attempt to free already freed memory block %p - aborting!\n", tck);
+		fprintf(stderr, "nedmalloc: Attempt to free already freed memory block %p - aborting!\n", tck);
 		abort();
 	}
 #ifdef FULLSANITYCHECKS
@@ -1023,7 +1023,7 @@ NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPE
 		assert(memsize);
 		if(!memsize)
 		{
-			fprintf(stderr, "nedprealloc() called with a block not created by nedmalloc!\n");
+			fprintf(stderr, "nedmalloc: nedprealloc() called with a block not created by nedmalloc!\n");
 			abort();
 		}
 #endif
@@ -1054,7 +1054,7 @@ void   nedpfree(nedpool *p, void *mem) THROWSPEC
 	if(!mem)
 	{	/* You'd be surprised the number of times this happens as so many
 		allocators are non-conformant here */
-		fprintf(stderr, "nedpfree() called with zero!\n");
+		fprintf(stderr, "nedmalloc: nedpfree() called with zero!\n");
 		abort();
 	}
 	GetThreadCache(&p, &tc, &mymspace, 0);
@@ -1064,7 +1064,7 @@ void   nedpfree(nedpool *p, void *mem) THROWSPEC
 	assert(memsize);
 	if(!memsize)
 	{
-		fprintf(stderr, "nedpfree() called with a block not created by nedmalloc!\n");
+		fprintf(stderr, "nedmalloc: nedpfree() called with a block not created by nedmalloc!\n");
 		abort();
 	}
 #endif

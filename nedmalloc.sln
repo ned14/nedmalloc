@@ -9,6 +9,9 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_tester", "nedmall
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_loader", "nedmalloc_loader.vcproj", "{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}"
+	ProjectSection(ProjectDependencies) = postProject
+		{B89384F5-360B-4AB2-8F43-2F5F98A947FE} = {B89384F5-360B-4AB2-8F43-2F5F98A947FE}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

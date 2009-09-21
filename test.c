@@ -10,7 +10,7 @@ An example of how to use nedalloc
 #define THREADS 5
 #define RECORDS (100000/THREADS)
 /*#define TORTURETEST*/
-#define USE_NEDMALLOC_DLL
+/*#define USE_NEDMALLOC_DLL*/
 
 #ifndef USE_NEDMALLOC_DLL
 #include "nedmalloc.c"
