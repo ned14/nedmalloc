@@ -187,6 +187,14 @@ a system allocated block. Added USE_ALLOCATOR which allows the changing of
 which backend allocator to use (with choices between the system allocator and
 dlmalloc - choosing the system allocator is intended for debug situations only
 e.g. valgrind). Thanks to Advanced Research Associates for sponsoring this.
+ * { 1105 } Added ability to build nedmalloc as a DLL. Added support for a run
+time PE binary patcher which can patch all usage of the system allocator
+replacing it with nedmalloc. Thanks to Advanced Research Associates for
+sponsoring this.
+ * { 1108 } Added patcher loader which can load any arbitrary program
+injecting the nedmalloc DLL which then patches in its replacement for the
+system allocator. Doesn't work on all programs, but does on most e.g. Microsoft
+Word. Thanks to Advanced Research Associates for sponsoring this.
 
 v1.05 15th June 2008:
  * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to
