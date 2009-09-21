@@ -42,7 +42,6 @@ DEALINGS IN THE SOFTWARE.
 
 /* TODO list:
 
-* Patch LoadLibrary et al to patch any newly loaded DLLs
 * Patch GetProcAddress to return the patched address
 */
 
@@ -163,18 +162,34 @@ static PROC DeindirectAddress(PROC _addr) THROWSPEC
 /* Little helper function for sending stuff to the debugger output
 seeing as fprintf et al are completely unavailable to us */
 static void putc(void *p, char c) THROWSPEC { *(*((char **)p))++ = c; }
+static HANDLE debugfile=INVALID_HANDLE_VALUE;
 static void DebugPrint(const char *fmt, ...) THROWSPEC
 {
 #if defined(_DEBUG) && defined(USE_DEBUGGER_OUTPUT)
 	char buffer[16384];
 	char *s=buffer;
+	HANDLE stdouth=GetStdHandle(STD_OUTPUT_HANDLE);
+	DWORD len;
+	DWORD written=0;
+
 	va_list va;
 	va_start(va,fmt);
 	tfp_format(&s,putc,fmt,va);
 	putc(&s,0);
 	va_end(va);
+	len=(DWORD)(strchr(buffer, 0)-buffer);
 	OutputDebugStringA(buffer);
-	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buffer, strchr(buffer, 0)-buffer, NULL, NULL);
+	if(stdouth && stdouth!=INVALID_HANDLE_VALUE)
+		WriteFile(stdouth, buffer, len, &written, NULL);
+#if 1
+	if(INVALID_HANDLE_VALUE==debugfile)
+	{
+		debugfile=CreateFile(__T("C:\\nedmalloc.log"), GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ, 
+			NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	}
+	if(INVALID_HANDLE_VALUE!=debugfile)
+		WriteFile(debugfile, buffer, len, &written, NULL);
+#endif
 #endif
 }
 
@@ -374,6 +389,32 @@ Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC
 
 
 
+
+NEDMALLOCEXTSPEC int PatchInNedmallocDLL(void) THROWSPEC;
+NEDMALLOCEXTSPEC int DepatchInNedmallocDLL(void) THROWSPEC;
+/* A LoadLibrary() wrapper */
+static HMODULE WINAPI LoadLibraryA_winpatcher(LPCSTR lpLibFileName)
+{
+	HMODULE ret=LoadLibraryA(lpLibFileName);
+#if defined(_DEBUG)
+	DebugPrint("Winpatcher: LoadLibraryA intercepted\n");
+#endif
+#ifdef REPLACE_SYSTEM_ALLOCATOR
+	PatchInNedmallocDLL();
+#endif
+	return ret;
+}
+static HMODULE WINAPI LoadLibraryW_winpatcher(LPCWSTR lpLibFileName)
+{
+	HMODULE ret=LoadLibraryW(lpLibFileName);
+#if defined(_DEBUG)
+	DebugPrint("Winpatcher: LoadLibraryW intercepted\n");
+#endif
+#ifdef REPLACE_SYSTEM_ALLOCATOR
+	PatchInNedmallocDLL();
+#endif
+	return ret;
+}
 /* The patch table: replace the specified symbols in the specified modules with the
    specified replacements. Format is:
 
@@ -406,14 +447,21 @@ static const ModuleListItem modules[]={
 	{ "MSVCR90.DLL", 0 }, { "MSVCR90D.DLL", 0 },
 	{ 0, 0 }
 };
+static const ModuleListItem kernelmodule[]={
+	{ "KERNEL32.DLL", 0 },
+	{ 0, 0 }
+};
 static SymbolListItem nedmallocpatchtable[]={
 	{ { "malloc",  0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc",  (PROC) nedmalloc  } },
 	{ { "calloc",  0, "", 0/*(PROC) calloc */ }, modules, { "nedcalloc",  (PROC) nedcalloc  } },
 	{ { "realloc", 0, "", 0/*(PROC) realloc*/ }, modules, { "nedrealloc", (PROC) nedrealloc } },
 	{ { "free",    0, "", 0/*(PROC) free   */ }, modules, { "nedfree",    (PROC) nedfree    } },
+#ifdef REPLACE_SYSTEM_ALLOCATOR
+	{ { "LoadLibraryA", 0, "", 0 }, kernelmodule, { "LoadLibraryA_winpatcher", (PROC) LoadLibraryA_winpatcher } },
+	{ { "LoadLibraryW", 0, "", 0 }, kernelmodule, { "LoadLibraryW_winpatcher", (PROC) LoadLibraryW_winpatcher } },
+#endif
 	{ { 0, 0, "", 0 }, 0, { 0, 0 } }
 };
-NEDMALLOCEXTSPEC int PatchInNedmallocDLL(void) THROWSPEC;
 int PatchInNedmallocDLL(void) THROWSPEC
 {
 	Status ret={SUCCESS};
@@ -427,7 +475,6 @@ int PatchInNedmallocDLL(void) THROWSPEC
 	}
 	return TRUE;
 }
-NEDMALLOCEXTSPEC int DepatchInNedmallocDLL(void) THROWSPEC;
 int DepatchInNedmallocDLL(void) THROWSPEC
 {
 	Status ret={SUCCESS};

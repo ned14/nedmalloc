@@ -159,16 +159,19 @@ int main(int argc, char *argv[])
 			DWORD needed, usmachinetype, themmachinetype;
 			char *buffer=(char *) list;
 			if(!EnumProcessModules(GetCurrentProcess(), list, 4096, &needed))
-			{ if(0x12b!=GetLastError()) { MKSTATUSWIN(ret);	goto badexit; } }
+			{ MKSTATUSWIN(ret);	goto badexit; }
 			us=list[0];
+			memset(list, 0, sizeof(list));
 			if(!EnumProcessModules(processh, list, 4096, &needed))
-			{ if(0x12b!=GetLastError()) { MKSTATUSWIN(ret);	goto badexit; } }
+			{ MKSTATUSWIN(ret);	goto badexit; }
 			them=list[0];
-			if(!ReadProcessMemory(GetCurrentProcess(), us, buffer, sizeof(list), NULL))
-			{ if(0x12b!=GetLastError()) { MKSTATUSWIN(ret);	goto badexit; } }
+			memset(list, 0, sizeof(list));
+			if(!ReadProcessMemory(GetCurrentProcess(), us, buffer, 4096, NULL))
+			{ MKSTATUSWIN(ret);	goto badexit; }
 			usmachinetype=GetImageMachineType(buffer);
-			if(!ReadProcessMemory(processh, them, buffer, sizeof(list), NULL))
-			{ if(0x12b!=GetLastError()) { MKSTATUSWIN(ret);	goto badexit; } }
+			memset(list, 0, sizeof(list));
+			if(!ReadProcessMemory(processh, them, buffer, 4096, NULL))
+			{ MKSTATUSWIN(ret);	goto badexit; }
 			themmachinetype=GetImageMachineType(buffer);
 			if(usmachinetype!=themmachinetype)
 			{
@@ -294,6 +297,14 @@ int main(int argc, char *argv[])
 	}
 	return 0;
 badexit:
-	fprintf(stderr, "Error code %d (%s) at %s:%d\n", ret.code, ret.msg, ret.sourcefile, ret.sourcelineno);
+	{
+		TCHAR buffer[4096], *p;
+		const char *s;
+		_stprintf_s(buffer, sizeof(buffer), __T("Error code %d (%s) at "), ret.code, ret.msg);
+		for(p=_tcschr(buffer, 0), s=ret.sourcefile; *s; p++, s++)
+			*p=*s;
+		_stprintf_s(p, sizeof(buffer), __T(":%d\n"), ret.sourcelineno);
+		MessageBox(NULL, buffer, __T("Error"), MB_OK);
+	}
 	return -1;
 }

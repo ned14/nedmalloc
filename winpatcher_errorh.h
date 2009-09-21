@@ -50,7 +50,17 @@ typedef struct Status_t
 	TCHAR msg[65];
 } Status;
 #define MKSTATUS(ret, codev) ( ret.code=codev, ret.sourcefile=__FILE__, ret.sourcelineno=__LINE__, ret )
-#define MKSTATUSWIN(ret) (ret.code=-(int)GetLastError(), ret.sourcefile=__FILE__, ret.sourcelineno=__LINE__, FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), ret.msg, (sizeof(ret.msg)-sizeof(TCHAR))/sizeof(TCHAR), NULL), ret )
+#define MKSTATUSWIN(ret) MakeStatusFromWindowsError(&ret)
+
+static Status MakeStatusFromWindowsError(Status *ret)
+{
+	ret->code=-(int)GetLastError();
+	ret->sourcefile=__FILE__;
+	ret->sourcelineno=__LINE__;
+	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM|FORMAT_MESSAGE_IGNORE_INSERTS, NULL, -ret->code, 0, ret->msg, (sizeof(ret->msg)/sizeof(TCHAR))-1, NULL);
+	ret->msg[64]=0;
+	return *ret;
+}
 
 #if defined(__cplusplus)
 }
