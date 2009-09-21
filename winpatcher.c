@@ -44,8 +44,6 @@ DEALINGS IN THE SOFTWARE.
 
 * Patch LoadLibrary et al to patch any newly loaded DLLs
 * Patch GetProcAddress to return the patched address
-* Write our own implementation of DbgHelp's ImageDirectoryEntryToData() as to avoid
-  it using the system allocator.
 */
 
 #if defined(__cplusplus)

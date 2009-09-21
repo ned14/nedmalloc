@@ -165,10 +165,10 @@ int main(int argc, char *argv[])
 			{ if(0x12b!=GetLastError()) { MKSTATUSWIN(ret);	goto badexit; } }
 			them=list[0];
 			if(!ReadProcessMemory(GetCurrentProcess(), us, buffer, sizeof(list), NULL))
-			{ MKSTATUSWIN(ret);	goto badexit; }
+			{ if(0x12b!=GetLastError()) { MKSTATUSWIN(ret);	goto badexit; } }
 			usmachinetype=GetImageMachineType(buffer);
 			if(!ReadProcessMemory(processh, them, buffer, sizeof(list), NULL))
-			{ MKSTATUSWIN(ret);	goto badexit; }
+			{ if(0x12b!=GetLastError()) { MKSTATUSWIN(ret);	goto badexit; } }
 			themmachinetype=GetImageMachineType(buffer);
 			if(usmachinetype!=themmachinetype)
 			{
