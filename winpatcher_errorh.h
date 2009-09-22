@@ -62,6 +62,19 @@ static Status MakeStatusFromWindowsError(Status *ret)
 	return *ret;
 }
 
+static void MakeReportFromStatus(TCHAR *buffer, size_t bufflen, const Status *ret)
+{
+	TCHAR *p;
+	const char *s;
+	if(ret->code>=0)
+		_stprintf_s(buffer, bufflen, __T("Success code %d at "), ret->code);
+	else
+		_stprintf_s(buffer, bufflen, __T("Error code %d (%s) at "), ret->code, ret->msg);
+	for(p=_tcschr(buffer, 0), s=ret->sourcefile; *s; p++, s++)
+		*p=*s;
+	_stprintf_s(p, bufflen-(p-buffer)/sizeof(TCHAR), __T(":%d\n"), ret->sourcelineno);
+}
+
 #if defined(__cplusplus)
 }
 #endif

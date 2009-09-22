@@ -298,12 +298,9 @@ int main(int argc, char *argv[])
 	return 0;
 badexit:
 	{
-		TCHAR buffer[4096], *p;
-		const char *s;
-		_stprintf_s(buffer, sizeof(buffer), __T("Error code %d (%s) at "), ret.code, ret.msg);
-		for(p=_tcschr(buffer, 0), s=ret.sourcefile; *s; p++, s++)
-			*p=*s;
-		_stprintf_s(p, sizeof(buffer), __T(":%d\n"), ret.sourcelineno);
+		TCHAR buffer[4096];
+		MakeReportFromStatus(buffer, sizeof(buffer), &ret);
+		_tprintf(__T("\n%s\n"), buffer);
 		MessageBox(NULL, buffer, __T("Error"), MB_OK);
 	}
 	return -1;

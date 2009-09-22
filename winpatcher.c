@@ -392,13 +392,18 @@ Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC
 
 NEDMALLOCEXTSPEC int PatchInNedmallocDLL(void) THROWSPEC;
 NEDMALLOCEXTSPEC int DepatchInNedmallocDLL(void) THROWSPEC;
-/* A LoadLibrary() wrapper */
+/* A LoadLibrary() wrapper. It's important to patch before
+as well as after as one DLL load can trigger other DLL loads */
 static HMODULE WINAPI LoadLibraryA_winpatcher(LPCSTR lpLibFileName)
 {
-	HMODULE ret=LoadLibraryA(lpLibFileName);
+	HMODULE ret=0;
+#ifdef REPLACE_SYSTEM_ALLOCATOR
+	PatchInNedmallocDLL();
+#endif
 #if defined(_DEBUG)
 	DebugPrint("Winpatcher: LoadLibraryA intercepted\n");
 #endif
+	ret=LoadLibraryA(lpLibFileName);
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 	PatchInNedmallocDLL();
 #endif
@@ -406,10 +411,14 @@ static HMODULE WINAPI LoadLibraryA_winpatcher(LPCSTR lpLibFileName)
 }
 static HMODULE WINAPI LoadLibraryW_winpatcher(LPCWSTR lpLibFileName)
 {
-	HMODULE ret=LoadLibraryW(lpLibFileName);
+	HMODULE ret=0;
+#ifdef REPLACE_SYSTEM_ALLOCATOR
+	PatchInNedmallocDLL();
+#endif
 #if defined(_DEBUG)
 	DebugPrint("Winpatcher: LoadLibraryW intercepted\n");
 #endif
+	ret=LoadLibraryW(lpLibFileName);
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 	PatchInNedmallocDLL();
 #endif
@@ -469,7 +478,9 @@ int PatchInNedmallocDLL(void) THROWSPEC
 	if(ret.code<0)
 	{
 #if defined(_DEBUG)
-		DebugPrint("Winpatcher: DLL Process Attach Failed with error code %d (%s) at %s:%d\n", ret.code, ret.msg, ret.sourcefile, ret.sourcelineno);
+		TCHAR buffer[4096];
+		MakeReportFromStatus(buffer, sizeof(buffer), &ret);
+		DebugPrint("Winpatcher: DLL Process Attach Failed with %s\n", buffer);
 #endif
 		return FALSE;
 	}
@@ -482,7 +493,9 @@ int DepatchInNedmallocDLL(void) THROWSPEC
 	if(ret.code<0)
 	{
 #if defined(_DEBUG)
-		DebugPrint("Winpatcher: DLL Process Detach Failed with error code %d (%s) at %s:%d\n", ret.code, ret.msg, ret.sourcefile, ret.sourcelineno);
+		TCHAR buffer[4096];
+		MakeReportFromStatus(buffer, sizeof(buffer), &ret);
+		DebugPrint("Winpatcher: DLL Process Detach Failed with %s\n", buffer);
 #endif
 		return FALSE;
 	}
