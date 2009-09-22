@@ -32,6 +32,7 @@ DEALINGS IN THE SOFTWARE.
 #include <stdio.h>
 #include <stdlib.h>
 #define WIN32_LEAN_AND_MEAN 1
+#define _WIN32_WINNT 0x0501		/* Minimum of Windows XP required */
 #include <windows.h>
 #include <tchar.h>
 #include <psapi.h>
