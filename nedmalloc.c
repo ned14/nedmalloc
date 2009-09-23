@@ -1050,12 +1050,11 @@ void   nedpfree(nedpool *p, void *mem) THROWSPEC
 	threadcache *tc;
 	int mymspace;
 	size_t memsize;
-	assert(mem);
 	if(!mem)
 	{	/* You'd be surprised the number of times this happens as so many
 		allocators are non-conformant here */
-		fprintf(stderr, "nedmalloc: nedpfree() called with zero!\n");
-		abort();
+		fprintf(stderr, "nedmalloc: WARNING nedpfree() called with zero. This is not portable behaviour!\n");
+		return;
 	}
 	GetThreadCache(&p, &tc, &mymspace, 0);
 #if THREADCACHEMAX
