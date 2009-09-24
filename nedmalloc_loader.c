@@ -38,6 +38,10 @@ DEALINGS IN THE SOFTWARE.
 #include <psapi.h>
 #include "winpatcher_errorh.h"
 
+#pragma warning(disable: 4100)	/* Unreferenced formal parameter */
+#pragma warning(disable: 4189)	/* Local variable is initialized but not referenced */
+#pragma warning(disable: 4706)	/* Assignment within conditional expression */
+
 
 /* WINBASEAPI HMODULE WINAPI LoadLibraryW(LPCWSTR lpLibFileName) */
 typedef HMODULE (WINAPI *LoadLibraryWaddr_t)(LPCWSTR);
@@ -132,6 +136,40 @@ int main(int argc, char *argv[])
 	_tprintf(__T("Process to run is: %s\nCommand line is: %s\n\n"), executable, newcommandline);
 #endif
 
+	/* Make sure that the process is the same type as us. It turns out after much
+	head scratching that EnumProcessModules() is fundamentally broken when running
+	under WOW64 on x64 (even for 32 bit processes querying 32 bit processes). Microsoft
+	simply doesn't bother trying to convert the 64 bit structures into 32 bit structures.
+	Therefore we simply load in the executable and parse. */
+	{
+		HMODULE list[4096], us;
+		DWORD needed, usmachinetype, themmachinetype;
+		HANDLE fh=0;
+		char *buffer=(char *) list;
+		if(!EnumProcessModules(GetCurrentProcess(), list, 4096, &needed))
+		{ MKSTATUSWIN(ret);	goto badexit; }
+		us=list[0];
+		memset(list, 0, sizeof(list));
+		usmachinetype=GetImageMachineType(us);
+		if(INVALID_HANDLE_VALUE==(fh=CreateFile(executable, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL)))
+		{ MKSTATUSWIN(ret);	goto badexit; }
+		__try
+		{
+			ReadFile(fh, buffer, sizeof(list), &needed, NULL);
+			themmachinetype=GetImageMachineType(buffer);
+			if(usmachinetype!=themmachinetype)
+			{
+				MKSTATUS(ret, ERROR);
+				_tcscpy_s(ret.msg, sizeof(ret.msg)/sizeof(TCHAR), __T("Incompatible machine type"));
+				goto badexit;
+			}
+		}
+		__finally
+		{
+			CloseHandle(fh);
+		}
+	}
+
 	if(!CreateProcess(executable, newcommandline, NULL, NULL, FALSE,
 		CREATE_SUSPENDED, NULL, NULL, &si, &pi))
 		{ MKSTATUSWIN(ret);	goto badexit; }
@@ -142,10 +180,9 @@ int main(int argc, char *argv[])
 		size_t *entrypoint=0, *firstparam=0, *stack=0;
 		void *code=0, *data=0;
 
-		/*if(!DuplicateHandle(GetCurrentProcess(), pi.hProcess, GetCurrentProcess(), &processh,
-			STANDARD_RIGHTS_REQUIRED|PROCESS_ALL_ACCESS, FALSE, 0))
-		{ MKSTATUSWIN(ret);	goto badexit; }
-		if(!DuplicateHandle(GetCurrentProcess(), pi.hThread, GetCurrentProcess(), &threadh,
+		/*if(!(processh=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ, FALSE, pi.dwProcessId)))
+		{ MKSTATUSWIN(ret);	goto badexit; }*/
+		/*if(!DuplicateHandle(GetCurrentProcess(), pi.hThread, GetCurrentProcess(), &threadh,
 			STANDARD_RIGHTS_REQUIRED|THREAD_ALL_ACCESS, FALSE, 0))
 		{ MKSTATUSWIN(ret);	goto badexit; }
 		*/
@@ -154,34 +191,6 @@ int main(int argc, char *argv[])
 		_tprintf(__T("Process handle: %p (%u), thread handle: %p (%u)\n"),
 			pi.hProcess, pi.dwProcessId, pi.hThread, pi.dwThreadId);
 #endif
-		/* Make sure that the process is the same type as us */
-		{
-			HMODULE list[4096], us, them;
-			DWORD needed, usmachinetype, themmachinetype;
-			char *buffer=(char *) list;
-			if(!EnumProcessModules(GetCurrentProcess(), list, 4096, &needed))
-			{ MKSTATUSWIN(ret);	goto badexit; }
-			us=list[0];
-			memset(list, 0, sizeof(list));
-			if(!EnumProcessModules(processh, list, 4096, &needed))
-			{ MKSTATUSWIN(ret);	goto badexit; }
-			them=list[0];
-			memset(list, 0, sizeof(list));
-			if(!ReadProcessMemory(GetCurrentProcess(), us, buffer, 4096, NULL))
-			{ MKSTATUSWIN(ret);	goto badexit; }
-			usmachinetype=GetImageMachineType(buffer);
-			memset(list, 0, sizeof(list));
-			if(!ReadProcessMemory(processh, them, buffer, 4096, NULL))
-			{ MKSTATUSWIN(ret);	goto badexit; }
-			themmachinetype=GetImageMachineType(buffer);
-			if(usmachinetype!=themmachinetype)
-			{
-				MKSTATUS(ret, ERROR);
-				_tcscpy_s(ret.msg, sizeof(ret.msg)/sizeof(TCHAR), __T("Incompatible machine type"));
-				MessageBox(NULL, __T("The child process does not have the same machine type as me. Terminating process"), __T("Error"), MB_OK);
-				goto badexit;
-			}
-		}
 #if 0
 		oldcontext.ContextFlags = context.ContextFlags = CONTEXT_ALL;
 		if(!GetThreadContext(threadh, &oldcontext))
@@ -227,7 +236,7 @@ int main(int argc, char *argv[])
 		{ MKSTATUSWIN(ret);	goto badexit; }
 		if(!(data=VirtualAllocEx(processh, 0, sizeof(injectiondata), MEM_TOP_DOWN|MEM_COMMIT, PAGE_READWRITE)))
 		{ MKSTATUSWIN(ret);	goto badexit; }
-		if(!WriteProcessMemory(processh, code, InjectedRoutineRT, 4096, NULL))
+		if(!WriteProcessMemory(processh, code, (void *)(size_t) InjectedRoutineRT, 4096, NULL))
 		{ MKSTATUSWIN(ret);	goto badexit; }
 		if(!WriteProcessMemory(processh, data, &injectiondata, sizeof(injectiondata), NULL))
 		{ MKSTATUSWIN(ret);	goto badexit; }
@@ -251,7 +260,7 @@ int main(int argc, char *argv[])
 		{
 			HANDLE childthreadh=0;
 			DWORD threadid=0;
-			if(!(childthreadh=CreateRemoteThread(processh, NULL, 0, code, data, 0, &threadid)))
+			if(!(childthreadh=CreateRemoteThread(processh, NULL, 0, (LPTHREAD_START_ROUTINE)(size_t) code, data, 0, &threadid)))
 			{ MKSTATUSWIN(ret);	goto badexit; }
 #ifdef _DEBUG
 			_tprintf(__T("Remote thread launched with threadid=%d\n"), threadid);
@@ -300,7 +309,7 @@ int main(int argc, char *argv[])
 badexit:
 	{
 		TCHAR buffer[4096];
-		MakeReportFromStatus(buffer, sizeof(buffer), &ret);
+		MakeReportFromStatus(buffer, sizeof(buffer)/sizeof(TCHAR), &ret);
 		_tprintf(__T("\n%s\n"), buffer);
 		MessageBox(NULL, buffer, __T("Error"), MB_OK);
 	}

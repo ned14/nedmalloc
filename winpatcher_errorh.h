@@ -50,13 +50,13 @@ typedef struct Status_t
 	TCHAR msg[65];
 } Status;
 #define MKSTATUS(ret, codev) ( ret.code=codev, ret.sourcefile=__FILE__, ret.sourcelineno=__LINE__, ret )
-#define MKSTATUSWIN(ret) MakeStatusFromWindowsError(&ret)
+#define MKSTATUSWIN(ret) MakeStatusFromWindowsError(&ret, __FILE__, __LINE__)
 
-static Status MakeStatusFromWindowsError(Status *ret)
+static Status MakeStatusFromWindowsError(Status *ret, const char *file, int lineno)
 {
 	ret->code=-(int)GetLastError();
-	ret->sourcefile=__FILE__;
-	ret->sourcelineno=__LINE__;
+	ret->sourcefile=file;
+	ret->sourcelineno=lineno;
 	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM|FORMAT_MESSAGE_IGNORE_INSERTS, NULL, -ret->code, 0, ret->msg, (sizeof(ret->msg)/sizeof(TCHAR))-1, NULL);
 	ret->msg[64]=0;
 	return *ret;

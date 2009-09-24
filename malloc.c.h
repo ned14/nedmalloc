@@ -375,7 +375,18 @@ malloc_getpagesize         default: derive from system includes, or 4096.
   memory from the system in page-size units.  This may be (and
   usually is) a function rather than a constant. This is ignored
   if WIN32, where page size is determined using getSystemInfo during
-  initialization.
+  initialization. This may be several megabytes if ENABLE_LARGE_PAGES
+  is enabled.
+
+ENABLE_LARGE_PAGES         default: NOT defined
+  Causes the system page size to be the value of GetLargePageMinimum()
+  if that function is available (Windows Server 2003/Vista or later).
+  This allows the use of large page entries in the MMU which can
+  significantly improve performance in large working set applications
+  as TLB cache load is reduced by a factor of three. Note that enabling
+  this option is equal to locking the process' memory in current
+  implementations of Windows and requires the SE_LOCK_MEMORY_PRIVILEGE
+  to be held by the process in order to succeed.
 
 USE_DEV_RANDOM             default: 0 (i.e., not used)
   Causes malloc to use /dev/random to initialize secure magic seed for
@@ -405,6 +416,7 @@ LACKS_STDLIB_H                default: NOT defined unless on WIN32
 
 DEFAULT_GRANULARITY        default: page size if MORECORE_CONTIGUOUS,
                                 system_info.dwAllocationGranularity in WIN32,
+                                GetLargePageMinimum() if ENABLE_LARGE_PAGES,
                                 otherwise 64K.
       Also settable using mallopt(M_GRANULARITY, x)
   The unit for allocating and deallocating memory from the system.  On
@@ -497,6 +509,7 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <tchar.h>
 #define HAVE_MMAP 1
 #define HAVE_MORECORE 0
 #define LACKS_UNISTD_H
@@ -1501,7 +1514,11 @@ static int dev_zero_fd = -1; /* Cached file descriptor for /dev/zero. */
 
 /* Win32 MMAP via VirtualAlloc */
 static FORCEINLINE void* win32mmap(size_t size) {
-  void* ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+  void* ptr = 0;
+#ifdef ENABLE_LARGE_PAGES
+  ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT|MEM_LARGE_PAGES, PAGE_READWRITE);
+#endif
+  if(!ptr) ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
   return (ptr != 0)? ptr: MFAIL;
 }
 
@@ -2944,6 +2961,10 @@ static size_t traverse_and_check(mstate m);
 
 /* ---------------------------- setting mparams -------------------------- */
 
+#ifdef ENABLE_LARGE_PAGES
+typedef size_t (WINAPI *GetLargePageMinimum_t)(void);
+#endif
+
 /* Initialize mparams */
 static int init_mparams(void) {
 #ifdef NEED_GLOBAL_LOCK_INIT
@@ -2967,6 +2988,20 @@ static int init_mparams(void) {
       psize = system_info.dwPageSize;
       gsize = ((DEFAULT_GRANULARITY != 0)?
                DEFAULT_GRANULARITY : system_info.dwAllocationGranularity);
+#ifdef ENABLE_LARGE_PAGES
+      { 
+          GetLargePageMinimum_t GetLargePageMinimum_ = (GetLargePageMinimum_t) GetProcAddress(GetModuleHandle(__T("kernel32.dll")), "GetLargePageMinimum");
+          if(GetLargePageMinimum_) {
+              size_t largepagesize = GetLargePageMinimum_();
+              if(largepagesize) {
+                  psize = largepagesize;
+                  gsize = ((DEFAULT_GRANULARITY != 0)?
+                           DEFAULT_GRANULARITY : largepagesize);
+                  if(gsize < largepagesize) gsize = largepagesize;
+              }
+          }
+      }
+#endif
     }
 #endif /* WIN32 */
 

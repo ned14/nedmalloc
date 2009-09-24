@@ -69,6 +69,9 @@ DEALINGS IN THE SOFTWARE.
 #ifndef DEFAULT_GRANULARITY
 #define DEFAULT_GRANULARITY (1*1024*1024)
 #endif
+#ifndef ENABLE_LARGE_PAGES
+#define ENABLE_LARGE_PAGES
+#endif
 /*#define USE_SPIN_LOCKS 0*/
 
 
@@ -835,9 +838,9 @@ void neddestroysyspool() THROWSPEC
 	}
 	/* Render syspool unusable */
 	for(n=0; n<THREADCACHEMAXCACHES; n++)
-		p->caches[n]=(threadcache *) 0xdeadbeef;
+		p->caches[n]=(threadcache *)(size_t)(sizeof(size_t)>4 ? 0xdeadbeefdeadbeef : 0xdeadbeef);
 	for(n=0; n<MAXTHREADSINPOOL+1; n++)
-		p->m[n]=(mstate) 0xdeadbeef;
+		p->m[n]=(mstate)(size_t)(sizeof(size_t)>4 ? 0xdeadbeefdeadbeef : 0xdeadbeef);
 	if(TLSFREE(p->mycache)) abort();
 	RELEASE_LOCK(&p->mutex);
 }
@@ -879,7 +882,7 @@ void nedtrimthreadcache(nedpool *p, int disable) THROWSPEC
 	mycache=(int)(size_t) TLSGET(p->mycache);
 	if(!mycache)
 	{	/* Set to mspace 0 */
-		if(disable && TLSSET(p->mycache, (void *)-1)) abort();
+		if(disable && TLSSET(p->mycache, (void *)(size_t)-1)) abort();
 	}
 	else if(mycache>0)
 	{	/* Set to last used mspace */
@@ -944,7 +947,7 @@ static FORCEINLINE void GetThreadCache(nedpool **p, threadcache **tc, int *mymsp
 		*tc=AllocCache(*p);
 		if(!*tc)
 		{	/* Disable */
-			if(TLSSET((*p)->mycache, (void *)-1)) abort();
+			if(TLSSET((*p)->mycache, (void *)(size_t)-1)) abort();
 			*mymspace=0;
 		}
 		else

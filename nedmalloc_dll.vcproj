@@ -49,7 +49,7 @@
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
 				UsePrecompiledHeader="0"
-				WarningLevel="3"
+				WarningLevel="4"
 				DebugInformationFormat="3"
 			/>
 			<Tool
@@ -66,7 +66,7 @@
 				AdditionalDependencies="psapi.lib"
 				OutputFile="$(OutDir)\nedmalloc.dll"
 				Version="1.0.6"
-				LinkIncremental="1"
+				LinkIncremental="2"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				LargeAddressAware="2"
@@ -121,13 +121,12 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				InlineFunctionExpansion="0"
 				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_USRDLL;_UNICODE;NEDMALLOC_DLL_EXPORTS;REPLACE_SYSTEM_ALLOCATOR;USE_DEBUGGER_OUTPUT"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
 				UsePrecompiledHeader="0"
-				WarningLevel="3"
+				WarningLevel="4"
 				DebugInformationFormat="3"
 			/>
 			<Tool
@@ -148,7 +147,6 @@
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				LargeAddressAware="2"
-				TerminalServerAware="0"
 				EntryPointSymbol="DllPreMainCRTStartup"
 				TargetMachine="17"
 			/>
@@ -180,7 +178,6 @@
 			IntermediateDirectory="$(ConfigurationName)"
 			ConfigurationType="2"
 			CharacterSet="1"
-			WholeProgramOptimization="1"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
@@ -207,7 +204,7 @@
 				EnableFunctionLevelLinking="true"
 				EnableEnhancedInstructionSet="1"
 				UsePrecompiledHeader="0"
-				WarningLevel="3"
+				WarningLevel="4"
 				DebugInformationFormat="3"
 			/>
 			<Tool
@@ -231,6 +228,7 @@
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
 				EntryPointSymbol="DllPreMainCRTStartup"
+				RandomizedBaseAddress="2"
 				TargetMachine="1"
 			/>
 			<Tool
@@ -261,7 +259,6 @@
 			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
 			ConfigurationType="2"
 			CharacterSet="1"
-			WholeProgramOptimization="1"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
@@ -281,7 +278,6 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalOptions="&#x0D;&#x0A;"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;_UNICODE;NEDMALLOC_DLL_EXPORTS;REPLACE_SYSTEM_ALLOCATOR"
@@ -289,7 +285,7 @@
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
-				WarningLevel="3"
+				WarningLevel="4"
 				DebugInformationFormat="3"
 			/>
 			<Tool
@@ -306,11 +302,10 @@
 				AdditionalDependencies="psapi.lib"
 				OutputFile="$(OutDir)\nedmalloc.dll"
 				Version="1.0.6"
-				LinkIncremental="1"
+				LinkIncremental="0"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				LargeAddressAware="2"
-				TerminalServerAware="0"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
 				EntryPointSymbol="DllPreMainCRTStartup"

@@ -40,6 +40,8 @@ DEALINGS IN THE SOFTWARE.
 #include <psapi.h>
 #include "winpatcher_errorh.h"
 
+#pragma warning(disable: 4100)	/* Unreferenced formal parameter */
+#pragma warning(disable: 4706)	/* Assignment within conditional expression */
 
 /* TODO list:
 
@@ -138,7 +140,7 @@ static HMODULE ModuleFromAddress(void *addr) THROWSPEC
 This is architecture dependent */
 static PROC DeindirectAddress(PROC _addr) THROWSPEC
 {
-	unsigned char *addr=(unsigned char *) *_addr;
+	unsigned char *addr=(unsigned char *)((size_t) _addr);
 #if defined(_M_IX86)
 	if(0xe9==addr[0])
 	{	/* We're seeing a jmp rel32 inserted under Edit & Continue */
@@ -147,17 +149,17 @@ static PROC DeindirectAddress(PROC _addr) THROWSPEC
 	}
 	if(0xff==addr[0] && 0x25==addr[1])
 	{	/* This is a jmp ptr, so dword[2:6] is where to load the address from */
-		addr=(char *)(**(unsigned int **)(addr+2));
+		addr=(unsigned char *)(**(unsigned int **)(addr+2));
 	}
 #elif defined(_M_X64)
 	if(0xff==addr[0] && 0x25==addr[1])
 	{	/* This is a jmp qword ptr, so dword[2:6] is the offset to where to load the address from */
 		unsigned int offset=*(unsigned int *)(addr+2);
 		addr+=offset+6;
-		addr=(char *)(*(size_t *)(addr));
+		addr=(unsigned char *)(*(size_t *)(addr));
 	}
 #endif
-	return (PROC) addr;
+	return (PROC)(size_t) addr;
 }
 
 /* Little helper function for sending stuff to the debugger output
@@ -192,6 +194,17 @@ static void DebugPrint(const char *fmt, ...) THROWSPEC
 		WriteFile(debugfile, buffer, len, &written, NULL);
 #endif
 #endif
+}
+
+/* Traps win32 structured exceptions and converts to Status */
+static int ExceptionToStatus(Status *ret, unsigned int code, EXCEPTION_POINTERS *ep)
+{
+#if defined(_DEBUG)
+	DebugPrint("Winpatcher: Win32 Exception %u at %p\n", code, ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionAddress : 0);
+#endif
+	ret->code=-(int)code;
+	_stprintf_s(ret->msg, sizeof(ret->msg)/sizeof(TCHAR), __T("Win32 Exception %u at %p"), code, ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionAddress : 0);
+	return EXCEPTION_EXECUTE_HANDLER;
 }
 
 /* Our own implementation of DbgHelp's ImageDirectoryEntryToData()
@@ -340,7 +353,7 @@ static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli
 				if(!sli->replace.addr || !sli->with.addr)
 					abort();	/* If you are not specifying modules you must specify symbols */
 				sli->replace.addr=DeindirectAddress(sli->replace.addr);
-				sli->replace.moduleBase=ModuleFromAddress(sli->replace.addr);
+				sli->replace.moduleBase=ModuleFromAddress((void *)(size_t) sli->replace.addr);
 				if(!GetModuleBaseNameA(GetCurrentProcess(), sli->replace.moduleBase, sli->replace.moduleName, sizeof(sli->replace.moduleName)-1))
 					return MKSTATUSWIN(ret);
 			}
@@ -359,23 +372,30 @@ Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC
 {
 	int count=0;
 	Status ret={SUCCESS};
-	HMODULE myModuleBase=ModuleFromAddress(WinPatcher), *module=0, modulelist[4096];
-	DWORD modulelistlen=sizeof(modulelist), modulelistlenneeded=0;
-
-	if(!EnumProcessModules(GetCurrentProcess(), modulelist, modulelistlen, &modulelistlenneeded))
-		return MKSTATUSWIN(ret);
-	for(module=modulelist; module<modulelist+(modulelistlenneeded/sizeof(HMODULE)); module++)
+	__try
 	{
-		char moduleBaseName[_MAX_PATH+2];
-		GetModuleBaseNameA(GetCurrentProcess(), *module, moduleBaseName, sizeof(moduleBaseName)-1);
-		if(*module==myModuleBase)
-			continue;	/* Not us or we'd break our patch table */
-#if defined(_DEBUG)
-		DebugPrint("Winpatcher: Scanning module %p (%s) for things to %s ...\n", *module, moduleBaseName, patchin ? "patch" : "depatch");
+		HMODULE myModuleBase=ModuleFromAddress((void *)(size_t) WinPatcher), *module=0, modulelist[4096];
+		DWORD modulelistlen=sizeof(modulelist), modulelistlenneeded=0;
+
+		if(!EnumProcessModules(GetCurrentProcess(), modulelist, modulelistlen, &modulelistlenneeded))
+			return MKSTATUSWIN(ret);
+		for(module=modulelist; module<modulelist+(modulelistlenneeded/sizeof(HMODULE)); module++)
+		{
+			char moduleBaseName[_MAX_PATH+2];
+			GetModuleBaseNameA(GetCurrentProcess(), *module, moduleBaseName, sizeof(moduleBaseName)-1);
+			if(*module==myModuleBase)
+				continue;	/* Not us or we'd break our patch table */
+#if defined(_DEBUG) && 0
+			DebugPrint("Winpatcher: Scanning module %p (%s) for things to %s ...\n", *module, moduleBaseName, patchin ? "patch" : "depatch");
 #endif
-		if((ret=ModifyModuleImportTableFor(*module, symbollist, patchin), ret.code)<0)
-			return ret;
-		count+=ret.code;
+			if((ret=ModifyModuleImportTableFor(*module, symbollist, patchin), ret.code)<0)
+				return ret;
+			count+=ret.code;
+		}
+	}
+	__except(ExceptionToStatus(&ret, GetExceptionCode(), GetExceptionInformation()))
+	{
+		return ret;
 	}
 	return MKSTATUS(ret, count);
 }
@@ -399,14 +419,14 @@ static HMODULE WINAPI LoadLibraryA_winpatcher(LPCSTR lpLibFileName)
 {
 	HMODULE ret=0;
 #ifdef REPLACE_SYSTEM_ALLOCATOR
-	PatchInNedmallocDLL();
+	if(!PatchInNedmallocDLL()) abort();
 #endif
 #if defined(_DEBUG)
 	DebugPrint("Winpatcher: LoadLibraryA intercepted\n");
 #endif
 	ret=LoadLibraryA(lpLibFileName);
 #ifdef REPLACE_SYSTEM_ALLOCATOR
-	PatchInNedmallocDLL();
+	if(!PatchInNedmallocDLL()) abort();
 #endif
 	return ret;
 }
@@ -414,14 +434,14 @@ static HMODULE WINAPI LoadLibraryW_winpatcher(LPCWSTR lpLibFileName)
 {
 	HMODULE ret=0;
 #ifdef REPLACE_SYSTEM_ALLOCATOR
-	PatchInNedmallocDLL();
+	if(!PatchInNedmallocDLL()) abort();
 #endif
 #if defined(_DEBUG)
 	DebugPrint("Winpatcher: LoadLibraryW intercepted\n");
 #endif
 	ret=LoadLibraryW(lpLibFileName);
 #ifdef REPLACE_SYSTEM_ALLOCATOR
-	PatchInNedmallocDLL();
+	if(!PatchInNedmallocDLL()) abort();
 #endif
 	return ret;
 }
@@ -478,11 +498,12 @@ int PatchInNedmallocDLL(void) THROWSPEC
 	ret=WinPatcher(nedmallocpatchtable, 1);
 	if(ret.code<0)
 	{
-#if defined(_DEBUG)
 		TCHAR buffer[4096];
-		MakeReportFromStatus(buffer, sizeof(buffer), &ret);
+		MakeReportFromStatus(buffer, sizeof(buffer)/sizeof(TCHAR), &ret);
+#if defined(_DEBUG)
 		DebugPrint("Winpatcher: DLL Process Attach Failed with %s\n", buffer);
 #endif
+		MessageBox(NULL, buffer, __T("Error"), MB_OK);
 		return FALSE;
 	}
 	return TRUE;
@@ -493,15 +514,24 @@ int DepatchInNedmallocDLL(void) THROWSPEC
 	ret=WinPatcher(nedmallocpatchtable, 0);
 	if(ret.code<0)
 	{
-#if defined(_DEBUG)
 		TCHAR buffer[4096];
-		MakeReportFromStatus(buffer, sizeof(buffer), &ret);
+		MakeReportFromStatus(buffer, sizeof(buffer)/sizeof(TCHAR), &ret);
+#if defined(_DEBUG)
 		DebugPrint("Winpatcher: DLL Process Detach Failed with %s\n", buffer);
 #endif
+		MessageBox(NULL, buffer, __T("Error"), MB_OK);
 		return FALSE;
 	}
 	return TRUE;
 }
+
+LONG CALLBACK ProcessExceptionHandler(PEXCEPTION_POINTERS ExceptionInfo)
+{
+	Status ret={SUCCESS};
+	ExceptionToStatus(&ret, ExceptionInfo->ExceptionRecord->ExceptionCode, ExceptionInfo);
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
 
 /* The DLL entry function for nedmalloc. This is called by the dynamic linker
 before absolutely everything else - including the CRT */
@@ -515,12 +545,30 @@ _DllMainCRTStartup(
 /* We split DllPreMainCRTStartup to avoid an annoying bug on the x64 compiler in /O2
 whereby it inserts a security cookie check before we've initialised support for it, thus
 provoking a failure */
+static PVOID ProcessExceptionHandlerH;
 static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWORD dllcode, LPVOID *isTheDynamicLinker)
 {
 	BOOL ret=TRUE;
 	if(DLL_PROCESS_ATTACH==dllcode)
 	{
 #ifdef REPLACE_SYSTEM_ALLOCATOR
+#if defined(_DEBUG)
+		DebugPrint("Winpatcher: patcher DLL loaded at %p\n", myModuleBase);
+#endif
+		if(!(ProcessExceptionHandlerH=AddVectoredExceptionHandler(1, ProcessExceptionHandler)))
+		{
+			TCHAR buffer[4096];
+			Status ret={SUCCESS};
+			MKSTATUSWIN(ret);
+			MakeReportFromStatus(buffer, sizeof(buffer)/sizeof(TCHAR), &ret);
+#if defined(_DEBUG)
+			DebugPrint("Winpatcher: Failed to install process exception hook due to: %s\n", buffer);
+#endif
+			return FALSE;
+		}
+#if defined(_DEBUG)
+		DebugPrint("Winpatcher: installed process exception hook with handle %p\n", ProcessExceptionHandlerH);
+#endif
 		if(!PatchInNedmallocDLL())
 			return FALSE;
 #endif
@@ -534,7 +582,12 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 	else if(DLL_PROCESS_DETACH==dllcode)
 	{
 #ifdef REPLACE_SYSTEM_ALLOCATOR
+#if defined(_DEBUG)
+		DebugPrint("Winpatcher: patcher DLL being kicked out from %p\n", myModuleBase);
+#endif
 		if(!DepatchInNedmallocDLL())
+			return FALSE;
+		if(!RemoveVectoredExceptionHandler(ProcessExceptionHandlerH))
 			return FALSE;
 #endif
 	}
