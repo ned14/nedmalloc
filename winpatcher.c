@@ -185,7 +185,7 @@ static void DebugPrint(const char *fmt, ...) THROWSPEC
 	OutputDebugStringA(buffer);
 	if(stdouth && stdouth!=INVALID_HANDLE_VALUE)
 		WriteFile(stdouth, buffer, len, &written, NULL);
-#if 1
+#if 0
 	if(INVALID_HANDLE_VALUE==debugfile)
 	{
 		debugfile=CreateFile(__T("C:\\nedmalloc.log"), GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ, 
@@ -618,19 +618,15 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 #if defined(_DEBUG)
 		DebugPrint("Winpatcher: patcher DLL loaded at %p\n", myModuleBase);
-#endif
 		if(!(ProcessExceptionHandlerH=AddVectoredExceptionHandler(1, ProcessExceptionHandler)))
 		{
 			TCHAR buffer[4096];
 			Status ret={SUCCESS};
 			MKSTATUSWIN(ret);
 			MakeReportFromStatus(buffer, sizeof(buffer)/sizeof(TCHAR), &ret);
-#if defined(_DEBUG)
 			DebugPrint("Winpatcher: Failed to install process exception hook due to: %s\n", buffer);
-#endif
 			return FALSE;
 		}
-#if defined(_DEBUG)
 		DebugPrint("Winpatcher: installed process exception hook with handle %p\n", ProcessExceptionHandlerH);
 #endif
 #ifdef ENABLE_LARGE_PAGES
@@ -674,8 +670,10 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 		/* You can enable the below if you want, but you probably don't */
 		/*if(!DepatchInNedmallocDLL())
 			return FALSE;*/
+#ifdef _DEBUG
 		if(!RemoveVectoredExceptionHandler(ProcessExceptionHandlerH))
 			return FALSE;
+#endif
 #endif
 	}
 	return ret;

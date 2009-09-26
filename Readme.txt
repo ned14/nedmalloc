@@ -42,6 +42,39 @@ To test, compile test.c. It will run a comparison between your system
 allocator and nedalloc and tell you how much faster nedalloc is. It also
 serves as an example of usage.
 
+If you are running on Windows, there are quite a few extra options available.
+Firstly you can build nedmalloc as a DLL and link that into your application
+- this has the particular advantage that the DLL can trap thread exits in
+your application and therefore call neddisablethreadcache(0) for you.
+
+If you define REPLACE_SYSTEM_ALLOCATOR when building the DLL then the DLL
+will replace most usage of the MSVCRT allocator with nedmalloc on load -
+this very conveniently allows you to simply link with the nedmalloc DLL
+and your application magically now uses it with no code changes required.
+The following code is suggested:
+
+#pragma comment(lib, "nedmalloc.lib") 
+
+This auto-patching feature can also be combined with Microsoft's Detours
+(http://research.microsoft.com/en-us/projects/detours/) to run any
+arbitrary application using nedmalloc:
+
+withdll -d:nedmalloc.dll program.exe
+
+There is an enclosed nedmalloc_loader program which does one variant of the
+same thing, however it is not currently working because nedmalloc needs
+kernel32 initialised beforehand.
+
+Lastly for some applications defining ENABLE_LARGE_PAGES can give a 10-15%
+performance increase by having nedmalloc allocate using large pages only.
+Large pages take much less space in the TLB cache and can greatly benefit
+programs with a large working set. For this to work, your computer must
+have the "Lock pages in memory" local security setting enabled for the
+process' user as well as be running on Windows Server 2003/Vista or later.
+If you are using the DLL then the DLL attempts to enable the
+SeLockMemoryPrivilege during initialisation - therefore if you are not
+using the DLL you will have to do this manually yourself.
+
 B. Notes:
 -=-=-=-=-
 If you want the very latest version of this allocator, get it from the
@@ -124,13 +157,11 @@ changing the thread cache by #defining THREADCACHEMAX - this fundamentally chang
 how the memory allocator behaves: if everything is fine with the thread cache fully
 on or fully off, then this strongly suggests the source of your problem.
 
-3. Make SURE you are matching allocations and frees belonging to nedmalloc.
-nedmalloc does not patch itself in to replace the system allocator (if you want that,
-try the Hoard memory allocator) because it is intended to coexist with any or
-all other memory allocators. Attempting to free a block not allocated by nedmalloc
-will end badly, similarly passing one of nedmalloc's blocks to another allocator
-will likely also end badly. I have inserted as many assertion and debug checks for
-this possibility as I can think of (further suggestions are welcome), but no system
+3. Make SURE you are matching allocations and frees belonging to nedmalloc if you
+are not defining REPLACE_SYSTEM_ALLOCATOR. Attempting to free a block not allocated
+by nedmalloc will end badly, similarly passing one of nedmalloc's blocks to another
+allocator will likely also end badly. I have inserted as many assertion and debug checks
+for this possibility as I can think of (further suggestions are welcome), but no system
 can ever be watertight. If you're using C++, I would use its strong template type
 system to have the compiler guarantee membership of a memory pointer - see the Boost
 libraries, or indeed my own TnFOX portability toolkit (http://www.nedprod.com/TnFOX/).
@@ -195,6 +226,10 @@ sponsoring this.
 injecting the nedmalloc DLL which then patches in its replacement for the
 system allocator. Doesn't work on all programs, but does on most e.g. Microsoft
 Word. Thanks to Advanced Research Associates for sponsoring this.
+ * { 1116 } Finished debugging and optimising the latest additions to the
+codebase. The patcher now works well on x64 as well as x86. Added support for
+large pages on Windows. Thanks to Advanced Research Associates for
+sponsoring this.
 
 v1.05 15th June 2008:
  * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to
