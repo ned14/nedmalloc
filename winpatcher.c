@@ -300,6 +300,7 @@ static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *import
 					return MKSTATUSWIN(ret);
 			}
 			*fn=withaddr;
+			FlushInstructionCache(GetCurrentProcess(), mbi.BaseAddress, mbi.RegionSize);
 			return MKSTATUS(ret, SUCCESS+1);
 		}
 	}
@@ -445,6 +446,40 @@ static HMODULE WINAPI LoadLibraryW_winpatcher(LPCWSTR lpLibFileName)
 #endif
 	return ret;
 }
+#ifdef REPLACE_SYSTEM_ALLOCATOR
+static void *nedreallocW(void *ptr, size_t newsize) THROWSPEC
+{
+	if(!ptr) return nedmalloc(newsize);
+	if(!nedblksize(ptr))
+	{
+		void *ret=nedmalloc(newsize);
+		if(!ret) return 0;
+		memcpy(ret, ptr, newsize);
+		free(ptr);
+#if defined(_DEBUG)
+		DebugPrint("Winpatcher: Non nedmalloc realloc of %p\n", ptr);
+#endif
+		return ret;
+	}
+	return nedrealloc(ptr, newsize);
+}
+static void nedfreeW(void *ptr) THROWSPEC
+{
+	if(!ptr) return;
+	if(!nedblksize(ptr))
+	{
+#if defined(_DEBUG)
+		DebugPrint("Winpatcher: Non nedmalloc free of %p\n", ptr);
+#endif
+		free(ptr);
+	}
+	else
+		nedfree(ptr);
+}
+#else
+#define nedreallocW nedrealloc
+#define nedfreeW nedfree
+#endif
 /* The patch table: replace the specified symbols in the specified modules with the
    specified replacements. Format is:
 
@@ -466,7 +501,7 @@ static HMODULE WINAPI LoadLibraryW_winpatcher(LPCWSTR lpLibFileName)
 */
 static const ModuleListItem modules[]={
 	/* Release and Debug MSVC6 CRTs */
-	{ "MSVCRT.DLL", 0 }, { "MSVCRTD.DLL", 0 },
+	/*{ "MSVCRT.DLL", 0 }, { "MSVCRTD.DLL", 0 },*/
 	/* Release and Debug MSVC7.0 CRTs */
 	{ "MSVCR70.DLL", 0 }, { "MSVCR70D.DLL", 0 },
 	/* Release and Debug MSVC7.1 CRTs */
@@ -482,10 +517,10 @@ static const ModuleListItem kernelmodule[]={
 	{ 0, 0 }
 };
 static SymbolListItem nedmallocpatchtable[]={
-	{ { "malloc",  0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc",  (PROC) nedmalloc  } },
-	{ { "calloc",  0, "", 0/*(PROC) calloc */ }, modules, { "nedcalloc",  (PROC) nedcalloc  } },
-	{ { "realloc", 0, "", 0/*(PROC) realloc*/ }, modules, { "nedrealloc", (PROC) nedrealloc } },
-	{ { "free",    0, "", 0/*(PROC) free   */ }, modules, { "nedfree",    (PROC) nedfree    } },
+	{ { "malloc",  0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc",  (PROC) nedmalloc   } },
+	{ { "calloc",  0, "", 0/*(PROC) calloc */ }, modules, { "nedcalloc",  (PROC) nedcalloc   } },
+	{ { "realloc", 0, "", 0/*(PROC) realloc*/ }, modules, { "nedrealloc", (PROC) nedreallocW } },
+	{ { "free",    0, "", 0/*(PROC) free   */ }, modules, { "nedfree",    (PROC) nedfreeW    } },
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 	{ { "LoadLibraryA", 0, "", 0 }, kernelmodule, { "LoadLibraryA_winpatcher", (PROC) LoadLibraryA_winpatcher } },
 	{ { "LoadLibraryW", 0, "", 0 }, kernelmodule, { "LoadLibraryW_winpatcher", (PROC) LoadLibraryW_winpatcher } },
@@ -569,6 +604,28 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 #if defined(_DEBUG)
 		DebugPrint("Winpatcher: installed process exception hook with handle %p\n", ProcessExceptionHandlerH);
 #endif
+#ifdef ENABLE_LARGE_PAGES
+		/* Attempt to enable SeLockMemoryPrivilege */
+		{
+			HANDLE token;
+			if(OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &token))
+			{
+				TOKEN_PRIVILEGES privs={1};
+				if(LookupPrivilegeValue(NULL, SE_LOCK_MEMORY_NAME, &privs.Privileges[0].Luid))
+				{
+					privs.Privileges[0].Attributes=SE_PRIVILEGE_ENABLED;
+					if(!AdjustTokenPrivileges(token, FALSE, &privs, 0, NULL, NULL) || GetLastError()!=S_OK)
+					{
+#if defined(_DEBUG)
+						DebugPrint("Winpatcher: Failed to enable SeLockMemoryPrivilege. Large pages will not be used.\n");
+#endif
+						OutputDebugStringA("Winpatcher: Failed to enable SeLockMemoryPrivilege. Large pages will not be used.\n");
+					}
+				}
+				CloseHandle(token);
+			}
+		}
+#endif
 		if(!PatchInNedmallocDLL())
 			return FALSE;
 #endif
@@ -585,8 +642,9 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 #if defined(_DEBUG)
 		DebugPrint("Winpatcher: patcher DLL being kicked out from %p\n", myModuleBase);
 #endif
-		if(!DepatchInNedmallocDLL())
-			return FALSE;
+		/* You can enable the below if you want, but you probably don't */
+		/*if(!DepatchInNedmallocDLL())
+			return FALSE;*/
 		if(!RemoveVectoredExceptionHandler(ProcessExceptionHandlerH))
 			return FALSE;
 #endif

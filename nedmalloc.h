@@ -143,7 +143,8 @@ extern "C" {
 
 /* Gets the usable size of an allocated block. Note this will always be bigger than what was
 asked for due to rounding etc. Tries to return zero if this is not a nedmalloc block (though
-one could see a segfault up to 6.25% of the time).
+one could see a segfault up to 6.25% of the time). On Win32 SEH is used to guarantee that a
+segfault never happens.
 */
 NEDMALLOCEXTSPEC size_t nedblksize(void *mem) THROWSPEC;
 
@@ -158,6 +159,7 @@ NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t by
 NEDMALLOCEXTSPEC struct mallinfo nedmallinfo(void) THROWSPEC;
 #endif
 NEDMALLOCEXTSPEC int    nedmallopt(int parno, int value) THROWSPEC;
+NEDMALLOCEXTSPEC void*  nedmalloc_internals(size_t *granularity, size_t *magic) THROWSPEC;
 NEDMALLOCEXTSPEC int    nedmalloc_trim(size_t pad) THROWSPEC;
 NEDMALLOCEXTSPEC void   nedmalloc_stats(void) THROWSPEC;
 NEDMALLOCEXTSPEC size_t nedmalloc_footprint(void) THROWSPEC;

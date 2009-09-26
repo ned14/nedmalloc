@@ -68,9 +68,7 @@ DEALINGS IN THE SOFTWARE.
 /* The default of 64Kb means we spend too much time kernel-side */
 #ifndef DEFAULT_GRANULARITY
 #define DEFAULT_GRANULARITY (1*1024*1024)
-#endif
-#ifndef ENABLE_LARGE_PAGES
-#define ENABLE_LARGE_PAGES
+#define DEFAULT_GRANULARITY_ALIGNED
 #endif
 /*#define USE_SPIN_LOCKS 0*/
 
@@ -286,6 +284,9 @@ size_t nedblksize(void *mem) THROWSPEC
 		/* Fail everything */
 		return 0;
 #elif USE_ALLOCATOR==1
+#ifdef WIN32
+		__try
+#endif
 		{
 			/* We try to return zero here if it isn't one of our own blocks, however
 			the current block annotation scheme used by dlmalloc makes it impossible
@@ -307,6 +308,9 @@ size_t nedblksize(void *mem) THROWSPEC
 			if(ok_magic(fm))
 				return chunksize(p)-overhead_for(p);
 		}
+#ifdef WIN32
+		__except(1) { }
+#endif
 #endif
 #endif
 	}
@@ -1115,6 +1119,18 @@ int    nedpmallopt(nedpool *p, int parno, int value) THROWSPEC
 #if USE_ALLOCATOR==1
 	return mspace_mallopt(parno, value);
 #else
+	return 0;
+#endif
+}
+void*  nedmalloc_internals(size_t *granularity, size_t *magic) THROWSPEC
+{
+#if USE_ALLOCATOR==1
+	if(granularity) *granularity=mparams.granularity;
+	if(magic) *magic=mparams.magic;
+	return (void *) &syspool;
+#else
+	if(granularity) *granularity=0;
+	if(magic) *magic=0;
 	return 0;
 #endif
 }
