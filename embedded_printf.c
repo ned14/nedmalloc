@@ -57,7 +57,7 @@ static void uli2a(unsigned long int num, unsigned int base, int uc,char * bf)
         num%=d;
         d/=base;
         if (n || dgt>0|| d==0) {
-            *bf++ = dgt+(dgt<10 ? '0' : (uc ? 'A' : 'a')-10);
+            *bf++ =(char)(dgt+(dgt<10 ? '0' : (uc ? 'A' : 'a')-10));
             ++n;
             }
         }
@@ -86,7 +86,7 @@ static void ui2a(unsigned int num, unsigned int base, int uc,char * bf)
         num%= d;
         d/=base;
         if (n || dgt>0 || d==0) {
-            *bf++ = dgt+(dgt<10 ? '0' : (uc ? 'A' : 'a')-10);
+            *bf++ = (char)(dgt+(dgt<10 ? '0' : (uc ? 'A' : 'a')-10));
             ++n;
             }
         }

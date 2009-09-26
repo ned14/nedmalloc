@@ -68,7 +68,9 @@ DEALINGS IN THE SOFTWARE.
 /* The default of 64Kb means we spend too much time kernel-side */
 #ifndef DEFAULT_GRANULARITY
 #define DEFAULT_GRANULARITY (1*1024*1024)
+#if DEBUG
 #define DEFAULT_GRANULARITY_ALIGNED
+#endif
 #endif
 /*#define USE_SPIN_LOCKS 0*/
 
