@@ -141,6 +141,7 @@ extern "C" {
 #endif
 #endif
 
+#if USE_ALLOCATOR==0
 static void *unsupported_operation(const char *opname) THROWSPEC
 {
 	fprintf(stderr, "nedmalloc: The operation %s is not supported under this build configuration\n", opname);
@@ -148,6 +149,7 @@ static void *unsupported_operation(const char *opname) THROWSPEC
 	return 0;
 }
 static size_t mspacecounter=(size_t) 0xdeadbeef;
+#endif
 
 static FORCEINLINE void *CallMalloc(void *mspace, size_t size, size_t alignment) THROWSPEC
 {

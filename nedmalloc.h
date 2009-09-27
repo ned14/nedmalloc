@@ -51,7 +51,7 @@ to each block. nedpfree() and nedprealloc() can then automagically know when
 to free a system allocated block. Enabling this typically adds 20-50% to
 application memory usage.
 
-USE_ALLOCATOR can be one of these settings:
+USE_ALLOCATOR can be one of these settings (it defaults to 1):
   0: System allocator (nedmalloc now simply acts as a threadcache).
      WARNING: Intended for DEBUG USE ONLY - not all functions work correctly.
   1: dlmalloc

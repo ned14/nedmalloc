@@ -212,23 +212,23 @@ Ullrich Heinemann for reporting this.
  * { 1096 } Fixed lots of level 4 warnings on MSVC. Thanks to Anteru for
 suggesting this.
  * { 1098 } Improved non-nedmalloc block detection to 6.25% probability
-of being wrong. Thanks to Advanced Research Associates for sponsoring this.
+of being wrong. Thanks to Applied Research Associates for sponsoring this.
  * { 1099 } Added USE_MAGIC_HEADERS which allows nedmalloc to handle freeing
 a system allocated block. Added USE_ALLOCATOR which allows the changing of
 which backend allocator to use (with choices between the system allocator and
 dlmalloc - choosing the system allocator is intended for debug situations only
-e.g. valgrind). Thanks to Advanced Research Associates for sponsoring this.
+e.g. valgrind). Thanks to Applied Research Associates for sponsoring this.
  * { 1105 } Added ability to build nedmalloc as a DLL. Added support for a run
 time PE binary patcher which can patch all usage of the system allocator
-replacing it with nedmalloc. Thanks to Advanced Research Associates for
+replacing it with nedmalloc. Thanks to Applied Research Associates for
 sponsoring this.
  * { 1108 } Added patcher loader which can load any arbitrary program
 injecting the nedmalloc DLL which then patches in its replacement for the
 system allocator. Doesn't work on all programs, but does on most e.g. Microsoft
-Word. Thanks to Advanced Research Associates for sponsoring this.
+Word. Thanks to Applied Research Associates for sponsoring this.
  * { 1116 } Finished debugging and optimising the latest additions to the
 codebase. The patcher now works well on x64 as well as x86. Added support for
-large pages on Windows. Thanks to Advanced Research Associates for
+large pages on Windows. Thanks to Applied Research Associates for
 sponsoring this.
 
 v1.05 15th June 2008:
