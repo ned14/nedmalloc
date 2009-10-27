@@ -150,6 +150,8 @@ static void *unsupported_operation(const char *opname) THROWSPEC
 }
 static size_t mspacecounter=(size_t) 0xdeadbeef;
 #endif
+static void *leastusedaddress;
+static size_t largestusedblock;
 
 static FORCEINLINE void *CallMalloc(void *mspace, size_t size, size_t alignment) THROWSPEC
 {
@@ -162,6 +164,12 @@ static FORCEINLINE void *CallMalloc(void *mspace, size_t size, size_t alignment)
 	ret=malloc(size);
 #elif USE_ALLOCATOR==1
 	ret=mspace_malloc((mstate) mspace, size);
+	if(ret)
+	{
+		size_t truesize=chunksize(mem2chunk(ret));
+		if(!leastusedaddress || ((mstate) mspace)->least_addr<leastusedaddress) leastusedaddress=((mstate) mspace)->least_addr;
+		if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);
+	}
 #endif
 	if(!ret) return 0;
 #if USE_MAGIC_HEADERS
@@ -186,6 +194,12 @@ static FORCEINLINE void *CallCalloc(void *mspace, size_t no, size_t size, size_t
 	ret=calloc(no, size);
 #elif USE_ALLOCATOR==1
 	ret=mspace_calloc((mstate) mspace, no, size);
+	if(ret)
+	{
+		size_t truesize=chunksize(mem2chunk(ret));
+		if(!leastusedaddress || ((mstate) mspace)->least_addr<leastusedaddress) leastusedaddress=((mstate) mspace)->least_addr;
+		if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);
+	}
 #endif
 	if(!ret) return 0;
 #if USE_MAGIC_HEADERS
@@ -227,6 +241,11 @@ static FORCEINLINE void *CallRealloc(void *mspace, void *mem, size_t size) THROW
 	ret=realloc(mem, size);
 #elif USE_ALLOCATOR==1
 	ret=mspace_realloc((mstate) mspace, mem, size);
+	if(ret)
+	{
+		size_t truesize=chunksize(mem2chunk(ret));
+		if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);
+	}
 #endif
 	if(!ret)
 	{	/* Put it back the way it was */
@@ -270,7 +289,7 @@ static FORCEINLINE void CallFree(void *mspace, void *mem) THROWSPEC
 #endif
 }
 
-size_t nedblksize(void *mem) THROWSPEC
+static mstate nedblkmstate(void *mem) THROWSPEC
 {
 	if(mem)
 	{
@@ -278,9 +297,7 @@ size_t nedblksize(void *mem) THROWSPEC
 		size_t *_mem=(size_t *) mem-3;
 		if(_mem[0]==*(size_t *) "NEDMALOC")
 		{
-			mstate mspace=(mstate) _mem[1];
-			size_t size=_mem[2];
-			return size-3*sizeof(size_t);
+			return (mstate) _mem[1];
 		}
 		else return 0;
 #else
@@ -298,24 +315,65 @@ size_t nedblksize(void *mem) THROWSPEC
 
 			mchunkptr->prev_foot = mem-(2*size_t) = mstate ^ mparams.magic for PRECEDING block;
 			mchunkptr->head      = mem-(1*size_t) = 8 multiple size of this block with bottom three bits = FLAG_BITS
+			    FLAG_BITS = bit 0 is CINUSE (currently in use unless is mmap), bit 1 is PINUSE (previous block currently
+				            in use unless mmap), bit 2 is UNUSED and currently is always zero.
 			*/
+			if(!is_aligned(mem)) return 0;		/* Would fail very rarely as all allocators return aligned blocks */
+			if(mem<leastusedaddress) return 0;	/* Simple but effective */
 			mchunkptr p=mem2chunk(mem);
 			mstate fm=0;
-			if(!is_inuse(p)) return 0;
-			/* The following isn't safe but is probably true: unlikely to allocate
-			a 2Gb block on a 32bit system or a 8Eb block on a 64 bit system */
-			if(p->head & ((size_t)1)<<(SIZE_T_BITSIZE-SIZE_T_ONE)) return 0;
-			/* We have now reduced our chances of being wrong to 0.5^4 = 6.25%.
-			We could start comparing prev_foot's for similarity but it starts getting slow. */
+			bool ismmapped=is_mmapped(p);
+			if((!ismmapped && !is_inuse(p)) || (p->head & FLAG4_BIT)) return 0;
+			/* Reduced uncertainty by 0.5^2 = 25.0% */
+			/* size should never exceed largestusedblock */
+			if(chunksize(p)>largestusedblock) return 0;
+			/* Reduced uncertainty by a minimum of 0.5^3 = 12.5%, maximum 0.5^16 = 0.0015% */
+			/* Having sanity checked prev_foot and head, check next block */
+			if(!ismmapped && (!next_pinuse(p) || (next_chunk(p)->head & FLAG4_BIT))) return 0;
+			/* Reduced uncertainty by 0.5^5 = 3.13% or 0.5^18 = 0.00038% */
+#if 0
+			/* If previous block is free, check that its next block pointer equals us */
+			if(!ismmapped && !pinuse(p))
+				if(next_chunk(prev_chunk(p))!=p) return 0;
+			/* We could start comparing prev_foot's for similarity but it starts getting slow. */
+#endif
 			fm = get_mstate_for(p);
+			if(!is_aligned(fm) || fm<leastusedaddress) return 0;
 			assert(ok_magic(fm));	/* If this fails, someone tried to free a block twice */
 			if(ok_magic(fm))
-				return chunksize(p)-overhead_for(p);
+				return fm;
 		}
 #ifdef WIN32
 		__except(1) { }
 #endif
 #endif
+#endif
+	}
+	return 0;
+}
+size_t nedblksize(void *mem) THROWSPEC
+{
+	if(mem)
+	{
+#if USE_MAGIC_HEADERS
+		size_t *_mem=(size_t *) mem-3;
+		if(_mem[0]==*(size_t *) "NEDMALOC")
+		{
+			mstate mspace=(mstate) _mem[1];
+			size_t size=_mem[2];
+			return size-3*sizeof(size_t);
+		}
+		else return 0;
+#else
+		if(nedblkmstate(mem))
+		{
+			mchunkptr p=mem2chunk(mem);
+			return chunksize(p)-overhead_for(p);
+		}
+		else
+		{
+			int a=1; /* Set breakpoints here if needed */
+		}
 #endif
 	}
 	return 0;
@@ -861,19 +919,8 @@ void nedpsetvalue(nedpool *p, void *v) THROWSPEC
 void *nedgetvalue(nedpool **p, void *mem) THROWSPEC
 {
 	nedpool *np=0;
-	mchunkptr mcp=mem2chunk(mem);
-	mstate fm;
-	if(!(is_aligned(chunk2mem(mcp))) && mcp->head != FENCEPOST_HEAD) return 0;
-	if(!cinuse(mcp)) return 0;
-	if(!next_pinuse(mcp)) return 0;
-	if(!is_mmapped(mcp) && !pinuse(mcp))
-	{
-		if(next_chunk(prev_chunk(mcp))!=mcp) return 0;
-	}
-	fm=get_mstate_for(mcp);
-	if(!ok_magic(fm)) return 0;
-	if(!ok_address(fm, mcp)) return 0;
-	if(!fm->extp) return 0;
+	mstate fm=nedblkmstate(mem);
+	if(!fm || !fm->extp) return 0;
 	np=(nedpool *) fm->extp;
 	if(p) *p=np;
 	return np->uservalue;
