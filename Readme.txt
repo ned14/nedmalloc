@@ -42,10 +42,14 @@ To test, compile test.c. It will run a comparison between your system
 allocator and nedalloc and tell you how much faster nedalloc is. It also
 serves as an example of usage.
 
-If you are running on Windows, there are quite a few extra options available.
+Windows-only features:
+-=-=-=-=-=-=-=-=-=-=-=
+If you are running on Windows, there are quite a few extra options available
+thanks to work generously sponsored by Applied Research Associates (USA).
 Firstly you can build nedmalloc as a DLL and link that into your application
 - this has the particular advantage that the DLL can trap thread exits in
-your application and therefore call neddisablethreadcache(0) for you.
+your application and therefore call neddisablethreadcache() on all currently
+existing nedpool's for you.
 
 If you define REPLACE_SYSTEM_ALLOCATOR when building the DLL then the DLL
 will replace most usage of the MSVCRT allocator with nedmalloc on load -
@@ -94,11 +98,16 @@ You will suffer memory leakage unless you call neddisablethreadcache()
 per pool for every thread which exits. This is because nedalloc cannot
 portably know when a thread exits and thus when its thread cache can
 be returned for use by other code. Don't forget pool zero, the system pool.
+This of course is not an issue if you use nedmalloc as a DLL on Windows.
+On some POSIX threads implementations there exists a pthread_atexit() which
+registers a termination handler for thread exit - if you don't have one of
+these then you'll have to do it manually.
 
-Equally if you use nedmalloc from a DLL which you later kick out of
-memory, you will leak memory if you don't disable all thread caches for
-all pools (as per the preceding paragraph), destroy all thread pools
-using neddestroypool() and destroy the system pool using neddestroysyspool().
+Equally if you use nedmalloc from a dynamically loaded DLL or shared object
+which you later kick out of memory, you will leak memory if you don't disable
+all thread caches for all pools (as per the preceding paragraph), destroy all
+thread pools using neddestroypool() and destroy the system pool using
+neddestroysyspool().
 
 For C++ type allocation patterns (where the same sizes of memory are
 regularly allocated and deallocated as objects are created and destroyed),
@@ -178,7 +187,7 @@ miss during all other testing.
 expert. There are quite a few on the market and they often are authors of memory
 allocators. Wolfram Gloger (the author of ptmalloc) provides consulting services.
 My own consulting company ned Productions Ltd. may be able to provide such a
-service depending on our current workload.
+service depending on our current workload: see http://www.nedproductions.biz/.
 
 I hope that these tips help. And I urge anyone considering simply dropping
 back to the system allocator as a quick fix to reconsider: squashing memory bugs
@@ -230,6 +239,10 @@ Word. Thanks to Applied Research Associates for sponsoring this.
 codebase. The patcher now works well on x64 as well as x86. Added support for
 large pages on Windows. Thanks to Applied Research Associates for
 sponsoring this.
+ * { 1125 } Added nedpoollist() which returns a snapshot of the nedpool's
+currently existing. The Windows DLL thread exit code now disables the thread
+cache for all currently existing nedpool's. Thanks to Applied Research
+Associates for sponsoring this.
 
 v1.05 15th June 2008:
  * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to

@@ -658,7 +658,15 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 	/* Invoke the CRT's handler which does atexit() etc */
 	ret=_DllMainCRTStartup(myModuleBase, dllcode, isTheDynamicLinker);
 	if(DLL_THREAD_DETACH==dllcode)
-	{	/* Destroy the thread cache for the system pool at least */
+	{	/* Destroy the thread cache for all known pools */
+		nedpool **pools=nedpoollist();
+		if(pools)
+		{
+			nedpool **pool;
+			for(pool=pools; *pool; ++pool)
+				neddisablethreadcache(*pool);
+			nedfree(pools);
+		}
 		neddisablethreadcache(0);
 	}
 	else if(DLL_PROCESS_DETACH==dllcode)

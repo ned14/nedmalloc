@@ -167,7 +167,7 @@ static FORCEINLINE void *CallMalloc(void *mspace, size_t size, size_t alignment)
 	if(ret)
 	{
 		size_t truesize=chunksize(mem2chunk(ret));
-		if(!leastusedaddress || ((mstate) mspace)->least_addr<leastusedaddress) leastusedaddress=((mstate) mspace)->least_addr;
+		if(!leastusedaddress || (void *)((mstate) mspace)->least_addr<leastusedaddress) leastusedaddress=(void *)((mstate) mspace)->least_addr;
 		if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);
 	}
 #endif
@@ -197,7 +197,7 @@ static FORCEINLINE void *CallCalloc(void *mspace, size_t no, size_t size, size_t
 	if(ret)
 	{
 		size_t truesize=chunksize(mem2chunk(ret));
-		if(!leastusedaddress || ((mstate) mspace)->least_addr<leastusedaddress) leastusedaddress=((mstate) mspace)->least_addr;
+		if(!leastusedaddress || (void *)((mstate) mspace)->least_addr<leastusedaddress) leastusedaddress=(void *)((mstate) mspace)->least_addr;
 		if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);
 	}
 #endif
@@ -320,28 +320,30 @@ static mstate nedblkmstate(void *mem) THROWSPEC
 			*/
 			if(!is_aligned(mem)) return 0;		/* Would fail very rarely as all allocators return aligned blocks */
 			if(mem<leastusedaddress) return 0;	/* Simple but effective */
-			mchunkptr p=mem2chunk(mem);
-			mstate fm=0;
-			bool ismmapped=is_mmapped(p);
-			if((!ismmapped && !is_inuse(p)) || (p->head & FLAG4_BIT)) return 0;
-			/* Reduced uncertainty by 0.5^2 = 25.0% */
-			/* size should never exceed largestusedblock */
-			if(chunksize(p)>largestusedblock) return 0;
-			/* Reduced uncertainty by a minimum of 0.5^3 = 12.5%, maximum 0.5^16 = 0.0015% */
-			/* Having sanity checked prev_foot and head, check next block */
-			if(!ismmapped && (!next_pinuse(p) || (next_chunk(p)->head & FLAG4_BIT))) return 0;
-			/* Reduced uncertainty by 0.5^5 = 3.13% or 0.5^18 = 0.00038% */
-#if 0
-			/* If previous block is free, check that its next block pointer equals us */
-			if(!ismmapped && !pinuse(p))
-				if(next_chunk(prev_chunk(p))!=p) return 0;
-			/* We could start comparing prev_foot's for similarity but it starts getting slow. */
-#endif
-			fm = get_mstate_for(p);
-			if(!is_aligned(fm) || fm<leastusedaddress) return 0;
-			assert(ok_magic(fm));	/* If this fails, someone tried to free a block twice */
-			if(ok_magic(fm))
-				return fm;
+			{
+				mchunkptr p=mem2chunk(mem);
+				mstate fm=0;
+				int ismmapped=is_mmapped(p);
+				if((!ismmapped && !is_inuse(p)) || (p->head & FLAG4_BIT)) return 0;
+				/* Reduced uncertainty by 0.5^2 = 25.0% */
+				/* size should never exceed largestusedblock */
+				if(chunksize(p)>largestusedblock) return 0;
+				/* Reduced uncertainty by a minimum of 0.5^3 = 12.5%, maximum 0.5^16 = 0.0015% */
+				/* Having sanity checked prev_foot and head, check next block */
+				if(!ismmapped && (!next_pinuse(p) || (next_chunk(p)->head & FLAG4_BIT))) return 0;
+				/* Reduced uncertainty by 0.5^5 = 3.13% or 0.5^18 = 0.00038% */
+	#if 0
+				/* If previous block is free, check that its next block pointer equals us */
+				if(!ismmapped && !pinuse(p))
+					if(next_chunk(prev_chunk(p))!=p) return 0;
+				/* We could start comparing prev_foot's for similarity but it starts getting slow. */
+	#endif
+				fm = get_mstate_for(p);
+				if(!is_aligned(fm) || (void *)fm<leastusedaddress) return 0;
+				assert(ok_magic(fm));	/* If this fails, someone tried to free a block twice */
+				if(ok_magic(fm))
+					return fm;
+			}
 		}
 #ifdef WIN32
 		__except(1) { }
@@ -862,20 +864,56 @@ found:
 	return p->m[n];
 }
 
+typedef struct PoolList_t
+{
+	unsigned int size;		/* Size of list */
+	unsigned int length;	/* Actual entries in list */
+#ifdef DEBUG
+	nedpool *list[1];		/* Force testing of list expansion */
+#else
+	nedpool *list[16];
+#endif
+} PoolList;
+static MLOCK_T poollistlock;
+static PoolList *poollist;
 NEDMALLOCPTRATTR nedpool *nedcreatepool(size_t capacity, int threads) THROWSPEC
 {
-	nedpool *ret;
-	if(!(ret=(nedpool *) nedpcalloc(0, 1, sizeof(nedpool)))) return 0;
+	nedpool *ret=0;
+	if(!poollist)
+	{
+		PoolList *newpoollist=0;
+		if(!(newpoollist=nedpcalloc(0, 1, sizeof(PoolList)+sizeof(nedpool *)))) return 0;
+		INITIAL_LOCK(&poollistlock);
+		ACQUIRE_LOCK(&poollistlock);
+		poollist=newpoollist;
+		poollist->size=sizeof(poollist->list)/sizeof(nedpool *);
+	}
+	else if(poollist->length==poollist->size)
+	{
+		PoolList *newpoollist=0;
+		size_t newsize=0;
+		ACQUIRE_LOCK(&poollistlock);
+		newsize=sizeof(PoolList)+(poollist->size+1)*sizeof(nedpool *);
+		if(!(newpoollist=realloc(poollist, newsize))) return 0;
+		poollist=newpoollist;
+		memset(&poollist->list[poollist->size], 0, newsize-(&poollist->list[poollist->size]-&poollist->list[0]));
+		poollist->size=((newsize-((char *)&poollist->list[0]-(char *)poollist))/sizeof(nedpool *))-1;
+		assert(poollist->size>poollist->length);
+	}
+	if(!(ret=(nedpool *) nedpcalloc(0, 1, sizeof(nedpool)))) goto badexit;
 	if(!InitPool(ret, capacity, threads))
 	{
 		nedpfree(0, ret);
-		return 0;
+		goto badexit;
 	}
+	poollist->list[poollist->length++]=ret;
+badexit:
+	RELEASE_LOCK(&poollistlock);
 	return ret;
 }
 void neddestroypool(nedpool *p) THROWSPEC
 {
-	int n;
+	unsigned int n;
 	ACQUIRE_LOCK(&p->mutex);
 	DestroyCaches(p);
 	for(n=0; p->m[n]; n++)
@@ -888,6 +926,18 @@ void neddestroypool(nedpool *p) THROWSPEC
 	RELEASE_LOCK(&p->mutex);
 	if(TLSFREE(p->mycache)) abort();
 	nedpfree(0, p);
+	ACQUIRE_LOCK(&poollistlock);
+	assert(poollist);
+	for(n=0; n<poollist->length && poollist->list[n]!=p; n++);
+	assert(n!=poollist->length);
+	memmove(&poollist->list[n], &poollist->list[n+1], &poollist->list[poollist->length]-&poollist->list[n]);
+	if(!--poollist->length)
+	{
+		assert(!poollist->list[0]);
+		nedpfree(0, poollist);
+		poollist=0;
+	}
+	RELEASE_LOCK(&poollistlock);
 }
 void neddestroysyspool() THROWSPEC
 {
@@ -909,6 +959,19 @@ void neddestroysyspool() THROWSPEC
 		p->m[n]=(mstate)(size_t)(sizeof(size_t)>4 ? 0xdeadbeefdeadbeef : 0xdeadbeef);
 	if(TLSFREE(p->mycache)) abort();
 	RELEASE_LOCK(&p->mutex);
+}
+nedpool **nedpoollist() THROWSPEC
+{
+	nedpool **ret=0;
+	if(poollist)
+	{
+		ACQUIRE_LOCK(&poollistlock);
+		if(!(ret=(nedpool **) nedmalloc((poollist->length+1)*sizeof(nedpool *)))) goto badexit;
+		memcpy(ret, poollist->list, (poollist->length+1)*sizeof(nedpool *));
+badexit:
+		RELEASE_LOCK(&poollistlock);
+	}
+	return ret;
 }
 
 void nedpsetvalue(nedpool *p, void *v) THROWSPEC

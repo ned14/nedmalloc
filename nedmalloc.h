@@ -190,12 +190,20 @@ NEDMALLOCEXTSPEC NEDMALLOCPTRATTR nedpool *nedcreatepool(size_t capacity, int th
 */
 NEDMALLOCEXTSPEC void neddestroypool(nedpool *p) THROWSPEC;
 
+/* Returns a zero terminated snapshot of threadpools existing at the time of call. Call
+nedfree() on the returned list when you are done. Returns zero if there is only the
+system pool in existence.
+*/
+NEDMALLOCEXTSPEC nedpool **nedpoollist() THROWSPEC;
+
 /* Sets a value to be associated with a pool. You can retrieve this value by passing
 any memory block allocated from that pool.
 */
 NEDMALLOCEXTSPEC void nedpsetvalue(nedpool *p, void *v) THROWSPEC;
+
 /* Gets a previously set value using nedpsetvalue() or zero if memory is unknown.
-Optionally can also retrieve pool.
+Optionally can also retrieve pool. You can detect an unknown block by the return
+being zero and *p being unmodifed.
 */
 NEDMALLOCEXTSPEC void *nedgetvalue(nedpool **p, void *mem) THROWSPEC;
 
@@ -210,6 +218,7 @@ data to the central pool. Remember to ALWAYS call with zero if you used the
 system pool.
 */
 NEDMALLOCEXTSPEC void neddisablethreadcache(nedpool *p) THROWSPEC;
+
 
 NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC;
