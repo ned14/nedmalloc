@@ -581,6 +581,7 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 		}
 		DebugPrint("Winpatcher: installed process exception hook with handle %p\n", ProcessExceptionHandlerH);
 #endif
+#endif
 #ifdef ENABLE_LARGE_PAGES
 		/* Attempt to enable SeLockMemoryPrivilege */
 		{
@@ -603,6 +604,7 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 			}
 		}
 #endif
+#ifdef REPLACE_SYSTEM_ALLOCATOR
 		if(!PatchInNedmallocDLL())
 			return FALSE;
 #endif

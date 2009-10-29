@@ -178,12 +178,12 @@ static FORCEINLINE void *CallMalloc(void *mspace, size_t size, size_t alignment)
 	if(alignment) ret=(void *)(((size_t) ret+alignment-1)&~(alignment-1));
 	for(; _ret<(size_t *)ret-2; _ret++) *_ret=*(size_t *)"NEDMALOC";
 	_ret[0]=(size_t) mspace;
-	_ret[1]=size;
+	_ret[1]=size-3*sizeof(size_t);
 #endif
 	return ret;
 }
 
-static FORCEINLINE void *CallCalloc(void *mspace, size_t no, size_t size, size_t alignment) THROWSPEC
+static FORCEINLINE void *CallCalloc(void *mspace, size_t size, size_t alignment) THROWSPEC
 {
 	void *ret=0;
 #if USE_MAGIC_HEADERS
@@ -191,9 +191,9 @@ static FORCEINLINE void *CallCalloc(void *mspace, size_t no, size_t size, size_t
 	size+=alignment+3*sizeof(size_t);
 #endif
 #if USE_ALLOCATOR==0
-	ret=calloc(no, size);
+	ret=calloc(1, size);
 #elif USE_ALLOCATOR==1
-	ret=mspace_calloc((mstate) mspace, no, size);
+	ret=mspace_calloc((mstate) mspace, 1, size);
 	if(ret)
 	{
 		size_t truesize=chunksize(mem2chunk(ret));
@@ -208,7 +208,7 @@ static FORCEINLINE void *CallCalloc(void *mspace, size_t no, size_t size, size_t
 	if(alignment) ret=(void *)(((size_t) ret+alignment-1)&~(alignment-1));
 	for(; _ret<(size_t *)ret-2; _ret++) *_ret=*(size_t *) "NEDMALOC";
 	_ret[0]=(size_t) mspace;
-	_ret[1]=size;
+	_ret[1]=size-3*sizeof(size_t);
 #endif
 	return ret;
 }
@@ -239,7 +239,7 @@ static FORCEINLINE void *CallRealloc(void *mspace, void *mem, int isforeign, siz
 	assert(_mem[0]==*(size_t *) "NEDMALOC");
 	newsize+=3*sizeof(size_t);
 	oldmspace=(mstate) _mem[1];
-	assert(oldsize==_mem[2]);
+	assert(oldsize>=_mem[2]);
 	for(; *_mem==*(size_t *) "NEDMALOC"; *_mem--=*(size_t *) "nedmaloc");
 	mem=(void *)(++_mem);
 #endif
@@ -265,7 +265,7 @@ static FORCEINLINE void *CallRealloc(void *mspace, void *mem, int isforeign, siz
 	ret=(void *)(_ret+3);
 	for(; _ret<(size_t *)ret-2; _ret++) *_ret=*(size_t *) "NEDMALOC";
 	_ret[0]=(size_t) mspace;
-	_ret[1]=newsize;
+	_ret[1]=newsize-3*sizeof(size_t);
 #endif
 	return ret;
 }
@@ -378,7 +378,7 @@ size_t nedblksize(int *isforeign, void *mem) THROWSPEC
 				mstate mspace=(mstate) _mem[1];
 				size_t size=_mem[2];
 				if(isforeign) *isforeign=0;
-				return size-3*sizeof(size_t);
+				return size;
 			}
 		}
 #elif USE_ALLOCATOR==1
@@ -619,7 +619,7 @@ static NOINLINE threadcache *AllocCache(nedpool *p) THROWSPEC
 		RELEASE_LOCK(&p->mutex);
 		return 0;
 	}
-	tc=p->caches[n]=(threadcache *) CallCalloc(p->m[0], 1, sizeof(threadcache), 0);
+	tc=p->caches[n]=(threadcache *) CallCalloc(p->m[0], sizeof(threadcache), 0);
 	if(!tc)
 	{
 		RELEASE_LOCK(&p->mutex);
@@ -1158,7 +1158,7 @@ NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC
 	if(!ret)
 	{	/* Use this thread's mspace */
         GETMSPACE(m, p, tc, mymspace, rsize,
-                  ret=CallCalloc(m, 1, rsize, 0));
+                  ret=CallCalloc(m, rsize, 0));
 	}
 	return ret;
 }
@@ -1191,7 +1191,7 @@ NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPE
 		if((ret=threadcache_malloc(p, tc, &size)))
 		{
 			memcpy(ret, mem, memsize<size ? memsize : size);
-			if(memsize<=THREADCACHEMAX)
+			if(memsize>=sizeof(threadcacheblk) && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
 				threadcache_free(p, tc, mymspace, mem, memsize);
 			else
 				CallFree(0, mem, isforeign);
@@ -1227,7 +1227,7 @@ void   nedpfree(nedpool *p, void *mem) THROWSPEC
 	}
 	GetThreadCache(&p, &tc, &mymspace, 0);
 #if THREADCACHEMAX
-	if(mem && tc && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
+	if(mem && tc && memsize>=sizeof(threadcacheblk) && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
 		threadcache_free(p, tc, mymspace, mem, memsize);
 	else
 #endif

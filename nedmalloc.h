@@ -54,11 +54,11 @@ to free a system allocated block. Enabling this typically adds 20-50% to
 application memory usage.
 
 ENABLE_TOLERANT_NEDMALLOC is automatically turned on if REPLACE_SYSTEM_ALLOCATOR
-is set. This causes nedmalloc to detect when a system allocator block is
-passed to it and to handle it appropriately. Note that without USE_MAGIC_HEADERS
-there is a very tiny chance that nedmalloc will segfault on non-Windows
-builds (it uses Win32 SEH to trap segfaults on Windows and there is no
-comparable system on POSIX).
+is set or the Windows DLL is being built. This causes nedmalloc to detect when a
+system allocator block is passed to it and to handle it appropriately. Note that
+without USE_MAGIC_HEADERS there is a very tiny chance that nedmalloc will segfault
+on non-Windows builds (it uses Win32 SEH to trap segfaults on Windows and there
+is no comparable system on POSIX).
 
 USE_ALLOCATOR can be one of these settings (it defaults to 1):
   0: System allocator (nedmalloc now simply acts as a threadcache).
@@ -72,6 +72,9 @@ USE_ALLOCATOR can be one of these settings (it defaults to 1):
 #ifndef NEDMALLOCEXTSPEC
  #ifdef NEDMALLOC_DLL_EXPORTS
   #define NEDMALLOCEXTSPEC extern __declspec(dllexport)
+  #ifndef ENABLE_TOLERANT_NEDMALLOC
+   #define ENABLE_TOLERANT_NEDMALLOC 1
+  #endif
  #else
   #define NEDMALLOCEXTSPEC extern
  #endif
@@ -103,8 +106,10 @@ USE_ALLOCATOR can be one of these settings (it defaults to 1):
  #if USE_ALLOCATOR==0
   #error Cannot combine using the system allocator with replacing the system allocator
  #endif
- #define ENABLE_TOLERANT_NEDMALLOC 1
- #ifndef WIN32	/* We have a dedidicated patcher for Windows */
+ #ifndef ENABLE_TOLERANT_NEDMALLOC
+  #define ENABLE_TOLERANT_NEDMALLOC 1
+ #endif
+ #ifndef WIN32	/* We have a dedicated patcher for Windows */
   #define nedmalloc               malloc
   #define nedcalloc               calloc
   #define nedrealloc              realloc
