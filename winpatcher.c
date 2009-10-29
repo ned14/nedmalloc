@@ -447,60 +447,12 @@ static HMODULE WINAPI LoadLibraryW_winpatcher(LPCWSTR lpLibFileName)
 #endif
 	return ret;
 }
-#ifdef REPLACE_SYSTEM_ALLOCATOR
-static void *nedreallocW(void *ptr, size_t newsize) THROWSPEC
-{
-	if(!ptr) return nedmalloc(newsize);
-	if(!nedblksize(ptr))
-	{
-		void *ret=nedmalloc(newsize);
-		if(!ret) return 0;
-		memcpy(ret, ptr, newsize);
-		free(ptr);
-#if defined(_DEBUG)
-		DebugPrint("Winpatcher: Non nedmalloc realloc of %p\n", ptr);
-#endif
-		return ret;
-	}
-	return nedrealloc(ptr, newsize);
-}
-static void nedfreeW(void *ptr) THROWSPEC
-{
-	if(!ptr) return;
-	if(!nedblksize(ptr))
-	{
-#if defined(_DEBUG)
-		DebugPrint("Winpatcher: Non nedmalloc free of %p\n", ptr);
-#endif
-		free(ptr);
-	}
-	else
-		nedfree(ptr);
-}
-static size_t nedblksizeW(void *ptr) THROWSPEC
-{
-	size_t size;
-	if(!ptr) return 0;
-	size=nedblksize(ptr);
-	if(!size)
-	{
-#if defined(_DEBUG)
-		DebugPrint("Winpatcher: Non nedmalloc blksize of %p\n", ptr);
-#endif
-		size=_msize(ptr);
-	}
-	return size;
-}
-#else
-#define nedreallocW nedrealloc
-#define nedfreeW nedfree
-#define nedblksizeW nedblksize
-#endif
-static void *nedmallocWdbg(size_t size, int type, const char *filename, int lineno)             { return nedmalloc(size); }
-static void *nedcallocWdbg(size_t no, size_t size, int type, const char *filename, int lineno)  { return nedcalloc(no, size); }
-static void *nedreallocWdbg(void *ptr, size_t size, int type, const char *filename, int lineno) { return nedreallocW(ptr, size); }
-static void nedfreeWdbg(void *ptr, int type)                                                    { nedfreeW(ptr); }
-static size_t nedblksizeWdbg(void *ptr, int type)                                               { return nedblksizeW(ptr); }
+
+static void *nedmalloc_dbg(size_t size, int type, const char *filename, int lineno)             { return nedmalloc(size); }
+static void *nedcalloc_dbg(size_t no, size_t size, int type, const char *filename, int lineno)  { return nedcalloc(no, size); }
+static void *nedrealloc_dbg(void *ptr, size_t size, int type, const char *filename, int lineno) { return nedrealloc(ptr, size); }
+static void nedfree_dbg(void *ptr, int type)                                                    { nedfree(ptr); }
+static size_t nedblksize_dbg(void *ptr, int type)                                               { return nedblksize(0, ptr); }
 /* The patch table: replace the specified symbols in the specified modules with the
    specified replacements. Format is:
 
@@ -540,15 +492,15 @@ static const ModuleListItem kernelmodule[]={
 static SymbolListItem nedmallocpatchtable[]={
 	{ { "malloc",       0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc",      (PROC) nedmalloc      } },
 	{ { "calloc",       0, "", 0/*(PROC) calloc */ }, modules, { "nedcalloc",      (PROC) nedcalloc      } },
-	{ { "realloc",      0, "", 0/*(PROC) realloc*/ }, modules, { "nedreallocW",    (PROC) nedreallocW    } },
-	{ { "free",         0, "", 0/*(PROC) free   */ }, modules, { "nedfreeW",       (PROC) nedfreeW       } },
-	{ { "_msize",       0, "", 0/*(PROC) _msize */ }, modules, { "nedblksizeW",    (PROC) nedblksizeW    } },
+	{ { "realloc",      0, "", 0/*(PROC) realloc*/ }, modules, { "nedreallocW",    (PROC) nedrealloc     } },
+	{ { "free",         0, "", 0/*(PROC) free   */ }, modules, { "nedfreeW",       (PROC) nedfree        } },
+	{ { "_msize",       0, "", 0/*(PROC) _msize */ }, modules, { "nedblksizeW",    (PROC) nedblksize     } },
 #if 0 /* Usually it's best to leave these off */
-	{ { "_malloc_dbg",  0, "", 0/*(PROC) malloc */ }, modules, { "nedmallocWdbg",  (PROC) nedmallocWdbg  } },
-	{ { "_calloc_dbg",  0, "", 0/*(PROC) calloc */ }, modules, { "nedcallocWdbg",  (PROC) nedcallocWdbg  } },
-	{ { "_realloc_dbg", 0, "", 0/*(PROC) realloc*/ }, modules, { "nedreallocWdbg", (PROC) nedreallocWdbg } },
-	{ { "_free_dbg",    0, "", 0/*(PROC) free   */ }, modules, { "nedfreeWdbg",    (PROC) nedfreeWdbg    } },
-	{ { "_msize_dbg",   0, "", 0/*(PROC) free   */ }, modules, { "nedblksizeWdbg", (PROC) nedblksizeWdbg } },
+	{ { "_malloc_dbg",  0, "", 0/*(PROC) malloc */ }, modules, { "nedmallocWdbg",  (PROC) nedmalloc_dbg  } },
+	{ { "_calloc_dbg",  0, "", 0/*(PROC) calloc */ }, modules, { "nedcallocWdbg",  (PROC) nedcalloc_dbg  } },
+	{ { "_realloc_dbg", 0, "", 0/*(PROC) realloc*/ }, modules, { "nedreallocWdbg", (PROC) nedrealloc_dbg } },
+	{ { "_free_dbg",    0, "", 0/*(PROC) free   */ }, modules, { "nedfreeWdbg",    (PROC) nedfree_dbg    } },
+	{ { "_msize_dbg",   0, "", 0/*(PROC) free   */ }, modules, { "nedblksizeWdbg", (PROC) nedblksize_dbg } },
 #endif
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 	{ { "LoadLibraryA", 0, "", 0 }, kernelmodule, { "LoadLibraryA_winpatcher", (PROC) LoadLibraryA_winpatcher } },

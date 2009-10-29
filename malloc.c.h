@@ -1761,6 +1761,7 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
 /* Custom pthread-style spin locks on x86 and x64 for gcc */
 struct pthread_mlock_t {
   volatile unsigned int l;
+  char cachelinepadding[64];
   unsigned int c;
   pthread_t threadid;
 };
@@ -1860,6 +1861,7 @@ static FORCEINLINE int pthread_try_lock (MLOCK_T *sl) {
 /* Custom win32-style spin locks on x86 and x64 for MSC */
 struct win32_mlock_t {
   volatile long l;
+  char cachelinepadding[64];
   unsigned int c;
   long threadid;
 };

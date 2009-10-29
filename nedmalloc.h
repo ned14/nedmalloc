@@ -32,8 +32,10 @@ DEALINGS IN THE SOFTWARE.
 
 /* See malloc.c.h for what each function does.
 
-REPLACE_SYSTEM_ALLOCATOR causes nedalloc's functions to be called malloc,
-free etc. instead of nedmalloc, nedfree etc. You may or may not want this.
+REPLACE_SYSTEM_ALLOCATOR on POSIX causes nedalloc's functions to be called
+malloc, free etc. instead of nedmalloc, nedfree etc. You may or may not want
+this. On Windows it causes nedmalloc to patch all loaded DLLs and binaries
+to replace usage of the system allocator.
 
 NO_NED_NAMESPACE prevents the functions from being defined in the nedalloc
 namespace when in C++ (uses the global namespace instead).
@@ -50,6 +52,13 @@ USE_MAGIC_HEADERS causes nedalloc to allocate an extra three sizeof(size_t)
 to each block. nedpfree() and nedprealloc() can then automagically know when
 to free a system allocated block. Enabling this typically adds 20-50% to
 application memory usage.
+
+ENABLE_TOLERANT_NEDMALLOC is automatically turned on if REPLACE_SYSTEM_ALLOCATOR
+is set. This causes nedmalloc to detect when a system allocator block is
+passed to it and to handle it appropriately. Note that without USE_MAGIC_HEADERS
+there is a very tiny chance that nedmalloc will segfault on non-Windows
+builds (it uses Win32 SEH to trap segfaults on Windows and there is no
+comparable system on POSIX).
 
 USE_ALLOCATOR can be one of these settings (it defaults to 1):
   0: System allocator (nedmalloc now simply acts as a threadcache).
@@ -94,6 +103,7 @@ USE_ALLOCATOR can be one of these settings (it defaults to 1):
  #if USE_ALLOCATOR==0
   #error Cannot combine using the system allocator with replacing the system allocator
  #endif
+ #define ENABLE_TOLERANT_NEDMALLOC 1
  #ifndef WIN32	/* We have a dedidicated patcher for Windows */
   #define nedmalloc               malloc
   #define nedcalloc               calloc
@@ -142,11 +152,11 @@ extern "C" {
 /* These are the global functions */
 
 /* Gets the usable size of an allocated block. Note this will always be bigger than what was
-asked for due to rounding etc. Tries to return zero if this is not a nedmalloc block (though
-one could see a segfault up to 6.25% of the time). On Win32 SEH is used to guarantee that a
-segfault never happens.
+asked for due to rounding etc. Optionally returns 1 in isforeign if the block came from the
+system allocator - note that there is a small (>0.01%) but real chance of segfault on non-Windows
+systems when passing non-nedmalloc blocks if you don't use USE_MAGIC_HEADERS.
 */
-NEDMALLOCEXTSPEC size_t nedblksize(void *mem) THROWSPEC;
+NEDMALLOCEXTSPEC size_t nedblksize(int *isforeign, void *mem) THROWSPEC;
 
 NEDMALLOCEXTSPEC void nedsetvalue(void *v) THROWSPEC;
 
