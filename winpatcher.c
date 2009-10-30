@@ -415,7 +415,7 @@ Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC
 		/* This is not a fast call, but sadly there is no choice */
 		if(!EnumProcessModules(GetCurrentProcess(), modulelist, modulelistlen, &modulelistlenneeded))
 			return MKSTATUSWIN(ret);
-		if(lastModuleListLen!=modulelistlenneeded || memcmp(lastModuleList, modulelist, modulelistlenneeded))
+		if(!patchin || lastModuleListLen!=modulelistlenneeded || memcmp(lastModuleList, modulelist, modulelistlenneeded))
 		{
 			for(module=modulelist; module<modulelist+(modulelistlenneeded/sizeof(HMODULE)); module++)
 			{
@@ -455,6 +455,12 @@ Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC
 			}
 			memcpy(lastModuleList, modulelist, modulelistlenneeded);
 			lastModuleListLen=modulelistlenneeded;
+		}
+		else
+		{
+#if defined(_DEBUG)
+			DebugPrint("Winpatcher: Loaded module list hasn't changed, so exiting\n");
+#endif
 		}
 	}
 	__except(ExceptionToStatus(&ret, GetExceptionCode(), GetExceptionInformation()))
@@ -554,15 +560,15 @@ static ModuleListItem kernelmodule[]={
 static SymbolListItem nedmallocpatchtable[]={
 	{ { "malloc",       0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc",      (PROC) nedmalloc      } },
 	{ { "calloc",       0, "", 0/*(PROC) calloc */ }, modules, { "nedcalloc",      (PROC) nedcalloc      } },
-	{ { "realloc",      0, "", 0/*(PROC) realloc*/ }, modules, { "nedreallocW",    (PROC) nedrealloc     } },
-	{ { "free",         0, "", 0/*(PROC) free   */ }, modules, { "nedfreeW",       (PROC) nedfree        } },
-	{ { "_msize",       0, "", 0/*(PROC) _msize */ }, modules, { "nedblksizeW",    (PROC) nedblksize     } },
+	{ { "realloc",      0, "", 0/*(PROC) realloc*/ }, modules, { "nedrealloc",     (PROC) nedrealloc     } },
+	{ { "free",         0, "", 0/*(PROC) free   */ }, modules, { "nedfree",        (PROC) nedfree        } },
+	{ { "_msize",       0, "", 0/*(PROC) _msize */ }, modules, { "nedblksize",     (PROC) nedblksize     } },
 #if 0 /* Usually it's best to leave these off */
-	{ { "_malloc_dbg",  0, "", 0/*(PROC) malloc */ }, modules, { "nedmallocWdbg",  (PROC) nedmalloc_dbg  } },
-	{ { "_calloc_dbg",  0, "", 0/*(PROC) calloc */ }, modules, { "nedcallocWdbg",  (PROC) nedcalloc_dbg  } },
-	{ { "_realloc_dbg", 0, "", 0/*(PROC) realloc*/ }, modules, { "nedreallocWdbg", (PROC) nedrealloc_dbg } },
-	{ { "_free_dbg",    0, "", 0/*(PROC) free   */ }, modules, { "nedfreeWdbg",    (PROC) nedfree_dbg    } },
-	{ { "_msize_dbg",   0, "", 0/*(PROC) free   */ }, modules, { "nedblksizeWdbg", (PROC) nedblksize_dbg } },
+	{ { "_malloc_dbg",  0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc_dbg",  (PROC) nedmalloc_dbg  } },
+	{ { "_calloc_dbg",  0, "", 0/*(PROC) calloc */ }, modules, { "nedcalloc_dbg",  (PROC) nedcalloc_dbg  } },
+	{ { "_realloc_dbg", 0, "", 0/*(PROC) realloc*/ }, modules, { "nedrealloc_dbg", (PROC) nedrealloc_dbg } },
+	{ { "_free_dbg",    0, "", 0/*(PROC) free   */ }, modules, { "nedfree_dbg",    (PROC) nedfree_dbg    } },
+	{ { "_msize_dbg",   0, "", 0/*(PROC) free   */ }, modules, { "nedblksize_dbg", (PROC) nedblksize_dbg } },
 #endif
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 	{ { "LoadLibraryA", 0, "", 0 }, kernelmodule, { "LoadLibraryA_winpatcher", (PROC) LoadLibraryA_winpatcher } },
