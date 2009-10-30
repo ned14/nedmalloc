@@ -80,14 +80,32 @@ USE_ALLOCATOR can be one of these settings (it defaults to 1):
  #endif
 #endif
 
+#if __STDC_VERSION__ >= 199901L		/* C99 or better */
+ #define RESTRICT restrict
+#else
+ #if defined(_MSC_VER) && _MSC_VER>=1400
+  #define RESTRICT __restrict
+ #endif
+ #ifdef __GNUC__
+  #define RESTRICT __restrict
+ #endif
+#endif
+#ifndef RESTRICT
+ #define RESTRICT
+#endif
+
 #if defined(_MSC_VER) && _MSC_VER>=1400
  #define NEDMALLOCPTRATTR __declspec(restrict)
+ #define NEDMALLOCNOALIASATTR __declspec(noalias)
 #endif
 #ifdef __GNUC__
  #define NEDMALLOCPTRATTR __attribute__ ((malloc))
 #endif
 #ifndef NEDMALLOCPTRATTR
  #define NEDMALLOCPTRATTR
+#endif
+#ifndef NEDMALLOCNOALIASATTR
+ #define NEDMALLOCNOALIASATTR
 #endif
 
 #ifndef USE_MAGIC_HEADERS
@@ -161,7 +179,7 @@ asked for due to rounding etc. Optionally returns 1 in isforeign if the block ca
 system allocator - note that there is a small (>0.01%) but real chance of segfault on non-Windows
 systems when passing non-nedmalloc blocks if you don't use USE_MAGIC_HEADERS.
 */
-NEDMALLOCEXTSPEC size_t nedblksize(int *isforeign, void *mem) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT mem) THROWSPEC;
 
 NEDMALLOCEXTSPEC void nedsetvalue(void *v) THROWSPEC;
 

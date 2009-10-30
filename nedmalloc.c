@@ -153,7 +153,7 @@ static size_t mspacecounter=(size_t) 0xdeadbeef;
 static void *leastusedaddress;
 static size_t largestusedblock;
 
-static FORCEINLINE void *CallMalloc(void *mspace, size_t size, size_t alignment) THROWSPEC
+static FORCEINLINE void *CallMalloc(void *RESTRICT mspace, size_t size, size_t alignment) THROWSPEC
 {
 	void *ret=0;
 #if USE_MAGIC_HEADERS
@@ -183,7 +183,7 @@ static FORCEINLINE void *CallMalloc(void *mspace, size_t size, size_t alignment)
 	return ret;
 }
 
-static FORCEINLINE void *CallCalloc(void *mspace, size_t size, size_t alignment) THROWSPEC
+static FORCEINLINE void *CallCalloc(void *RESTRICT mspace, size_t size, size_t alignment) THROWSPEC
 {
 	void *ret=0;
 #if USE_MAGIC_HEADERS
@@ -213,7 +213,7 @@ static FORCEINLINE void *CallCalloc(void *mspace, size_t size, size_t alignment)
 	return ret;
 }
 
-static FORCEINLINE void *CallRealloc(void *mspace, void *mem, int isforeign, size_t oldsize, size_t newsize) THROWSPEC
+static FORCEINLINE void *CallRealloc(void *RESTRICT mspace, void *RESTRICT mem, int isforeign, size_t oldsize, size_t newsize) THROWSPEC
 {
 	void *ret=0;
 #if USE_MAGIC_HEADERS
@@ -270,7 +270,7 @@ static FORCEINLINE void *CallRealloc(void *mspace, void *mem, int isforeign, siz
 	return ret;
 }
 
-static FORCEINLINE void CallFree(void *mspace, void *mem, int isforeign) THROWSPEC
+static FORCEINLINE void CallFree(void *RESTRICT mspace, void *RESTRICT mem, int isforeign) THROWSPEC
 {
 #if USE_MAGIC_HEADERS
 	mstate oldmspace=0;
@@ -301,7 +301,7 @@ static FORCEINLINE void CallFree(void *mspace, void *mem, int isforeign) THROWSP
 #endif
 }
 
-static mstate nedblkmstate(void *mem) THROWSPEC
+static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 {
 	if(mem)
 	{
@@ -365,7 +365,7 @@ static mstate nedblkmstate(void *mem) THROWSPEC
 	}
 	return 0;
 }
-size_t nedblksize(int *isforeign, void *mem) THROWSPEC
+NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT mem) THROWSPEC
 {
 	if(mem)
 	{
@@ -464,7 +464,7 @@ struct nedpool_t
 };
 static nedpool syspool;
 
-static FORCEINLINE unsigned int size2binidx(size_t _size) THROWSPEC
+static FORCEINLINE NEDMALLOCNOALIASATTR unsigned int size2binidx(size_t _size) THROWSPEC
 {	/* 8=1000	16=10000	20=10100	24=11000	32=100000	48=110000	4096=1000000000000 */
 	unsigned int topbit, size=(unsigned int)(_size>>4);
 	/* 16=1		20=1	24=1	32=10	48=11	64=100	96=110	128=1000	4096=100000000 */
@@ -548,7 +548,7 @@ static void tcfullsanitycheck(threadcache *tc) THROWSPEC
 }
 #endif
 
-static NOINLINE void RemoveCacheEntries(nedpool *p, threadcache *tc, unsigned int age) THROWSPEC
+static NOINLINE void RemoveCacheEntries(nedpool *RESTRICT p, threadcache *RESTRICT tc, unsigned int age) THROWSPEC
 {
 #ifdef FULLSANITYCHECKS
 	tcfullsanitycheck(tc);
@@ -586,7 +586,7 @@ static NOINLINE void RemoveCacheEntries(nedpool *p, threadcache *tc, unsigned in
 	tcfullsanitycheck(tc);
 #endif
 }
-static void DestroyCaches(nedpool *p) THROWSPEC
+static void DestroyCaches(nedpool *RESTRICT p) THROWSPEC
 {
 	if(p->caches)
 	{
@@ -608,7 +608,7 @@ static void DestroyCaches(nedpool *p) THROWSPEC
 	}
 }
 
-static NOINLINE threadcache *AllocCache(nedpool *p) THROWSPEC
+static NOINLINE threadcache *AllocCache(nedpool *RESTRICT p) THROWSPEC
 {
 	threadcache *tc=0;
 	int n, end;
@@ -637,9 +637,9 @@ static NOINLINE threadcache *AllocCache(nedpool *p) THROWSPEC
 	return tc;
 }
 
-static void *threadcache_malloc(nedpool *p, threadcache *tc, size_t *size) THROWSPEC
+static void *threadcache_malloc(nedpool *RESTRICT p, threadcache *RESTRICT tc, size_t *RESTRICT size) THROWSPEC
 {
-	void *ret=0;
+	void *RESTRICT ret=0;
 	unsigned int bestsize;
 	unsigned int idx=size2binidx(*size);
 	size_t blksize=0;
@@ -723,7 +723,7 @@ static void *threadcache_malloc(nedpool *p, threadcache *tc, size_t *size) THROW
 #endif
 	return ret;
 }
-static NOINLINE void ReleaseFreeInCache(nedpool *p, threadcache *tc, int mymspace) THROWSPEC
+static NOINLINE void ReleaseFreeInCache(nedpool *RESTRICT p, threadcache *RESTRICT tc, int mymspace) THROWSPEC
 {
 	unsigned int age=THREADCACHEMAXFREESPACE/8192;
 	/*ACQUIRE_LOCK(&p->m[mymspace]->mutex);*/
@@ -735,7 +735,7 @@ static NOINLINE void ReleaseFreeInCache(nedpool *p, threadcache *tc, int mymspac
 	}
 	/*RELEASE_LOCK(&p->m[mymspace]->mutex);*/
 }
-static void threadcache_free(nedpool *p, threadcache *tc, int mymspace, void *mem, size_t size) THROWSPEC
+static void threadcache_free(nedpool *RESTRICT p, threadcache *RESTRICT tc, int mymspace, void *RESTRICT mem, size_t size) THROWSPEC
 {
 	unsigned int bestsize;
 	unsigned int idx=size2binidx(size);
@@ -801,7 +801,7 @@ static void threadcache_free(nedpool *p, threadcache *tc, int mymspace, void *me
 
 
 
-static NOINLINE int InitPool(nedpool *p, size_t capacity, int threads) THROWSPEC
+static NOINLINE int InitPool(nedpool *RESTRICT p, size_t capacity, int threads) THROWSPEC
 {	/* threads is -1 for system pool */
 	ensure_initialization();
 	ACQUIRE_MALLOC_GLOBAL_LOCK();
@@ -837,7 +837,7 @@ err:
 	RELEASE_MALLOC_GLOBAL_LOCK();
 	return 0;
 }
-static NOINLINE mstate FindMSpace(nedpool *p, threadcache *tc, int *lastUsed, size_t size) THROWSPEC
+static NOINLINE mstate FindMSpace(nedpool *RESTRICT p, threadcache *RESTRICT tc, int *RESTRICT lastUsed, size_t size) THROWSPEC
 {	/* Gets called when thread's last used mspace is in use. The strategy
 	is to run through the list of all available mspaces looking for an
 	unlocked one and if we fail, we create a new one so long as we don't
@@ -1068,7 +1068,7 @@ void neddisablethreadcache(nedpool *p) THROWSPEC
 	if(USE_ALLOCATOR==1) { RELEASE_LOCK(&m->mutex); } \
   } while (0)
 
-static FORCEINLINE mstate GetMSpace(nedpool *p, threadcache *tc, int mymspace, size_t size) THROWSPEC
+static FORCEINLINE mstate GetMSpace(nedpool *RESTRICT p, threadcache *RESTRICT tc, int mymspace, size_t size) THROWSPEC
 {	/* Returns a locked and ready for use mspace */
 	mstate m=p->m[mymspace];
 	assert(m);
@@ -1078,7 +1078,7 @@ static FORCEINLINE mstate GetMSpace(nedpool *p, threadcache *tc, int mymspace, s
 #endif
 	return m;
 }
-static FORCEINLINE void GetThreadCache(nedpool **p, threadcache **tc, int *mymspace, size_t *size) THROWSPEC
+static FORCEINLINE void GetThreadCache(nedpool *RESTRICT *RESTRICT p, threadcache *RESTRICT *RESTRICT tc, int *RESTRICT mymspace, size_t *RESTRICT size) THROWSPEC
 {
 	int mycache;
 	if(size && *size<sizeof(threadcacheblk)) *size=sizeof(threadcacheblk);
