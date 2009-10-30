@@ -39,15 +39,27 @@ DEALINGS IN THE SOFTWARE.
 #define _WIN32_WINNT 0x0501		/* Minimum of Windows XP required */
 #include <windows.h>
 #include <psapi.h>
+#include "uthash/src/uthash.h"
 #include "winpatcher_errorh.h"
 
 #pragma warning(disable: 4100)	/* Unreferenced formal parameter */
+#pragma warning(disable: 4127)	/* conditional expression is constant */
 #pragma warning(disable: 4706)	/* Assignment within conditional expression */
 
 /* TODO list:
 
 * Patch GetProcAddress to return the patched address
 */
+
+/* Set uthash to use nedmalloc */
+#undef uthash_malloc
+#undef uthash_free
+#define uthash_malloc(sz) nedpmalloc(0, sz)
+#define uthash_free(ptr) nedpfree(0, ptr)
+#define HASH_FIND_PTR(head,findptr,out)                                         \
+    HASH_FIND(hh,head,findptr,sizeof(void *),out)
+#define HASH_ADD_PTR(head,ptrfield,add)                                         \
+    HASH_ADD(hh,head,ptrfield,sizeof(void *),add)
 
 #if defined(__cplusplus)
 #if !defined(NO_WINPATCHER_NAMESPACE)
@@ -107,6 +119,7 @@ The INT, which is a duplicate copy of the information, is just the ticket.
 typedef struct ModuleListItem_t
 {
 	const char *into;
+	HMODULE intoAddr;
 	const char *from;	/* zero means this module */
 } ModuleListItem;
 
@@ -114,12 +127,12 @@ typedef struct SymbolListItem_t
 {
 	struct Replace_t
 	{
-		const char *name;
-		HMODULE moduleBase;
-		char moduleName[_MAX_PATH+2];
-		PROC addr;
+		const char *name;				/* Replace this symbol */
+		HMODULE moduleBase;				/* In this DLL */
+		char moduleName[_MAX_PATH+2];	/* Where the DLL is named this */
+		PROC addr;						/* Where the symbol has this address in the DLL (=0 for use GetProcAddress()) */
 	} replace;
-	const ModuleListItem *modules;	/* zero means wherever the replace symbol lives */
+	ModuleListItem *modules;			/* zero means wherever the replace symbol lives */
 	struct With_t
 	{
 		const char *name;
@@ -302,6 +315,8 @@ static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *import
 			}
 			*fn=withaddr;
 			FlushInstructionCache(GetCurrentProcess(), mbi.BaseAddress, mbi.RegionSize);
+			if(!VirtualProtect(mbi.BaseAddress, mbi.RegionSize, PAGE_EXECUTE_READ, &mbi.Protect))
+				return MKSTATUSWIN(ret);
 			return MKSTATUS(ret, SUCCESS+1);
 		}
 	}
@@ -320,15 +335,20 @@ static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli
 	{
 		if(sli->modules)
 		{
-			const ModuleListItem *module;
+			ModuleListItem *module;
 			for(module=sli->modules; module->into; module++)
 			{
-				sli->replace.moduleBase=0;
-				if(!GetModuleHandleExA(0, module->into, &sli->replace.moduleBase))
+				if(!module->intoAddr && (HMODULE)(size_t)-1!=module->intoAddr)
+				{
+					if(!GetModuleHandleExA(0, module->into, &module->intoAddr))
+						module->intoAddr=(HMODULE)(size_t)-1;
+				}
+				if((HMODULE)(size_t)-1==module->intoAddr)
 				{	/* Not loaded so move to next one */
 					ret=MKSTATUSWIN(ret);
 					continue;
 				}
+				sli->replace.moduleBase=module->intoAddr;
 				if(!(sli->replace.addr=GetProcAddress(sli->replace.moduleBase, sli->replace.name)))
 					return MKSTATUS(ret, SUCCESS); /* Some symbols may not always be found */
 				if(!module->from)
@@ -366,6 +386,18 @@ static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli
 	return MKSTATUS(ret, count);
 }
 
+
+/* ARA are suffering from slow process init times due to the patcher. Let's see what we can
+do through the magic of caching! */
+static HMODULE myModuleBase, lastModuleList[4096];
+static DWORD lastModuleListLen;
+typedef struct PatchedModule_t
+{
+	HMODULE moduleBaseAddr;
+	char moduleBaseName[_MAX_PATH+2];
+	UT_hash_handle hh;
+} PatchedModule;
+static PatchedModule *patchedmodules;
 /* Modifies all symbols in all loaded modules
      Returns: The number of entries modified
 */
@@ -376,23 +408,53 @@ Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC
 	Status ret={SUCCESS};
 	__try
 	{
-		HMODULE myModuleBase=ModuleFromAddress((void *)(size_t) WinPatcher), *module=0, modulelist[4096];
+		HMODULE *module=0, modulelist[4096];
 		DWORD modulelistlen=sizeof(modulelist), modulelistlenneeded=0;
 
+		if(!myModuleBase) myModuleBase=ModuleFromAddress((void *)(size_t) WinPatcher);
+		/* This is not a fast call, but sadly there is no choice */
 		if(!EnumProcessModules(GetCurrentProcess(), modulelist, modulelistlen, &modulelistlenneeded))
 			return MKSTATUSWIN(ret);
-		for(module=modulelist; module<modulelist+(modulelistlenneeded/sizeof(HMODULE)); module++)
+		if(lastModuleListLen!=modulelistlenneeded || memcmp(lastModuleList, modulelist, modulelistlenneeded))
 		{
-			char moduleBaseName[_MAX_PATH+2];
-			GetModuleBaseNameA(GetCurrentProcess(), *module, moduleBaseName, sizeof(moduleBaseName)-1);
-			if(*module==myModuleBase)
-				continue;	/* Not us or we'd break our patch table */
-#if defined(_DEBUG) && 0
-			DebugPrint("Winpatcher: Scanning module %p (%s) for things to %s ...\n", *module, moduleBaseName, patchin ? "patch" : "depatch");
+			for(module=modulelist; module<modulelist+(modulelistlenneeded/sizeof(HMODULE)); module++)
+			{
+				PatchedModule *pm=0;
+				HASH_FIND_PTR(patchedmodules, module, pm);
+				if(pm)
+				{	/* Already patched */
+					assert(pm->moduleBaseAddr==*module);
+#if defined(_DEBUG)
+					DebugPrint("Winpatcher: Module %p (%s) already patched\n", pm->moduleBaseAddr, pm->moduleBaseName, patchin ? "patch" : "depatch");
 #endif
-			if((ret=ModifyModuleImportTableFor(*module, symbollist, patchin), ret.code)<0)
-				return ret;
-			count+=ret.code;
+					if(patchin)
+					{
+						count+=SUCCESS;
+						continue;
+					}
+				}
+				else
+				{
+					if(!(pm=nedpcalloc(0, 1, sizeof(PatchedModule))))
+						return MKSTATUS(ret, ERROR);
+					pm->moduleBaseAddr=*module;
+#if defined(_DEBUG)
+					/* This is an extremely slow call, so absolutely avoid if possible */
+					GetModuleBaseNameA(GetCurrentProcess(), pm->moduleBaseAddr, pm->moduleBaseName, sizeof(pm->moduleBaseName)-1);
+#endif
+					HASH_ADD_PTR(patchedmodules, moduleBaseAddr, pm);
+				}
+				if(*module==myModuleBase)
+					continue;	/* Not us or we'd break our patch table */
+#if defined(_DEBUG)
+				DebugPrint("Winpatcher: Scanning module %p (%s) for things to %s ...\n", pm->moduleBaseAddr, pm->moduleBaseName, patchin ? "patch" : "depatch");
+#endif
+				if((ret=ModifyModuleImportTableFor(*module, symbollist, patchin), ret.code)<0)
+					return ret;
+				count+=ret.code;
+			}
+			memcpy(lastModuleList, modulelist, modulelistlenneeded);
+			lastModuleListLen=modulelistlenneeded;
 		}
 	}
 	__except(ExceptionToStatus(&ret, GetExceptionCode(), GetExceptionInformation()))
@@ -421,7 +483,7 @@ static HMODULE WINAPI LoadLibraryA_winpatcher(LPCSTR lpLibFileName)
 {
 	HMODULE ret=0;
 #ifdef REPLACE_SYSTEM_ALLOCATOR
-	if(!PatchInNedmallocDLL()) abort();
+	/*if(!PatchInNedmallocDLL()) abort();*/
 #endif
 #if defined(_DEBUG)
 	DebugPrint("Winpatcher: LoadLibraryA intercepted\n");
@@ -436,7 +498,7 @@ static HMODULE WINAPI LoadLibraryW_winpatcher(LPCWSTR lpLibFileName)
 {
 	HMODULE ret=0;
 #ifdef REPLACE_SYSTEM_ALLOCATOR
-	if(!PatchInNedmallocDLL()) abort();
+	/*if(!PatchInNedmallocDLL()) abort();*/
 #endif
 #if defined(_DEBUG)
 	DebugPrint("Winpatcher: LoadLibraryW intercepted\n");
@@ -472,22 +534,22 @@ static size_t nedblksize_dbg(void *ptr, int type)                               
    method is to specify modules, plus specifying modules covers executables not built
    using the same version of MSVCRT.
 */
-static const ModuleListItem modules[]={
+static ModuleListItem modules[]={
 	/* Release and Debug MSVC6 CRTs */
-	/*{ "MSVCRT.DLL", 0 }, { "MSVCRTD.DLL", 0 },*/
+	/*{ "MSVCRT.DLL", 0, 0 }, { "MSVCRTD.DLL", 0, 0 },*/
 	/* Release and Debug MSVC7.0 CRTs */
-	{ "MSVCR70.DLL", 0 }, { "MSVCR70D.DLL", 0 },
+	{ "MSVCR70.DLL", 0, 0 }, { "MSVCR70D.DLL", 0, 0 },
 	/* Release and Debug MSVC7.1 CRTs */
-	{ "MSVCR71.DLL", 0 }, { "MSVCR71D.DLL", 0 },
+	{ "MSVCR71.DLL", 0, 0 }, { "MSVCR71D.DLL", 0, 0 },
 	/* Release and Debug MSVC8 CRTs */
-	{ "MSVCR80.DLL", 0 }, { "MSVCR80D.DLL", 0 },
+	{ "MSVCR80.DLL", 0, 0 }, { "MSVCR80D.DLL", 0, 0 },
 	/* Release and Debug MSVC9 CRTs */
-	{ "MSVCR90.DLL", 0 }, { "MSVCR90D.DLL", 0 },
-	{ 0, 0 }
+	{ "MSVCR90.DLL", 0, 0 }, { "MSVCR90D.DLL", 0, 0 },
+	{ 0, 0, 0 }
 };
-static const ModuleListItem kernelmodule[]={
-	{ "KERNEL32.DLL", 0 },
-	{ 0, 0 }
+static ModuleListItem kernelmodule[]={
+	{ "KERNEL32.DLL", 0, 0 },
+	{ 0, 0, 0 }
 };
 static SymbolListItem nedmallocpatchtable[]={
 	{ { "malloc",       0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc",      (PROC) nedmalloc      } },
