@@ -71,7 +71,11 @@ USE_ALLOCATOR can be one of these settings (it defaults to 1):
 
 #ifndef NEDMALLOCEXTSPEC
  #ifdef NEDMALLOC_DLL_EXPORTS
-  #define NEDMALLOCEXTSPEC extern __declspec(dllexport)
+  #ifdef WIN32
+   #define NEDMALLOCEXTSPEC extern __declspec(dllexport)
+  #elif defined(__GNUC__)
+   #define NEDMALLOCEXTSPEC extern __attribute__ ((visibility("default")))
+  #endif
   #ifndef ENABLE_TOLERANT_NEDMALLOC
    #define ENABLE_TOLERANT_NEDMALLOC 1
   #endif

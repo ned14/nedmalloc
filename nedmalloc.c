@@ -36,6 +36,11 @@ DEALINGS IN THE SOFTWARE.
 #endif
 
 /*#define FULLSANITYCHECKS*/
+/* If link time code generation is on, don't force or prevent inlining */
+#if defined(_MSC_VER) && defined(NEDMALLOC_DLL_EXPORTS)
+#define FORCEINLINE
+#define NOINLINE
+#endif
 
 #include "nedmalloc.h"
 #ifdef WIN32
@@ -75,7 +80,6 @@ DEALINGS IN THE SOFTWARE.
 /*#define USE_SPIN_LOCKS 0*/
 
 
-/*#define FORCEINLINE*/
 #include "malloc.c.h"
 #ifdef NDEBUG               /* Disable assert checking on release builds */
  #undef DEBUG
@@ -150,12 +154,12 @@ static void *unsupported_operation(const char *opname) THROWSPEC
 }
 static size_t mspacecounter=(size_t) 0xdeadbeef;
 #endif
-static void *leastusedaddress;
+static void *RESTRICT leastusedaddress;
 static size_t largestusedblock;
 
 static FORCEINLINE void *CallMalloc(void *RESTRICT mspace, size_t size, size_t alignment) THROWSPEC
 {
-	void *ret=0;
+	void *RESTRICT ret=0;
 #if USE_MAGIC_HEADERS
 	size_t *_ret=0;
 	size+=alignment+3*sizeof(size_t);
@@ -185,7 +189,7 @@ static FORCEINLINE void *CallMalloc(void *RESTRICT mspace, size_t size, size_t a
 
 static FORCEINLINE void *CallCalloc(void *RESTRICT mspace, size_t size, size_t alignment) THROWSPEC
 {
-	void *ret=0;
+	void *RESTRICT ret=0;
 #if USE_MAGIC_HEADERS
 	size_t *_ret=0;
 	size+=alignment+3*sizeof(size_t);
@@ -215,7 +219,7 @@ static FORCEINLINE void *CallCalloc(void *RESTRICT mspace, size_t size, size_t a
 
 static FORCEINLINE void *CallRealloc(void *RESTRICT mspace, void *RESTRICT mem, int isforeign, size_t oldsize, size_t newsize) THROWSPEC
 {
-	void *ret=0;
+	void *RESTRICT ret=0;
 #if USE_MAGIC_HEADERS
 	mstate oldmspace=0;
 	size_t *_ret=0, *_mem=(size_t *) mem-3;
@@ -330,8 +334,10 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 			    FLAG_BITS = bit 0 is CINUSE (currently in use unless is mmap), bit 1 is PINUSE (previous block currently
 				            in use unless mmap), bit 2 is UNUSED and currently is always zero.
 			*/
+			register void *RESTRICT leastusedaddress_=leastusedaddress;		/* Cache these to avoid register reloading */
+			register size_t largestusedblock_=largestusedblock;
 			if(!is_aligned(mem)) return 0;		/* Would fail very rarely as all allocators return aligned blocks */
-			if(mem<leastusedaddress) return 0;	/* Simple but effective */
+			if(mem<leastusedaddress_) return 0;	/* Simple but effective */
 			{
 				mchunkptr p=mem2chunk(mem);
 				mstate fm=0;
@@ -339,7 +345,7 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 				if((!ismmapped && !is_inuse(p)) || (p->head & FLAG4_BIT)) return 0;
 				/* Reduced uncertainty by 0.5^2 = 25.0% */
 				/* size should never exceed largestusedblock */
-				if(chunksize(p)>largestusedblock) return 0;
+				if(chunksize(p)>largestusedblock_) return 0;
 				/* Reduced uncertainty by a minimum of 0.5^3 = 12.5%, maximum 0.5^16 = 0.0015% */
 				/* Having sanity checked prev_foot and head, check next block */
 				if(!ismmapped && (!next_pinuse(p) || (next_chunk(p)->head & FLAG4_BIT))) return 0;
@@ -351,7 +357,7 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 				/* We could start comparing prev_foot's for similarity but it starts getting slow. */
 	#endif
 				fm = get_mstate_for(p);
-				if(!is_aligned(fm) || (void *)fm<leastusedaddress) return 0;
+				if(!is_aligned(fm) || (void *)fm<leastusedaddress_) return 0;
 				assert(ok_magic(fm));	/* If this fails, someone tried to free a block twice */
 				if(ok_magic(fm))
 					return fm;
@@ -1078,22 +1084,14 @@ static FORCEINLINE mstate GetMSpace(nedpool *RESTRICT p, threadcache *RESTRICT t
 #endif
 	return m;
 }
-static FORCEINLINE void GetThreadCache(nedpool *RESTRICT *RESTRICT p, threadcache *RESTRICT *RESTRICT tc, int *RESTRICT mymspace, size_t *RESTRICT size) THROWSPEC
+static NOINLINE void GetThreadCache_cold1(nedpool *RESTRICT *RESTRICT p) THROWSPEC
 {
-	int mycache;
-	if(size && *size<sizeof(threadcacheblk)) *size=sizeof(threadcacheblk);
-	if(!*p)
-	{
-		*p=&syspool;
-		if(!syspool.threads) InitPool(&syspool, 0, -1);
-	}
-	mycache=(int)(size_t) TLSGET((*p)->mycache);
-	if(mycache>0)
-	{	/* Already have a cache */
-		*tc=(*p)->caches[mycache-1];
-		*mymspace=(*tc)->mymspace;
-	}
-	else if(!mycache)
+	*p=&syspool;
+	if(!syspool.threads) InitPool(&syspool, 0, -1);
+}
+static NOINLINE void GetThreadCache_cold2(nedpool *RESTRICT *RESTRICT p, threadcache *RESTRICT *RESTRICT tc, int *RESTRICT mymspace, int mycache) THROWSPEC
+{
+	if(!mycache)
 	{	/* Need to allocate a new cache */
 		*tc=AllocCache(*p);
 		if(!*tc)
@@ -1109,6 +1107,20 @@ static FORCEINLINE void GetThreadCache(nedpool *RESTRICT *RESTRICT p, threadcach
 		*tc=0;
 		*mymspace=-mycache-1;
 	}
+}
+static FORCEINLINE void GetThreadCache(nedpool *RESTRICT *RESTRICT p, threadcache *RESTRICT *RESTRICT tc, int *RESTRICT mymspace, size_t *RESTRICT size) THROWSPEC
+{
+	int mycache;
+	if(size && *size<sizeof(threadcacheblk)) *size=sizeof(threadcacheblk);
+	if(!*p)
+		GetThreadCache_cold1(p);
+	mycache=(int)(size_t) TLSGET((*p)->mycache);
+	if(mycache>0)
+	{	/* Already have a cache */
+		*tc=(*p)->caches[mycache-1];
+		*mymspace=(*tc)->mymspace;
+	}
+	else GetThreadCache_cold2(p, tc, mymspace, mycache);
 	assert(*mymspace>=0);
 	assert(!(*tc) || (long)(size_t)CURRENT_THREAD==(*tc)->threadid);
 #ifdef FULLSANITYCHECKS
