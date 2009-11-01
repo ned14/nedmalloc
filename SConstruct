@@ -49,6 +49,8 @@ if sys.platform=='win32':
     else:
         env['CCFLAGS']+=["/O2", "/MD", "/GL"]
     env['LIBS']+=["psapi", "user32"]
+    env['LINKFLAGS']+=["/PGD:${VARIANT}/nedmalloc.pgd"]
+    #env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
     env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
 else:
     env['CPPDEFINES']+=[]

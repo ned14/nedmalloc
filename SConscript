@@ -8,7 +8,7 @@ if sys.platform=='win32': libsources+=["winpatcher.c"]
 libobjects = env.SharedObject(source = libsources, CPPDEFINES=env['CPPDEFINES']+["NEDMALLOC_DLL_EXPORTS"])
 nedmalloclib = env.SharedLibrary("nedmalloc", source = libobjects)
 if sys.platform=='win32':
-    env.AddPreAction(env.AddPreAction(env.AddPreAction(nedmalloclib, "copy /y ${VARIANT}/nedmalloc!1.pgc ${VARIANT}/nedmalloc.pgd")), "pgomgr /clear ${VARIANT}/nedmalloc.pgd"), "pgomgr /merge ${VARIANT}/nedmalloc.pgd")
+    #env.AddPreAction(env.AddPreAction(nedmalloclib, "pgomgr /clear ${VARIANT}/nedmalloc.pgd"), "pgomgr /merge ${VARIANT}/nedmalloc.pgd")
     nedmalloclib=nedmalloclib[1]
 
 # Test program

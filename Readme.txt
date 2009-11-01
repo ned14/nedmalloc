@@ -42,6 +42,10 @@ To test, compile test.c. It will run a comparison between your system
 allocator and nedalloc and tell you how much faster nedalloc is. It also
 serves as an example of usage.
 
+If you'd like nedmalloc as a Windows DLL or ELF shared object, the easiest
+thing to do is to use scons (http://www.scons.org/) to build nedmalloc (or
+use the enclosed MSVC project files).
+
 Windows-only features:
 -=-=-=-=-=-=-=-=-=-=-=
 If you are running on Windows, there are quite a few extra options available
@@ -243,6 +247,11 @@ sponsoring this.
 currently existing. The Windows DLL thread exit code now disables the thread
 cache for all currently existing nedpool's. Thanks to Applied Research
 Associates for sponsoring this.
+ * { 1126 } Added ENABLE_TOLERANT_NEDMALLOC which allows nedmalloc to
+recognise system allocator blocks and to do the right thing with them.
+ * { 1139 } Added link time code generation support for Windows builds. This
+currently has zero performance improvement on x64 (on MSVC9) but can add 15%
+to x86 performance (on MSVC9). Also added scons SConstruct and SConscript files.
 
 v1.05 15th June 2008:
  * { 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to
