@@ -65,6 +65,9 @@ USE_ALLOCATOR can be one of these settings (it defaults to 1):
      WARNING: Intended for DEBUG USE ONLY - not all functions work correctly.
   1: dlmalloc
 
+ENABLE_LARGE_PAGES enables support for requesting memory from the system in large
+(typically >=2Mb) pages if the host OS supports this. These occupy just a single
+TLB entry and can significantly improve performance in large working set applications.
 */
 
 #include <stddef.h>   /* for size_t */
@@ -150,19 +153,23 @@ USE_ALLOCATOR can be one of these settings (it defaults to 1):
  #endif
 #endif
 
-
-#ifndef NO_MALLINFO
- #define NO_MALLINFO 0
-#endif
-
-#if !NO_MALLINFO
 #if defined(__cplusplus)
 extern "C" {
 #endif
-struct mallinfo;
+struct nedmallinfo {
+  size_t arena;    /* non-mmapped space allocated from system */
+  size_t ordblks;  /* number of free chunks */
+  size_t smblks;   /* always 0 */
+  size_t hblks;    /* always 0 */
+  size_t hblkhd;   /* space in mmapped regions */
+  size_t usmblks;  /* maximum total allocated space */
+  size_t fsmblks;  /* always 0 */
+  size_t uordblks; /* total allocated space */
+  size_t fordblks; /* total free space */
+  size_t keepcost; /* releasable (via malloc_trim) space */
+};
 #if defined(__cplusplus)
 }
-#endif
 #endif
 
 #if defined(__cplusplus)
@@ -192,9 +199,7 @@ NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedcalloc(size_t no, size_t size) THROW
 NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedrealloc(void *mem, size_t size) THROWSPEC;
 NEDMALLOCEXTSPEC void   nedfree(void *mem) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC;
-#if !NO_MALLINFO
-NEDMALLOCEXTSPEC struct mallinfo nedmallinfo(void) THROWSPEC;
-#endif
+NEDMALLOCEXTSPEC struct nedmallinfo nedmallinfo(void) THROWSPEC;
 NEDMALLOCEXTSPEC int    nedmallopt(int parno, int value) THROWSPEC;
 NEDMALLOCEXTSPEC void*  nedmalloc_internals(size_t *granularity, size_t *magic) THROWSPEC;
 NEDMALLOCEXTSPEC int    nedmalloc_trim(size_t pad) THROWSPEC;
@@ -262,9 +267,7 @@ NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_
 NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC;
 NEDMALLOCEXTSPEC void   nedpfree(nedpool *p, void *mem) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes) THROWSPEC;
-#if !NO_MALLINFO
-NEDMALLOCEXTSPEC struct mallinfo nedpmallinfo(nedpool *p) THROWSPEC;
-#endif
+NEDMALLOCEXTSPEC struct nedmallinfo nedpmallinfo(nedpool *p) THROWSPEC;
 NEDMALLOCEXTSPEC int    nedpmallopt(nedpool *p, int parno, int value) THROWSPEC;
 NEDMALLOCEXTSPEC int    nedpmalloc_trim(nedpool *p, size_t pad) THROWSPEC;
 NEDMALLOCEXTSPEC void   nedpmalloc_stats(nedpool *p) THROWSPEC;

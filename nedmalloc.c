@@ -425,9 +425,7 @@ NEDMALLOCPTRATTR void * nedcalloc(size_t no, size_t size) THROWSPEC				{ return 
 NEDMALLOCPTRATTR void * nedrealloc(void *mem, size_t size) THROWSPEC			{ return nedprealloc((nedpool *) 0, mem, size); }
 void   nedfree(void *mem) THROWSPEC												{ nedpfree((nedpool *) 0, mem); }
 NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC	{ return nedpmemalign((nedpool *) 0, alignment, bytes); }
-#if !NO_MALLINFO
-struct mallinfo nedmallinfo(void) THROWSPEC										{ return nedpmallinfo((nedpool *) 0); }
-#endif
+struct nedmallinfo nedmallinfo(void) THROWSPEC									{ return nedpmallinfo((nedpool *) 0); }
 int    nedmallopt(int parno, int value) THROWSPEC								{ return nedpmallopt((nedpool *) 0, parno, value); }
 int    nedmalloc_trim(size_t pad) THROWSPEC										{ return nedpmalloc_trim((nedpool *) 0, pad); }
 void   nedmalloc_stats() THROWSPEC												{ nedpmalloc_stats((nedpool *) 0); }
@@ -1257,15 +1255,14 @@ NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes)
 	}
 	return ret;
 }
-#if !NO_MALLINFO
-struct mallinfo nedpmallinfo(nedpool *p) THROWSPEC
+struct nedmallinfo nedpmallinfo(nedpool *p) THROWSPEC
 {
 	int n;
-	struct mallinfo ret={0};
+	struct nedmallinfo ret={0};
 	if(!p) { p=&syspool; if(!syspool.threads) InitPool(&syspool, 0, -1); }
 	for(n=0; p->m[n]; n++)
 	{
-#if USE_ALLOCATOR==1
+#if USE_ALLOCATOR==1 && !NO_MALLINFO
 		struct mallinfo t=mspace_mallinfo(p->m[n]);
 		ret.arena+=t.arena;
 		ret.ordblks+=t.ordblks;
@@ -1278,7 +1275,6 @@ struct mallinfo nedpmallinfo(nedpool *p) THROWSPEC
 	}
 	return ret;
 }
-#endif
 int    nedpmallopt(nedpool *p, int parno, int value) THROWSPEC
 {
 #if USE_ALLOCATOR==1

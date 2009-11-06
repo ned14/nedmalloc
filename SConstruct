@@ -1,18 +1,39 @@
 import os, sys, platform
 
-env = Environment(ENV=os.environ)
-AddOption('--debugbuild', dest='debug', help='enable debug build')
+env = Environment()
+#print env['TOOLS']
+AddOption('--debugbuild', dest='debug', nargs='?', const=True, help='enable debug build')
 AddOption('--force32', dest='force32', help='force 32 bit build on 64 bit machine')
 AddOption('--sse', dest='sse', nargs=1, type='int', help='set SSE used (0-4) on 32 bit x86')
+AddOption('--replacesystemallocator', dest='replacesystemallocator', nargs='?', const=True, help='replace all usage of the system allocator in the process when loaded')
+AddOption('--tolerant', dest='tolerant', nargs='?', const=True, help='enable tolerance of the system allocator (not guaranteed)')
+AddOption('--magicheaders', dest='magicheaders', nargs='?', const=True, help='enable magic headers (guaranteed tolerance of the system allocator)')
+AddOption('--useallocator', dest='useallocator', nargs=1, type='int', default=1, help='which allocator to use')
+AddOption('--largepages', dest='largepages', nargs='?', const=True, help='enable large page support')
+
+# Force scons to always use absolute paths in everything (helps debuggers to find source files)
+env['CCCOM']   =    env['CCCOM'].replace('$CHANGED_SOURCES','$SOURCES.abspath')
+env['SHCCCOM'] =  env['SHCCCOM'].replace('$CHANGED_SOURCES','$SOURCES.abspath')
+env['CXXCOM']  =   env['CXXCOM'].replace('$CHANGED_SOURCES','$SOURCES.abspath')
+env['SHCXXCOM']= env['SHCXXCOM'].replace('$CHANGED_SOURCES','$SOURCES.abspath')
 architecture="generic"
 env['CPPDEFINES']=[]
 env['CCFLAGS']=[]
 env['LIBS']=[]
 env['LINKFLAGS']=[]
+if env.GetOption('replacesystemallocator'): env['CPPDEFINES']+=["REPLACE_SYSTEM_ALLOCATOR"]
+if env.GetOption('tolerant'): env['CPPDEFINES']+=["ENABLE_TOLERANT_NEDMALLOC"]
+if env.GetOption('magicheaders'): env['CPPDEFINES']+=["USE_MAGIC_HEADERS"]
+env['CPPDEFINES']+=[("USE_ALLOCATOR",env.GetOption('useallocator'))]
+if env.GetOption('largepages'): env['CPPDEFINES']+=["ENABLE_LARGE_PAGES"]
 
 # Am I in a 32 or 64 bit environment? Note that not specifying --sse doesn't set any x86 or x64 specific options
 # so it's good to go for ANY platform
 if sys.platform=="win32":
+    # Even the very latest scons still screws this up :(
+    env['ENV']['INCLUDE']=os.environ['INCLUDE']
+    env['ENV']['LIB']=os.environ['LIB']
+    env['ENV']['PATH']=os.environ['PATH']
     if not env.GetOption('force32') and os.environ.has_key('LIBPATH') and -1!=os.environ['LIBPATH'].find("\\amd64"):
         architecture="x64"
     else:
@@ -42,16 +63,28 @@ else:
 # Am I building for Windows or POSIX?
 if sys.platform=='win32':
     env['CPPDEFINES']+=["WIN32", "_WINDOWS", "UNICODE", "_UNICODE"]
-    env['CCFLAGS']+=["/GF"]     # Eliminate duplicate strings
-    env['CCFLAGS']+=["/Gy"]     # Seperate COMDATs
+    env['CCFLAGS']+=["/GF"]             # Eliminate duplicate strings
+    env['CCFLAGS']+=["/Gy"]             # Seperate COMDATs
+    env['CCFLAGS']+=["/Zi"]             # Program database debug info
     if env.GetOption('debug'):
         env['CCFLAGS']+=["/Od", "/MDd"]
     else:
         env['CCFLAGS']+=["/O2", "/MD", "/GL"]
-    env['LIBS']+=["psapi", "user32"]
-    env['LINKFLAGS']+=["/PGD:${VARIANT}/nedmalloc.pgd"]
-    #env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
-    env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
+    env['LIBS']+=["psapi", "user32", "advapi32"]
+    env['LINKFLAGS']+=["/DEBUG"]                # Output debug symbols
+    env['LINKFLAGS']+=["/LARGEADDRESSAWARE"]    # Works past 2Gb
+    env['LINKFLAGS']+=["/DYNAMICBASE"]          # Doesn't mind being randomly placed
+    env['LINKFLAGS']+=["/NXCOMPAT"]             # Likes no execute
+
+    env['LINKFLAGS']+=["/ENTRY:DllPreMainCRTStartup"]
+    env['LINKFLAGS']+=["/VERSION:1.0.6"]        # Version
+    env['LINKFLAGS']+=["/MANIFEST"]             # Be UAC compatible
+    
+    if not env.GetOption('debug'):
+        env['LINKFLAGS']+=["/OPT:REF", "/OPT:ICF"]  # Eliminate redundants
+        env['LINKFLAGS']+=["/PGD:${VARIANT}/nedmalloc.pgd"]
+        #env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
+        env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
 else:
     env['CPPDEFINES']+=[]
     if env.GetOption('debug'):
@@ -63,4 +96,5 @@ else:
 
 # Build
 env['VARIANT']=variant
-SConscript("SConscript", variant_dir=variant, duplicate=False, exports="env")
+nedmalloclib=SConscript("SConscript", variant_dir=variant, duplicate=False, exports="env")
+Return("nedmalloclib")
