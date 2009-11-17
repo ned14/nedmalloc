@@ -68,6 +68,11 @@ USE_ALLOCATOR can be one of these settings (it defaults to 1):
 ENABLE_LARGE_PAGES enables support for requesting memory from the system in large
 (typically >=2Mb) pages if the host OS supports this. These occupy just a single
 TLB entry and can significantly improve performance in large working set applications.
+
+ENABLE_FAST_HEAP_DETECTION enables special logic to detect blocks allocated
+by the system heap. This avoids 1.5%-2% overhead when checking for non-nedmalloc
+blocks, but it assumes that the NT and glibc heaps function in a very specific
+fashion which may not hold true across OS upgrades.
 */
 
 #include <stddef.h>   /* for size_t */

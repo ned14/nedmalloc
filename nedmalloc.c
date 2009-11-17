@@ -35,6 +35,9 @@ DEALINGS IN THE SOFTWARE.
 #pragma warning(disable:4706)	/* assignment within conditional expression */
 #endif
 
+/*#define ENABLE_TOLERANT_NEDMALLOC 1*/
+/*#define ENABLE_FAST_HEAP_DETECTION 1*/
+
 /*#define FULLSANITYCHECKS*/
 /* If link time code generation is on, don't force or prevent inlining */
 #if defined(_MSC_VER) && defined(NEDMALLOC_DLL_EXPORTS)
@@ -154,8 +157,10 @@ static void *unsupported_operation(const char *opname) THROWSPEC
 }
 static size_t mspacecounter=(size_t) 0xdeadbeef;
 #endif
+#ifndef ENABLE_FAST_HEAP_DETECTION
 static void *RESTRICT leastusedaddress;
 static size_t largestusedblock;
+#endif
 
 static FORCEINLINE void *CallMalloc(void *RESTRICT mspace, size_t size, size_t alignment) THROWSPEC
 {
@@ -168,12 +173,14 @@ static FORCEINLINE void *CallMalloc(void *RESTRICT mspace, size_t size, size_t a
 	ret=malloc(size);
 #elif USE_ALLOCATOR==1
 	ret=mspace_malloc((mstate) mspace, size);
+#ifndef ENABLE_FAST_HEAP_DETECTION
 	if(ret)
 	{
 		size_t truesize=chunksize(mem2chunk(ret));
 		if(!leastusedaddress || (void *)((mstate) mspace)->least_addr<leastusedaddress) leastusedaddress=(void *)((mstate) mspace)->least_addr;
 		if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);
 	}
+#endif
 #endif
 	if(!ret) return 0;
 #if USE_MAGIC_HEADERS
@@ -198,12 +205,14 @@ static FORCEINLINE void *CallCalloc(void *RESTRICT mspace, size_t size, size_t a
 	ret=calloc(1, size);
 #elif USE_ALLOCATOR==1
 	ret=mspace_calloc((mstate) mspace, 1, size);
+#ifndef ENABLE_FAST_HEAP_DETECTION
 	if(ret)
 	{
 		size_t truesize=chunksize(mem2chunk(ret));
 		if(!leastusedaddress || (void *)((mstate) mspace)->least_addr<leastusedaddress) leastusedaddress=(void *)((mstate) mspace)->least_addr;
 		if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);
 	}
+#endif
 #endif
 	if(!ret) return 0;
 #if USE_MAGIC_HEADERS
@@ -251,11 +260,13 @@ static FORCEINLINE void *CallRealloc(void *RESTRICT mspace, void *RESTRICT mem, 
 	ret=realloc(mem, newsize);
 #elif USE_ALLOCATOR==1
 	ret=mspace_realloc((mstate) mspace, mem, newsize);
+#ifndef ENABLE_FAST_HEAP_DETECTION
 	if(ret)
 	{
 		size_t truesize=chunksize(mem2chunk(ret));
 		if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);
 	}
+#endif
 #endif
 	if(!ret)
 	{	/* Put it back the way it was */
@@ -321,6 +332,58 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 		/* Fail everything */
 		return 0;
 #elif USE_ALLOCATOR==1
+#ifdef ENABLE_FAST_HEAP_DETECTION
+#ifdef WIN32
+		/*  On Windows for RELEASE both x86 and x64 the NT heap precedes each block with an eight byte header
+			which looks like:
+				normal: 4 bytes of size, 4 bytes of [char < 64, char < 64, char < 64 bit 0 always set, char random ]
+				mmaped: 4 bytes of size  4 bytes of [zero,      zero,      0xb,                        zero        ]
+
+			On Windows for DEBUG both x86 and x64 the preceding four bytes is always 0xfdfdfdfd (no man's land).
+		*/
+#pragma pack(push, 1)
+		struct _HEAP_ENTRY
+		{
+			USHORT Size;
+			USHORT PreviousSize;
+			UCHAR Cookie;			/* SegmentIndex */
+			UCHAR Flags;			/* always bit 0 (HEAP_ENTRY_BUSY). bit 1=(HEAP_ENTRY_EXTRA_PRESENT), bit 2=normal block (HEAP_ENTRY_FILL_PATTERN), bit 3=mmap block (HEAP_ENTRY_VIRTUAL_ALLOC). Bit 4 (HEAP_ENTRY_LAST_ENTRY) could be set */
+			UCHAR UnusedBytes;
+			UCHAR SmallTagIndex;	/* fastbin index. Always one of 0x02, 0x03, 0x04 < 0x80 */
+		} *RESTRICT he=((struct _HEAP_ENTRY *) mem)-1;
+#pragma pack(pop)
+		unsigned int header=((unsigned int *)mem)[-1], mask1=0x8080E100, result1, mask2=0xFFFFFF06, result2;
+		result1=header & mask1;	/* Positive testing for NT heap */
+		result2=header & mask2;	/* Positive testing for dlmalloc */
+		if(result1==0x00000100 && result2!=0x00000102)
+		{	/* This is likely a NT heap block */
+			return 0;
+		}
+#endif
+#ifdef __linux__
+		/* On Linux glibc uses ptmalloc2 (really dlmalloc) just as we do, but prev_foot contains rubbish
+		when the preceding block is allocated because ptmalloc2 finds the local mstate by rounding the ptr
+		down to the nearest megabyte. It's like dlmalloc with FOOTERS disabled. */
+		mchunkptr p=mem2chunk(mem);
+		mstate fm=get_mstate_for(p);
+		/* If it's a ptmalloc2 block, fm is likely to be some crazy value */
+		if(!is_aligned(fm)) return 0;
+		if((size_t)mem-(size_t)fm>=(size_t)1<<(SIZE_T_BITSIZE-1)) return 0;
+		if(ok_magic(fm))
+			return fm;
+		else
+			return 0;
+		if(1) { }
+#endif
+		else
+		{
+			mchunkptr p=mem2chunk(mem);
+			mstate fm=get_mstate_for(p);
+			assert(ok_magic(fm));	/* If this fails, someone tried to free a block twice */
+			if(ok_magic(fm))
+				return fm;
+		}
+#else
 #ifdef WIN32
 		__try
 #endif
@@ -358,6 +421,7 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 	#endif
 				fm = get_mstate_for(p);
 				if(!is_aligned(fm) || (void *)fm<leastusedaddress_) return 0;
+				if((size_t)mem-(size_t)fm>=(size_t)1<<(SIZE_T_BITSIZE-1)) return 0;
 				assert(ok_magic(fm));	/* If this fails, someone tried to free a block twice */
 				if(ok_magic(fm))
 					return fm;
@@ -365,6 +429,7 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 		}
 #ifdef WIN32
 		__except(1) { }
+#endif
 #endif
 #endif
 #endif
@@ -641,13 +706,13 @@ static NOINLINE threadcache *AllocCache(nedpool *RESTRICT p) THROWSPEC
 	return tc;
 }
 
-static void *threadcache_malloc(nedpool *RESTRICT p, threadcache *RESTRICT tc, size_t *RESTRICT size) THROWSPEC
+static void *threadcache_malloc(nedpool *RESTRICT p, threadcache *RESTRICT tc, size_t *RESTRICT _size) THROWSPEC
 {
 	void *RESTRICT ret=0;
+	size_t size=*_size, blksize=0;
 	unsigned int bestsize;
-	unsigned int idx=size2binidx(*size);
-	size_t blksize=0;
-	threadcacheblk *blk, **binsptr;
+	unsigned int idx=size2binidx(size);
+	threadcacheblk *RESTRICT blk, **RESTRICT binsptr;
 #ifdef FULLSANITYCHECKS
 	tcfullsanitycheck(tc);
 #endif
@@ -656,31 +721,31 @@ static void *threadcache_malloc(nedpool *RESTRICT p, threadcache *RESTRICT tc, s
 #if 0
 	/* Finer grained bin fit */
 	idx<<=1;
-	if(*size>bestsize)
+	if(size>bestsize)
 	{
 		idx++;
 		bestsize+=bestsize>>1;
 	}
-	if(*size>bestsize)
+	if(size>bestsize)
 	{
 		idx++;
 		bestsize=1<<(4+(idx>>1));
 	}
 #else
-	if(*size>bestsize)
+	if(size>bestsize)
 	{
 		idx++;
 		bestsize<<=1;
 	}
 #endif
-	assert(bestsize>=*size);
-	if(*size<bestsize) *size=bestsize;
-	assert(*size<=THREADCACHEMAX);
+	assert(bestsize>=size);
+	if(size<bestsize) size=bestsize;
+	assert(size<=THREADCACHEMAX);
 	assert(idx<=THREADCACHEMAXBINS);
 	binsptr=&tc->bins[idx*2];
 	/* Try to match close, but move up a bin if necessary */
 	blk=*binsptr;
-	if(!blk || blk->size<*size)
+	if(!blk || blk->size<size)
 	{	/* Bump it up a bin */
 		if(idx<THREADCACHEMAXBINS)
 		{
@@ -693,7 +758,7 @@ static void *threadcache_malloc(nedpool *RESTRICT p, threadcache *RESTRICT tc, s
 	{
 		blksize=blk->size; /*nedblksize(blk);*/
 		assert(nedblksize(0, blk)>=blksize);
-		assert(blksize>=*size);
+		assert(blksize>=size);
 		if(blk->next)
 			blk->next->prev=0;
 		*binsptr=blk->next;
@@ -704,13 +769,13 @@ static void *threadcache_malloc(nedpool *RESTRICT p, threadcache *RESTRICT tc, s
 #endif
 		assert(binsptr[0]!=blk && binsptr[1]!=blk);
 		assert(nedblksize(0, blk)>=sizeof(threadcacheblk) && nedblksize(0, blk)<=THREADCACHEMAX+CHUNK_OVERHEAD);
-		/*printf("malloc: %p, %p, %p, %lu\n", p, tc, blk, (long) size);*/
+		/*printf("malloc: %p, %p, %p, %lu\n", p, tc, blk, (long) _size);*/
 		ret=(void *) blk;
 	}
 	++tc->mallocs;
 	if(ret)
 	{
-		assert(blksize>=*size);
+		assert(blksize>=size);
 		++tc->successes;
 		tc->freeInCache-=blksize;
 		assert((long) tc->freeInCache>=0);
@@ -725,6 +790,7 @@ static void *threadcache_malloc(nedpool *RESTRICT p, threadcache *RESTRICT tc, s
 #ifdef FULLSANITYCHECKS
 	tcfullsanitycheck(tc);
 #endif
+	*_size=size;
 	return ret;
 }
 static NOINLINE void ReleaseFreeInCache(nedpool *RESTRICT p, threadcache *RESTRICT tc, int mymspace) THROWSPEC
@@ -743,7 +809,7 @@ static void threadcache_free(nedpool *RESTRICT p, threadcache *RESTRICT tc, int 
 {
 	unsigned int bestsize;
 	unsigned int idx=size2binidx(size);
-	threadcacheblk **binsptr, *tck=(threadcacheblk *) mem;
+	threadcacheblk **RESTRICT binsptr, *RESTRICT tck=(threadcacheblk *) mem;
 	assert(size>=sizeof(threadcacheblk) && size<=THREADCACHEMAX+CHUNK_OVERHEAD);
 #ifdef DEBUG
 	/* Make sure this is a valid memory block */

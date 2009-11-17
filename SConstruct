@@ -10,6 +10,7 @@ AddOption('--tolerant', dest='tolerant', nargs='?', const=True, help='enable tol
 AddOption('--magicheaders', dest='magicheaders', nargs='?', const=True, help='enable magic headers (guaranteed tolerance of the system allocator)')
 AddOption('--useallocator', dest='useallocator', nargs=1, type='int', default=1, help='which allocator to use')
 AddOption('--largepages', dest='largepages', nargs='?', const=True, help='enable large page support')
+AddOption('--fastheapdetection', dest='fastheapdetection', nargs='?', const=True, help='enable fast system-specific heap detection')
 
 # Force scons to always use absolute paths in everything (helps debuggers to find source files)
 env['CCCOM']   =    env['CCCOM'].replace('$CHANGED_SOURCES','$SOURCES.abspath')
@@ -26,6 +27,7 @@ if env.GetOption('tolerant'): env['CPPDEFINES']+=["ENABLE_TOLERANT_NEDMALLOC"]
 if env.GetOption('magicheaders'): env['CPPDEFINES']+=["USE_MAGIC_HEADERS"]
 env['CPPDEFINES']+=[("USE_ALLOCATOR",env.GetOption('useallocator'))]
 if env.GetOption('largepages'): env['CPPDEFINES']+=["ENABLE_LARGE_PAGES"]
+if env.GetOption('fastheapdetection'): env['CPPDEFINES']+=["ENABLE_FAST_HEAP_DETECTION"]
 
 # Am I in a 32 or 64 bit environment? Note that not specifying --sse doesn't set any x86 or x64 specific options
 # so it's good to go for ANY platform
@@ -69,7 +71,8 @@ if sys.platform=='win32':
     if env.GetOption('debug'):
         env['CCFLAGS']+=["/Od", "/MDd"]
     else:
-        env['CCFLAGS']+=["/O2", "/MD", "/GL"]
+        env['CCFLAGS']+=["/O2", "/MD"]
+        #env['CCFLAGS']+=["/GL"]
     env['LIBS']+=["psapi", "user32", "advapi32"]
     env['LINKFLAGS']+=["/DEBUG"]                # Output debug symbols
     env['LINKFLAGS']+=["/LARGEADDRESSAWARE"]    # Works past 2Gb
@@ -82,9 +85,9 @@ if sys.platform=='win32':
     
     if not env.GetOption('debug'):
         env['LINKFLAGS']+=["/OPT:REF", "/OPT:ICF"]  # Eliminate redundants
-        env['LINKFLAGS']+=["/PGD:${VARIANT}/nedmalloc.pgd"]
+        #env['LINKFLAGS']+=["/PGD:${VARIANT}/nedmalloc.pgd"]
         #env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
-        env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
+        #env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
 else:
     env['CPPDEFINES']+=[]
     if env.GetOption('debug'):

@@ -1613,7 +1613,11 @@ static FORCEINLINE void* win32mmap(size_t size) {
 #endif
   }
 #if DEBUG
+#ifdef ENABLE_LARGE_PAGES
+  printf("VirtualAlloc returns %p size %u. LargePagesAvailable=%d\n", ptr, size, largepagesavailable);
+#else
   printf("VirtualAlloc returns %p size %u\n", ptr, size);
+#endif
 #endif
   return (ptr != 0)? ptr: MFAIL;
 }
