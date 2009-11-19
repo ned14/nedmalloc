@@ -477,7 +477,7 @@ NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT m
 	/* This is the BSD libc equivalent.  */
 	return malloc_size(mem);
 #else
-#error Can't tolerate the memory allocator of an unknown system!
+#error Cannot tolerate the memory allocator of an unknown system!
 #endif
 #endif
 	}
@@ -1057,9 +1057,9 @@ void neddestroysyspool() THROWSPEC
 	}
 	/* Render syspool unusable */
 	for(n=0; n<THREADCACHEMAXCACHES; n++)
-		p->caches[n]=(threadcache *)(size_t)(sizeof(size_t)>4 ? 0xdeadbeefdeadbeef : 0xdeadbeef);
+		p->caches[n]=(threadcache *)(size_t)(sizeof(size_t)>4 ? 0xdeadbeefdeadbeefULL : 0xdeadbeefUL);
 	for(n=0; n<MAXTHREADSINPOOL+1; n++)
-		p->m[n]=(mstate)(size_t)(sizeof(size_t)>4 ? 0xdeadbeefdeadbeef : 0xdeadbeef);
+		p->m[n]=(mstate)(size_t)(sizeof(size_t)>4 ? 0xdeadbeefdeadbeefULL : 0xdeadbeefUL);
 	if(TLSFREE(p->mycache)) abort();
 	RELEASE_LOCK(&p->mutex);
 }

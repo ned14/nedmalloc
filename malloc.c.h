@@ -1777,7 +1777,7 @@ struct pthread_mlock_t {
 #define TRY_LOCK(sl)          pthread_try_lock(sl)
 #define SPINS_PER_YIELD       63
 
-static MLOCK_T malloc_global_mutex = { 0, 0, 0};
+static MLOCK_T malloc_global_mutex = { 0, "", 0, 0};
 
 static FORCEINLINE int pthread_acquire_lock (MLOCK_T *sl) {
   int spins = 0;
@@ -2180,7 +2180,6 @@ typedef struct malloc_chunk* mchunkptr;
 typedef struct malloc_chunk* sbinptr;  /* The type of bins of chunks */
 typedef unsigned int bindex_t;         /* Described below */
 typedef unsigned int binmap_t;         /* Described below */
-typedef unsigned int flag_t;           /* The type of various bit flag sets */
 
 /* ------------------- Chunks sizes and alignments ----------------------- */
 

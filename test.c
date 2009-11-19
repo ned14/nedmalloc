@@ -11,13 +11,38 @@ An example of how to use nedalloc
 #define RECORDS (100000/THREADS)
 /*#define TORTURETEST*/
 /*#define USE_NEDMALLOC_DLL*/
+/*#define ENABLE_FAST_HEAP_DETECTION*/
 
-#ifndef USE_NEDMALLOC_DLL
+#ifdef _MSC_VER
+/*#pragma optimize("g", off)*/	/* Useful for debugging */
+#endif
+
+#if !defined(USE_NEDMALLOC_DLL)
 #include "nedmalloc.c"
-#else
+#elif defined(WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#include <pthread.h>
 #endif
+
+#ifndef FORCEINLINE
+  #if defined(__GNUC__)
+#define FORCEINLINE __inline __attribute__ ((always_inline))
+  #elif defined(_MSC_VER)
+    #define FORCEINLINE __forceinline
+  #endif
+#endif
+#ifndef NOINLINE
+  #if defined(__GNUC__)
+    #define NOINLINE __attribute__ ((noinline))
+  #elif defined(_MSC_VER)
+    #define NOINLINE __declspec(noinline)
+  #else
+    #define NOINLINE
+  #endif
+#endif
+
 
 static int whichmalloc;
 static int doRealloc;
@@ -306,7 +331,7 @@ int PatchInNedmallocDLL(void);
 int main(void)
 {
 	double std=0, ned=0;
-#ifdef USE_NEDMALLOC_DLL
+#if defined(WIN32) && defined(USE_NEDMALLOC_DLL)
 	PatchInNedmallocDLL();
 #endif
 

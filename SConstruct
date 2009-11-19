@@ -47,7 +47,7 @@ if sys.platform=="win32":
 else:
     if not env.GetOption('force32') and ('x64' in platform.machine() or 'x86_64' in platform.machine()):
         architecture="x64"
-    elif 'i386' in platform.machine():
+    elif platform.machine() in ['i386', 'i486', 'i586', 'i686']:
         architecture="x86"
         if env.GetOption('sse'):
             env['CCFLAGS']+=["-mfpmath=sse"]
@@ -90,10 +90,11 @@ if sys.platform=='win32':
         #env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
 else:
     env['CPPDEFINES']+=[]
+    env['CCFLAGS']+=["-Wall"]
     if env.GetOption('debug'):
-        env['CCFLAGS']+=["-O0 -g"]
+        env['CCFLAGS']+=["-O0", "-g"]
     else:
-        env['CCFLAGS']+=["-O2 -g"]
+        env['CCFLAGS']+=["-O2", "-g"]
     env['LIBS']+=["pthread"]
     env['LINKFLAGS']+=[]
 
