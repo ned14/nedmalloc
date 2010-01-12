@@ -56,7 +56,9 @@ your application and therefore call neddisablethreadcache() on all currently
 existing nedpool's for you.
 
 If you define REPLACE_SYSTEM_ALLOCATOR when building the DLL then the DLL
-will replace most usage of the MSVCRT allocator with nedmalloc on load -
+will replace most usage of the MSVCRT allocator within any process it is
+loaded into with nedmalloc's routines instead, whilst remaining able to
+handle the odd free() of a MSVCRT allocated block allocated during CRT init -
 this very conveniently allows you to simply link with the nedmalloc DLL
 and your application magically now uses it with no code changes required.
 The following code is suggested:
@@ -65,13 +67,21 @@ The following code is suggested:
 
 This auto-patching feature can also be combined with Microsoft's Detours
 (http://research.microsoft.com/en-us/projects/detours/) to run any
-arbitrary application using nedmalloc:
+arbitrary application using nedmalloc instead of the system allocator:
 
 withdll /d:nedmalloc.dll program.exe
 
-There is an enclosed nedmalloc_loader program which does one variant of the
-same thing, however it is not currently working because nedmalloc needs
-kernel32 initialised beforehand.
+For those not able to use Microsoft Detours, there is an enclosed
+nedmalloc_loader program which does one variant of the same thing. It may
+or may not be useful to you - it is not intended to be maintained.
+
+When building the nedmalloc DLL for the purposes of DLL insertion, you NEED
+to match MSVCRT versions or you will have a CRT heap conflict. In other words,
+if the program using nedmalloc is linked against MSVCRTD, then so must be
+nedmalloc or vice versa. As a result of this issue, by default nedmalloc
+ALWAYS LINKS TO MSVCRT EVEN IN DEBUG BUILDS unless configured otherwise.
+This allows problem-free usage with release build applications which is
+where nedmalloc tends to be most commonly deployed.
 
 Lastly for some applications defining ENABLE_LARGE_PAGES can give a 10-15%
 performance increase by having nedmalloc allocate using large pages only.

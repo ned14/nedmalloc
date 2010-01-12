@@ -183,7 +183,7 @@ seeing as fprintf et al are completely unavailable to us */
 #endif
 static void putc(void *p, char c) THROWSPEC { *(*((char **)p))++ = c; }
 static HANDLE debugfile=INVALID_HANDLE_VALUE;
-static void DebugPrint(const char *fmt, ...) THROWSPEC
+extern void DebugPrint(const char *fmt, ...) THROWSPEC
 {
 #if defined(_DEBUG) && defined(USE_DEBUGGER_OUTPUT)
 	char buffer[16384];
@@ -201,7 +201,7 @@ static void DebugPrint(const char *fmt, ...) THROWSPEC
 	OutputDebugStringA(buffer);
 	if(stdouth && stdouth!=INVALID_HANDLE_VALUE)
 		WriteFile(stdouth, buffer, len, &written, NULL);
-#if 1
+#if 0	/* Enable this if you want it to write the log to C:\nedmalloc.log */
 	if(INVALID_HANDLE_VALUE==debugfile)
 	{
 		debugfile=CreateFile(__T("C:\\nedmalloc.log"), GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ, 

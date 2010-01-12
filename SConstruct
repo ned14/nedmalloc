@@ -12,6 +12,8 @@ AddOption('--magicheaders', dest='magicheaders', nargs='?', const=True, help='en
 AddOption('--useallocator', dest='useallocator', nargs=1, type='int', default=1, help='which allocator to use')
 AddOption('--largepages', dest='largepages', nargs='?', const=True, help='enable large page support')
 AddOption('--fastheapdetection', dest='fastheapdetection', nargs='?', const=True, help='enable fast system-specific heap detection')
+AddOption('--forceusemsvcrt', dest='usemsvcrt', nargs='?', const=True, help='forces use of MSVCRT on Windows')
+AddOption('--forceusemsvcrtd', dest='usemsvcrtd', nargs='?', const=True, help='forces use of MSVCRTD on Windows')
 
 # Force scons to always use absolute paths in everything (helps debuggers to find source files)
 env['CCCOM']   =    env['CCCOM'].replace('$CHANGED_SOURCES','$SOURCES.abspath')
@@ -71,10 +73,12 @@ if sys.platform=='win32':
     env['CCFLAGS']+=["/Gy"]             # Seperate COMDATs
     env['CCFLAGS']+=["/Zi"]             # Program database debug info
     if env.GetOption('debug'):
-        env['CCFLAGS']+=["/Od", "/MDd"]
+        env['CCFLAGS']+=["/Od"]
     else:
-        env['CCFLAGS']+=["/O2", "/MD"]
+        env['CCFLAGS']+=["/O2"]
         #env['CCFLAGS']+=["/GL"]
+    if env.GetOption('usemsvcrt'): env['CCFLAGS']+=["/MD"]
+    if env.GetOption('usemsvcrtd'): env['CCFLAGS']+=["/MDd"]
     env['LIBS']+=["psapi", "user32", "advapi32"]
     env['LINKFLAGS']+=["/DEBUG"]                # Output debug symbols
     env['LINKFLAGS']+=["/LARGEADDRESSAWARE"]    # Works past 2Gb

@@ -491,14 +491,14 @@ NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT m
 #endif
 #if defined(ENABLE_TOLERANT_NEDMALLOC) || USE_ALLOCATOR==0
 #ifdef _MSC_VER
-	/* This is the MSVCRT equivalent */
-	return _msize(mem);
+		/* This is the MSVCRT equivalent */
+		return _msize(mem);
 #elif defined(__linux__)
-	/* This is the glibc/ptmalloc2/dlmalloc equivalent.  */
-	return malloc_usable_size(mem);
+		/* This is the glibc/ptmalloc2/dlmalloc equivalent.  */
+		return malloc_usable_size(mem);
 #elif defined(__FreeBSD__) || defined(__APPLE__)
-	/* This is the BSD libc equivalent.  */
-	return malloc_size(mem);
+		/* This is the BSD libc equivalent.  */
+		return malloc_size(mem);
 #else
 #error Cannot tolerate the memory allocator of an unknown system!
 #endif
