@@ -16,8 +16,10 @@ if sys.platform=='win32':
 
 # Test program
 sources = [ "test.c" ]
-objects = env.Object(source = sources) + [nedmallocliblib]
-testprogram = env.Program("test", source = objects, LINKFLAGS=[])
+objects = env.Object(source = sources) # + [nedmallocliblib]
+testlibs=[nedmallocliblib]
+if sys.platform=='win32': testlibs+=["user32"]
+testprogram = env.Program("test", source = objects, LINKFLAGS=[], LIBS = testlibs)
 
 Default(testprogram)
 Return("nedmalloclib")

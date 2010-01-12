@@ -37,6 +37,7 @@ DEALINGS IN THE SOFTWARE.
 
 /*#define ENABLE_TOLERANT_NEDMALLOC 1*/
 /*#define ENABLE_FAST_HEAP_DETECTION 1*/
+/*#define NEDMALLOC_DEBUG 1*/
 
 /*#define FULLSANITYCHECKS*/
 /* If link time code generation is on, don't force or prevent inlining */
@@ -44,6 +45,7 @@ DEALINGS IN THE SOFTWARE.
 #define FORCEINLINE
 #define NOINLINE
 #endif
+
 
 #include "nedmalloc.h"
 #ifdef WIN32
@@ -59,19 +61,25 @@ DEALINGS IN THE SOFTWARE.
  #define USE_LOCKS 1
 #endif
 #define FOOTERS 1           /* Need to enable footers so frees lock the right mspace */
-#if defined(DEBUG) && !defined(_DEBUG)
- #define _DEBUG
-#elif !defined(NDEBUG) && !defined(DEBUG) && !defined(_DEBUG)
- #define NDEBUG
+#ifndef NEDMALLOC_DEBUG
+ #if defined(DEBUG) || defined(_DEBUG)
+  #define NEDMALLOC_DEBUG 1
+ #else
+  #define NEDMALLOC_DEBUG 0
+ #endif
 #endif
-#undef DEBUG				/* dlmalloc wants DEBUG either 0 or 1 */
-#ifdef _DEBUG
+/* We need to consistently define DEBUG=0|1, _DEBUG and NDEBUG for dlmalloc */
+#undef DEBUG
+#undef _DEBUG
+#if NEDMALLOC_DEBUG
+ #define _DEBUG
  #define DEBUG 1
 #else
  #define DEBUG 0
 #endif
 #ifdef NDEBUG               /* Disable assert checking on release builds */
  #undef DEBUG
+ #undef _DEBUG
 #endif
 /* The default of 64Kb means we spend too much time kernel-side */
 #ifndef DEFAULT_GRANULARITY
@@ -86,9 +94,12 @@ DEALINGS IN THE SOFTWARE.
 #include "malloc.c.h"
 #ifdef NDEBUG               /* Disable assert checking on release builds */
  #undef DEBUG
-#endif
-#if defined(__GNUC__) && defined(DEBUG)
-#warning DEBUG is defined so allocator will run with assert checking! Define NDEBUG to run at full speed.
+#elif !NEDMALLOC_DEBUG
+ #ifdef __GNUC__
+  #warning DEBUG is defined so allocator will run with assert checking! Define NDEBUG to run at full speed.
+ #elif defined(_MSC_VER)
+  #pragma message(__FILE__ ": WARNING: DEBUG is defined so allocator will run with assert checking! Define NDEBUG to run at full speed.")
+ #endif
 #endif
 
 /* The maximum concurrent threads in a pool possible */
@@ -165,14 +176,26 @@ static size_t largestusedblock;
 static FORCEINLINE void *CallMalloc(void *RESTRICT mspace, size_t size, size_t alignment) THROWSPEC
 {
 	void *RESTRICT ret=0;
+	size_t _alignment=alignment;
 #if USE_MAGIC_HEADERS
 	size_t *_ret=0;
 	size+=alignment+3*sizeof(size_t);
+	_alignment=0;
 #endif
 #if USE_ALLOCATOR==0
-	ret=malloc(size);
+	ret=_alignment ? 
+#ifdef _MSC_VER
+	/* This is the MSVCRT equivalent */
+		_aligned_malloc(size, _alignment)
+#elif defined(__linux__) || defined(__FreeBSD__) || defined(__APPLE__)
+	/* This is the glibc/ptmalloc2/dlmalloc/BSD libc equivalent.  */
+		memalign(_alignment, size)
+#else
+#error Cannot aligned allocate with the memory allocator of an unknown system!
+#endif
+		: malloc(size);
 #elif USE_ALLOCATOR==1
-	ret=mspace_malloc((mstate) mspace, size);
+	ret=_alignment ? mspace_memalign((mstate) mspace, _alignment, size) : mspace_malloc((mstate) mspace, size);
 #ifndef ENABLE_FAST_HEAP_DETECTION
 	if(ret)
 	{
@@ -484,19 +507,19 @@ NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT m
 	return 0;
 }
 
-void nedsetvalue(void *v) THROWSPEC												{ nedpsetvalue((nedpool *) 0, v); }
-NEDMALLOCPTRATTR void * nedmalloc(size_t size) THROWSPEC						{ return nedpmalloc((nedpool *) 0, size); }
-NEDMALLOCPTRATTR void * nedcalloc(size_t no, size_t size) THROWSPEC				{ return nedpcalloc((nedpool *) 0, no, size); }
-NEDMALLOCPTRATTR void * nedrealloc(void *mem, size_t size) THROWSPEC			{ return nedprealloc((nedpool *) 0, mem, size); }
-void   nedfree(void *mem) THROWSPEC												{ nedpfree((nedpool *) 0, mem); }
-NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC	{ return nedpmemalign((nedpool *) 0, alignment, bytes); }
-struct nedmallinfo nedmallinfo(void) THROWSPEC									{ return nedpmallinfo((nedpool *) 0); }
-int    nedmallopt(int parno, int value) THROWSPEC								{ return nedpmallopt((nedpool *) 0, parno, value); }
-int    nedmalloc_trim(size_t pad) THROWSPEC										{ return nedpmalloc_trim((nedpool *) 0, pad); }
-void   nedmalloc_stats() THROWSPEC												{ nedpmalloc_stats((nedpool *) 0); }
-size_t nedmalloc_footprint() THROWSPEC											{ return nedpmalloc_footprint((nedpool *) 0); }
-NEDMALLOCPTRATTR void **nedindependent_calloc(size_t elemsno, size_t elemsize, void **chunks) THROWSPEC	{ return nedpindependent_calloc((nedpool *) 0, elemsno, elemsize, chunks); }
-NEDMALLOCPTRATTR void **nedindependent_comalloc(size_t elems, size_t *sizes, void **chunks) THROWSPEC	{ return nedpindependent_comalloc((nedpool *) 0, elems, sizes, chunks); }
+NEDMALLOCNOALIASATTR void nedsetvalue(void *v) THROWSPEC											{ nedpsetvalue((nedpool *) 0, v); }
+NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc(size_t size) THROWSPEC						{ return nedpmalloc((nedpool *) 0, size); }
+NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedcalloc(size_t no, size_t size) THROWSPEC			{ return nedpcalloc((nedpool *) 0, no, size); }
+NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc(void *mem, size_t size) THROWSPEC			{ return nedprealloc((nedpool *) 0, mem, size); }
+NEDMALLOCNOALIASATTR void   nedfree(void *mem) THROWSPEC											{ nedpfree((nedpool *) 0, mem); }
+NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC	{ return nedpmemalign((nedpool *) 0, alignment, bytes); }
+NEDMALLOCNOALIASATTR struct nedmallinfo nedmallinfo(void) THROWSPEC									{ return nedpmallinfo((nedpool *) 0); }
+NEDMALLOCNOALIASATTR int    nedmallopt(int parno, int value) THROWSPEC								{ return nedpmallopt((nedpool *) 0, parno, value); }
+NEDMALLOCNOALIASATTR int    nedmalloc_trim(size_t pad) THROWSPEC									{ return nedpmalloc_trim((nedpool *) 0, pad); }
+void   nedmalloc_stats() THROWSPEC																	{ nedpmalloc_stats((nedpool *) 0); }
+NEDMALLOCNOALIASATTR size_t nedmalloc_footprint() THROWSPEC											{ return nedpmalloc_footprint((nedpool *) 0); }
+NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedindependent_calloc(size_t elemsno, size_t elemsize, void **chunks) THROWSPEC	{ return nedpindependent_calloc((nedpool *) 0, elemsno, elemsize, chunks); }
+NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedindependent_comalloc(size_t elems, size_t *sizes, void **chunks) THROWSPEC		{ return nedpindependent_comalloc((nedpool *) 0, elems, sizes, chunks); }
 
 struct threadcacheblk_t;
 typedef struct threadcacheblk_t threadcacheblk;
@@ -1349,7 +1372,7 @@ int    nedpmallopt(nedpool *p, int parno, int value) THROWSPEC
 	return 0;
 #endif
 }
-void*  nedmalloc_internals(size_t *granularity, size_t *magic) THROWSPEC
+NEDMALLOCNOALIASATTR void*  nedmalloc_internals(size_t *granularity, size_t *magic) THROWSPEC
 {
 #if USE_ALLOCATOR==1
 	if(granularity) *granularity=mparams.granularity;

@@ -178,6 +178,9 @@ static PROC DeindirectAddress(PROC _addr) THROWSPEC
 
 /* Little helper function for sending stuff to the debugger output
 seeing as fprintf et al are completely unavailable to us */
+#if defined(_DEBUG) && defined(USE_DEBUGGER_OUTPUT)
+#include "embedded_printf.c"
+#endif
 static void putc(void *p, char c) THROWSPEC { *(*((char **)p))++ = c; }
 static HANDLE debugfile=INVALID_HANDLE_VALUE;
 static void DebugPrint(const char *fmt, ...) THROWSPEC
@@ -198,7 +201,7 @@ static void DebugPrint(const char *fmt, ...) THROWSPEC
 	OutputDebugStringA(buffer);
 	if(stdouth && stdouth!=INVALID_HANDLE_VALUE)
 		WriteFile(stdouth, buffer, len, &written, NULL);
-#if 0
+#if 1
 	if(INVALID_HANDLE_VALUE==debugfile)
 	{
 		debugfile=CreateFile(__T("C:\\nedmalloc.log"), GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ, 
@@ -638,6 +641,7 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 #if defined(_DEBUG)
 		DebugPrint("Winpatcher: patcher DLL loaded at %p\n", myModuleBase);
+#if 0	/* Seems to get upset if kernel32 isn't initialised :( */
 		if(!(ProcessExceptionHandlerH=AddVectoredExceptionHandler(1, ProcessExceptionHandler)))
 		{
 			TCHAR buffer[4096];
@@ -648,6 +652,7 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 			return FALSE;
 		}
 		DebugPrint("Winpatcher: installed process exception hook with handle %p\n", ProcessExceptionHandlerH);
+#endif
 #endif
 #endif
 #ifdef ENABLE_LARGE_PAGES
@@ -701,8 +706,10 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 		/*if(!DepatchInNedmallocDLL())
 			return FALSE;*/
 #ifdef _DEBUG
+#if 0
 		if(!RemoveVectoredExceptionHandler(ProcessExceptionHandlerH))
 			return FALSE;
+#endif
 #endif
 #endif
 	}

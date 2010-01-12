@@ -3,10 +3,11 @@ import os, sys, platform
 env = Environment()
 #print env['TOOLS']
 AddOption('--debugbuild', dest='debug', nargs='?', const=True, help='enable debug build')
+AddOption('--debugprint', dest='debugprint', nargs='?', const=True, help='enable lots of debug printing (windows only)')
 AddOption('--force32', dest='force32', help='force 32 bit build on 64 bit machine')
-AddOption('--sse', dest='sse', nargs=1, type='int', help='set SSE used (0-4) on 32 bit x86')
+AddOption('--sse', dest='sse', nargs=1, type='int', default=1, help='set SSE used (0-4) on 32 bit x86. Defaults to 1 (SSE1).')
 AddOption('--replacesystemallocator', dest='replacesystemallocator', nargs='?', const=True, help='replace all usage of the system allocator in the process when loaded')
-AddOption('--tolerant', dest='tolerant', nargs='?', const=True, help='enable tolerance of the system allocator (not guaranteed)')
+AddOption('--tolerant', dest='tolerant', nargs=1, default=1, help='enable tolerance of the system allocator (not guaranteed). On by default.')
 AddOption('--magicheaders', dest='magicheaders', nargs='?', const=True, help='enable magic headers (guaranteed tolerance of the system allocator)')
 AddOption('--useallocator', dest='useallocator', nargs=1, type='int', default=1, help='which allocator to use')
 AddOption('--largepages', dest='largepages', nargs='?', const=True, help='enable large page support')
@@ -22,6 +23,7 @@ env['CPPDEFINES']=[]
 env['CCFLAGS']=[]
 env['LIBS']=[]
 env['LINKFLAGS']=[]
+if env.GetOption('debugprint'): env['CPPDEFINES']+=["USE_DEBUGGER_OUTPUT"]
 if env.GetOption('replacesystemallocator'): env['CPPDEFINES']+=["REPLACE_SYSTEM_ALLOCATOR"]
 if env.GetOption('tolerant'): env['CPPDEFINES']+=["ENABLE_TOLERANT_NEDMALLOC"]
 if env.GetOption('magicheaders'): env['CPPDEFINES']+=["USE_MAGIC_HEADERS"]

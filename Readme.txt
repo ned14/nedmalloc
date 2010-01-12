@@ -67,7 +67,7 @@ This auto-patching feature can also be combined with Microsoft's Detours
 (http://research.microsoft.com/en-us/projects/detours/) to run any
 arbitrary application using nedmalloc:
 
-withdll -d:nedmalloc.dll program.exe
+withdll /d:nedmalloc.dll program.exe
 
 There is an enclosed nedmalloc_loader program which does one variant of the
 same thing, however it is not currently working because nedmalloc needs
