@@ -1,5 +1,5 @@
-nedalloc v1.06 ?:
--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+nedalloc v1.06 beta 1 13th January 2010:
+-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
 
@@ -216,7 +216,7 @@ Fixing memory bugs now tends to be worth it in the long run.
 
 E. ChangeLog:
 -=-=-=-=-=-=-
-v1.06 ?:
+v1.06 beta 1 13th January 2010:
  * { 1079 } Fixed misdeclaration of struct mallinfo as C++ type. Thanks to
 James Mansion for reporting this.
  * { 1082 } Fixed dlmalloc bug which caused header corruption to mmap()
