@@ -32,6 +32,7 @@ DEALINGS IN THE SOFTWARE.
 #pragma warning(push)
 #pragma warning(disable:4100)	/* unreferenced formal parameter */
 #pragma warning(disable:4127)	/* conditional expression is constant */
+#pragma warning(disable:4232)	/* address of dllimport is not static, identity not guaranteed */
 #pragma warning(disable:4706)	/* assignment within conditional expression */
 #endif
 
@@ -180,8 +181,26 @@ static size_t mspacecounter=(size_t) 0xdeadbeef;
 static void *RESTRICT leastusedaddress;
 static size_t largestusedblock;
 #endif
+/* Used to redirect system allocator ops if needed */
+extern void *(*sysmalloc)(size_t)=malloc;
+extern void *(*syscalloc)(size_t, size_t)=calloc;
+extern void *(*sysrealloc)(void *, size_t)=realloc;
+extern void (*sysfree)(void *)=free;
+extern size_t (*sysblksize)(void *)=
+#ifdef _MSC_VER
+	/* This is the MSVCRT equivalent */
+	_msize;
+#elif defined(__linux__)
+	/* This is the glibc/ptmalloc2/dlmalloc equivalent.  */
+	malloc_usable_size;
+#elif defined(__FreeBSD__) || defined(__APPLE__)
+	/* This is the BSD libc equivalent.  */
+	malloc_size;
+#else
+#error Cannot tolerate the memory allocator of an unknown system!
+#endif
 
-static FORCEINLINE void *CallMalloc(void *RESTRICT mspace, size_t size, size_t alignment) THROWSPEC
+static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallMalloc(void *RESTRICT mspace, size_t size, size_t alignment) THROWSPEC
 {
 	void *RESTRICT ret=0;
 	size_t _alignment=alignment;
@@ -191,7 +210,7 @@ static FORCEINLINE void *CallMalloc(void *RESTRICT mspace, size_t size, size_t a
 	_alignment=0;
 #endif
 #if USE_ALLOCATOR==0
-	ret=malloc(size);	/* magic headers takes care of alignment */
+	ret=sysmalloc(size);	/* magic headers takes care of alignment */
 #elif USE_ALLOCATOR==1
 	ret=_alignment ? mspace_memalign((mstate) mspace, _alignment, size) : mspace_malloc((mstate) mspace, size);
 #ifndef ENABLE_FAST_HEAP_DETECTION
@@ -215,7 +234,7 @@ static FORCEINLINE void *CallMalloc(void *RESTRICT mspace, size_t size, size_t a
 	return ret;
 }
 
-static FORCEINLINE void *CallCalloc(void *RESTRICT mspace, size_t size, size_t alignment) THROWSPEC
+static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallCalloc(void *RESTRICT mspace, size_t size, size_t alignment) THROWSPEC
 {
 	void *RESTRICT ret=0;
 #if USE_MAGIC_HEADERS
@@ -223,7 +242,7 @@ static FORCEINLINE void *CallCalloc(void *RESTRICT mspace, size_t size, size_t a
 	size+=alignment+3*sizeof(size_t);
 #endif
 #if USE_ALLOCATOR==0
-	ret=calloc(1, size);
+	ret=syscalloc(1, size);
 #elif USE_ALLOCATOR==1
 	ret=mspace_calloc((mstate) mspace, 1, size);
 #ifndef ENABLE_FAST_HEAP_DETECTION
@@ -247,7 +266,7 @@ static FORCEINLINE void *CallCalloc(void *RESTRICT mspace, size_t size, size_t a
 	return ret;
 }
 
-static FORCEINLINE void *CallRealloc(void *RESTRICT mspace, void *RESTRICT mem, int isforeign, size_t oldsize, size_t newsize) THROWSPEC
+static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallRealloc(void *RESTRICT mspace, void *RESTRICT mem, int isforeign, size_t oldsize, size_t newsize) THROWSPEC
 {
 	void *RESTRICT ret=0;
 #if USE_MAGIC_HEADERS
@@ -265,7 +284,7 @@ static FORCEINLINE void *CallRealloc(void *RESTRICT mspace, void *RESTRICT mem, 
 			printf("*** nedmalloc frees system allocated block %p\n", mem);
 #endif
 			memcpy(ret, mem, oldsize<newsize ? oldsize : newsize);
-			free(mem);
+			sysfree(mem);
 		}
 		return ret;
 	}
@@ -278,7 +297,7 @@ static FORCEINLINE void *CallRealloc(void *RESTRICT mspace, void *RESTRICT mem, 
 	mem=(void *)(++_mem);
 #endif
 #if USE_ALLOCATOR==0
-	ret=realloc(mem, newsize);
+	ret=sysrealloc(mem, newsize);
 #elif USE_ALLOCATOR==1
 	ret=mspace_realloc((mstate) mspace, mem, newsize);
 #ifndef ENABLE_FAST_HEAP_DETECTION
@@ -320,7 +339,7 @@ static FORCEINLINE void CallFree(void *RESTRICT mspace, void *RESTRICT mem, int 
 #if defined(DEBUG)
 		printf("*** nedmalloc frees system allocated block %p\n", mem);
 #endif
-		free(mem);
+		sysfree(mem);
 		return;
 	}
 #if USE_MAGIC_HEADERS
@@ -331,7 +350,7 @@ static FORCEINLINE void CallFree(void *RESTRICT mspace, void *RESTRICT mem, int 
 	mem=(void *)(++_mem);
 #endif
 #if USE_ALLOCATOR==0
-	free(mem);
+	sysfree(mem);
 #elif USE_ALLOCATOR==1
 	mspace_free((mstate) mspace, mem);
 #endif
@@ -488,18 +507,7 @@ NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT m
 #endif
 #endif
 #if defined(ENABLE_TOLERANT_NEDMALLOC) || USE_ALLOCATOR==0
-#ifdef _MSC_VER
-		/* This is the MSVCRT equivalent */
-		return _msize(mem);
-#elif defined(__linux__)
-		/* This is the glibc/ptmalloc2/dlmalloc equivalent.  */
-		return malloc_usable_size(mem);
-#elif defined(__FreeBSD__) || defined(__APPLE__)
-		/* This is the BSD libc equivalent.  */
-		return malloc_size(mem);
-#else
-#error Cannot tolerate the memory allocator of an unknown system!
-#endif
+		return sysblksize(mem);
 #endif
 	}
 	return 0;

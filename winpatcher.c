@@ -330,7 +330,7 @@ static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *import
      Returns: The number of entries modified
      moduleBase: The PE module to patch
 */
-static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli, int patchin) THROWSPEC
+static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli, int patchin, int *usingreleaseMSVCRT, int *usingdebugMSVCRT) THROWSPEC
 {
 	Status ret={SUCCESS};
 	int count=0;
@@ -339,11 +339,12 @@ static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli
 		if(sli->modules)
 		{
 			ModuleListItem *module;
-			for(module=sli->modules; module->into; module++)
+			int moduleidx=0;
+			for(module=sli->modules; module->into; module++, moduleidx++)
 			{
 				if(!module->intoAddr && (HMODULE)(size_t)-1!=module->intoAddr)
 				{
-					if(!GetModuleHandleExA(0, module->into, &module->intoAddr))
+					if(!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, module->into, &module->intoAddr))
 						module->intoAddr=(HMODULE)(size_t)-1;
 				}
 				if((HMODULE)(size_t)-1==module->intoAddr)
@@ -362,13 +363,18 @@ static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli
 				else
 				{
 					HMODULE withBase=0;
-					if(!GetModuleHandleExA(0, module->from, &withBase))
+					if(!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, module->from, &withBase))
 						return MKSTATUSWIN(ret);
 					if(!(sli->with.addr=GetProcAddress(withBase, sli->with.name)))
 						return MKSTATUSWIN(ret);
 				}
 				if((ret=ModifyModuleImportTableForI(moduleBase, module->into, sli, patchin), ret.code)<0)
 					return ret;
+				if(ret.code)
+				{
+					if(usingdebugMSVCRT && (moduleidx & 1)) (*usingdebugMSVCRT)++;
+					else (*usingreleaseMSVCRT)++;
+				}
 			}
 		}
 		else
@@ -402,10 +408,10 @@ typedef struct PatchedModule_t
 } PatchedModule;
 static PatchedModule *patchedmodules;
 /* Modifies all symbols in all loaded modules
-     Returns: The number of entries modified
+     Returns: The number of entries modified, plus how many are using release vs. debug versions of MSVCRT
 */
-NEDMALLOCEXTSPEC Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC;
-Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC
+NEDMALLOCEXTSPEC Status WinPatcher(SymbolListItem *symbollist, int patchin, int *usingreleaseMSVCRT, int *usingdebugMSVCRT) THROWSPEC;
+Status WinPatcher(SymbolListItem *symbollist, int patchin, int *usingreleaseMSVCRT, int *usingdebugMSVCRT) THROWSPEC
 {
 	int count=0;
 	Status ret={SUCCESS};
@@ -452,7 +458,7 @@ Status WinPatcher(SymbolListItem *symbollist, int patchin) THROWSPEC
 #if defined(_DEBUG)
 				DebugPrint("Winpatcher: Scanning module %p (%s) for things to %s ...\n", pm->moduleBaseAddr, pm->moduleBaseName, patchin ? "patch" : "depatch");
 #endif
-				if((ret=ModifyModuleImportTableFor(*module, symbollist, patchin), ret.code)<0)
+				if((ret=ModifyModuleImportTableFor(*module, symbollist, patchin, usingreleaseMSVCRT, usingdebugMSVCRT), ret.code)<0)
 					return ret;
 				count+=ret.code;
 			}
@@ -544,6 +550,7 @@ static size_t nedblksize_dbg(void *ptr, int type)                               
    using the same version of MSVCRT.
 */
 static ModuleListItem modules[]={
+	/* NOTE: Keep these release/debug format as this is used above! */
 	/* Release and Debug MSVC6 CRTs */
 	/*{ "MSVCRT.DLL", 0, 0 }, { "MSVCRTD.DLL", 0, 0 },*/
 	/* Release and Debug MSVC7.0 CRTs */
@@ -561,11 +568,12 @@ static ModuleListItem kernelmodule[]={
 	{ 0, 0, 0 }
 };
 static SymbolListItem nedmallocpatchtable[]={
-	{ { "malloc",       0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc",      (PROC) nedmalloc      } },
-	{ { "calloc",       0, "", 0/*(PROC) calloc */ }, modules, { "nedcalloc",      (PROC) nedcalloc      } },
-	{ { "realloc",      0, "", 0/*(PROC) realloc*/ }, modules, { "nedrealloc",     (PROC) nedrealloc     } },
-	{ { "free",         0, "", 0/*(PROC) free   */ }, modules, { "nedfree",        (PROC) nedfree        } },
-	{ { "_msize",       0, "", 0/*(PROC) _msize */ }, modules, { "nedblksize",     (PROC) nedblksize     } },
+	{ { "malloc",           0, "", 0/*(PROC) malloc */ },           modules, { "nedmalloc",      (PROC) nedmalloc      } },
+	{ { "calloc",           0, "", 0/*(PROC) calloc */ },           modules, { "nedcalloc",      (PROC) nedcalloc      } },
+	{ { "realloc",          0, "", 0/*(PROC) realloc*/ },           modules, { "nedrealloc",     (PROC) nedrealloc     } },
+	{ { "free",             0, "", 0/*(PROC) free   */ },           modules, { "nedfree",        (PROC) nedfree        } },
+	{ { "_msize",           0, "", 0/*(PROC) _msize */ },           modules, { "nedblksize",     (PROC) nedblksize     } },
+
 #if 0 /* Usually it's best to leave these off */
 	{ { "_malloc_dbg",  0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc_dbg",  (PROC) nedmalloc_dbg  } },
 	{ { "_calloc_dbg",  0, "", 0/*(PROC) calloc */ }, modules, { "nedcalloc_dbg",  (PROC) nedcalloc_dbg  } },
@@ -579,10 +587,14 @@ static SymbolListItem nedmallocpatchtable[]={
 #endif
 	{ { 0, 0, "", 0 }, 0, { 0, 0 } }
 };
+static int UsingReleaseMSVCRT, UsingDebugMSVCRT;
 int PatchInNedmallocDLL(void) THROWSPEC
 {
 	Status ret={SUCCESS};
-	ret=WinPatcher(nedmallocpatchtable, 1);
+	ret=WinPatcher(nedmallocpatchtable, 1, &UsingReleaseMSVCRT, &UsingDebugMSVCRT);
+#if defined(_DEBUG)
+	DebugPrint("Winpatcher: UsingReleaseMSVCRT=%d, UsingDebugMSVCRT=%d\n", UsingReleaseMSVCRT, UsingDebugMSVCRT);
+#endif
 	if(ret.code<0)
 	{
 		TCHAR buffer[4096];
@@ -598,7 +610,7 @@ int PatchInNedmallocDLL(void) THROWSPEC
 int DepatchInNedmallocDLL(void) THROWSPEC
 {
 	Status ret={SUCCESS};
-	ret=WinPatcher(nedmallocpatchtable, 0);
+	ret=WinPatcher(nedmallocpatchtable, 0, 0, 0);
 	if(ret.code<0)
 	{
 		TCHAR buffer[4096];
@@ -633,6 +645,11 @@ _DllMainCRTStartup(
 whereby it inserts a security cookie check before we've initialised support for it, thus
 provoking a failure */
 static PVOID ProcessExceptionHandlerH;
+extern void *(*sysmalloc)(size_t);
+extern void *(*syscalloc)(size_t, size_t);
+extern void *(*sysrealloc)(void *, size_t);
+extern void (*sysfree)(void *);
+extern size_t (*sysblksize)(void *);
 static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWORD dllcode, LPVOID *isTheDynamicLinker)
 {
 	BOOL ret=TRUE;
@@ -680,6 +697,45 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 		if(!PatchInNedmallocDLL())
 			return FALSE;
+		{
+			HMODULE mymsvcrt=0;
+			ModuleListItem *module;
+			int moduleidx=0;
+			GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCTSTR)(void *)malloc, &mymsvcrt);
+			for(module=modules; module->into && module->intoAddr!=mymsvcrt; module++, moduleidx++);
+			if(!module->into) abort(); /* There is something serious wrong if this happens */
+#if defined(_DEBUG)
+			DebugPrint("Winpatcher: Determined that the nedmalloc DLL is linked against %s (%p)\n", module->into, module->intoAddr);
+#endif
+			if(UsingReleaseMSVCRT>UsingDebugMSVCRT && (moduleidx & 1))
+			{	/* Need to replace the debug MSVCRT with which nedmalloc was linked with release */
+				module--;
+#if defined(_DEBUG)
+				DebugPrint("Winpatcher: This is not what this process is using, so replacing with %s (%p)\n", module->into, module->intoAddr);
+#endif
+				sysmalloc =(void * (*)(size_t))GetProcAddress(module->intoAddr, "malloc");
+				syscalloc =(void * (*)(size_t, size_t))GetProcAddress(module->intoAddr, "calloc");
+				sysrealloc=(void * (*)(void *, size_t))GetProcAddress(module->intoAddr, "realloc");
+				sysfree   =(void   (*)(void *))GetProcAddress(module->intoAddr, "free");
+				sysblksize=(size_t (*)(void *))GetProcAddress(module->intoAddr, "_msize");
+			}
+			else if(UsingReleaseMSVCRT<UsingDebugMSVCRT && !(moduleidx & 1))
+			{	/* Need to replace the release MSVCRT with which nedmalloc was linked with debug */
+				module++;
+#if defined(_DEBUG)
+				DebugPrint("Winpatcher: This is not what this process is using, so replacing with %s (%p)\n", module->into, module->intoAddr);
+#endif
+				sysmalloc =(void * (*)(size_t))GetProcAddress(module->intoAddr, "malloc");
+				syscalloc =(void * (*)(size_t, size_t))GetProcAddress(module->intoAddr, "calloc");
+				sysrealloc=(void * (*)(void *, size_t))GetProcAddress(module->intoAddr, "realloc");
+				sysfree   =(void   (*)(void *))GetProcAddress(module->intoAddr, "free");
+				sysblksize=(size_t (*)(void *))GetProcAddress(module->intoAddr, "_msize");
+			}
+			if(UsingReleaseMSVCRT && UsingDebugMSVCRT)
+				MessageBox(NULL, __T("nedmalloc: This process appears to be simultaneously using both the debug and release variants of the\n")
+								 __T("run-time C library which means that there are mutually incompatible CRT heaps in use. This is probably\n")
+								 __T("a bad idea and you should fix it for reliable operation"), __T("Warning:"), MB_OK);
+		}
 #endif
 	}
 	/* Invoke the CRT's handler which does atexit() etc */
