@@ -1,9 +1,12 @@
 import os, sys, platform
+def bitscanrev(x, c=-1):
+    return bitscanrev(x/2, c+1) if x else c
 
 env = Environment()
 #print env['TOOLS']
 AddOption('--debugbuild', dest='debug', nargs='?', const=True, help='enable debug build')
 AddOption('--debugprint', dest='debugprint', nargs='?', const=True, help='enable lots of debug printing (windows only)')
+AddOption('--fullsanitychecks', dest='fullsanitychecks', nargs='?', const=True, help='enable full sanity checking on every memory op')
 AddOption('--force32', dest='force32', help='force 32 bit build on 64 bit machine')
 AddOption('--sse', dest='sse', nargs=1, type='int', default=1, help='set SSE used (0-4) on 32 bit x86. Defaults to 1 (SSE1).')
 AddOption('--replacesystemallocator', dest='replacesystemallocator', nargs='?', const=True, help='replace all usage of the system allocator in the process when loaded')
@@ -12,8 +15,10 @@ AddOption('--magicheaders', dest='magicheaders', nargs='?', const=True, help='en
 AddOption('--useallocator', dest='useallocator', nargs=1, type='int', default=1, help='which allocator to use')
 AddOption('--largepages', dest='largepages', nargs='?', const=True, help='enable large page support')
 AddOption('--fastheapdetection', dest='fastheapdetection', nargs='?', const=True, help='enable fast system-specific heap detection')
-AddOption('--forceusemsvcrt', dest='usemsvcrt', nargs='?', const=True, help='forces use of MSVCRT on Windows')
-AddOption('--forceusemsvcrtd', dest='usemsvcrtd', nargs='?', const=True, help='forces use of MSVCRTD on Windows')
+AddOption('--defaultgranularity', dest='defaultgranularity', nargs=1, type='int', help='sets how much memory to claim or release from the system at one time')
+AddOption('--threadcachemax', dest='threadcachemax', nargs=1, type='int', help='sets what allocations should use the threadcache')
+AddOption('--threadcachemaxbins', dest='threadcachemaxbins', nargs=1, type='int', help='sets the threadcache binning')
+AddOption('--threadcachemaxfreespace', dest='threadcachemaxfreespace', nargs=1, type='int', help='sets when the threadcache should be garbage collected')
 
 # Force scons to always use absolute paths in everything (helps debuggers to find source files)
 env['CCCOM']   =    env['CCCOM'].replace('$CHANGED_SOURCES','$SOURCES.abspath')
@@ -26,12 +31,22 @@ env['CCFLAGS']=[]
 env['LIBS']=[]
 env['LINKFLAGS']=[]
 if env.GetOption('debugprint'): env['CPPDEFINES']+=["USE_DEBUGGER_OUTPUT"]
+if env.GetOption('fullsanitychecks'): env['CPPDEFINES']+=["FULLSANITYCHECKS"]
 if env.GetOption('replacesystemallocator'): env['CPPDEFINES']+=["REPLACE_SYSTEM_ALLOCATOR"]
 if env.GetOption('tolerant'): env['CPPDEFINES']+=["ENABLE_TOLERANT_NEDMALLOC"]
 if env.GetOption('magicheaders'): env['CPPDEFINES']+=["USE_MAGIC_HEADERS"]
 env['CPPDEFINES']+=[("USE_ALLOCATOR",env.GetOption('useallocator'))]
 if env.GetOption('largepages'): env['CPPDEFINES']+=["ENABLE_LARGE_PAGES"]
 if env.GetOption('fastheapdetection'): env['CPPDEFINES']+=["ENABLE_FAST_HEAP_DETECTION"]
+if env.GetOption('defaultgranularity'): env['CPPDEFINES']+=[("DEFAULT_GRANULARITY",env.GetOption('defaultgranularity'))]
+if env.GetOption('threadcachemax'):
+    env['CPPDEFINES']+=[("THREADCACHEMAX",env.GetOption('threadcachemax'))]
+    if not env.GetOption('threadcachemaxbins'):
+        maxbins=bitscanrev(env.GetOption('threadcachemax'))-4;
+        print "THREADCACHEMAX set but not THREADCACHEMAXBINS, so auto-setting THREADCACHEMAXBINS =", maxbins
+        env['CPPDEFINES']+=[("THREADCACHEMAXBINS",maxbins)]
+if env.GetOption('threadcachemaxbins'): env['CPPDEFINES']+=[("THREADCACHEMAXBINS",env.GetOption('threadcachemaxbins'))]
+if env.GetOption('threadcachemaxfreespace'): env['CPPDEFINES']+=[("THREADCACHEMAXFREESPACE",env.GetOption('threadcachemaxfreespace'))]
 
 # Am I in a 32 or 64 bit environment? Note that not specifying --sse doesn't set any x86 or x64 specific options
 # so it's good to go for ANY platform
@@ -73,12 +88,10 @@ if sys.platform=='win32':
     env['CCFLAGS']+=["/Gy"]             # Seperate COMDATs
     env['CCFLAGS']+=["/Zi"]             # Program database debug info
     if env.GetOption('debug'):
-        env['CCFLAGS']+=["/Od"]
+        env['CCFLAGS']+=["/Od", "/MDd"]
     else:
-        env['CCFLAGS']+=["/O2"]
+        env['CCFLAGS']+=["/O2", "/MD"]
         #env['CCFLAGS']+=["/GL"]
-    if env.GetOption('usemsvcrt'): env['CCFLAGS']+=["/MD"]
-    if env.GetOption('usemsvcrtd'): env['CCFLAGS']+=["/MDd"]
     env['LIBS']+=["psapi", "user32", "advapi32"]
     env['LINKFLAGS']+=["/DEBUG"]                # Output debug symbols
     env['LINKFLAGS']+=["/LARGEADDRESSAWARE"]    # Works past 2Gb

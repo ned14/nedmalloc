@@ -113,13 +113,21 @@ DEALINGS IN THE SOFTWARE.
 /* The maximum size to be allocated from the thread cache */
 #ifndef THREADCACHEMAX
 #define THREADCACHEMAX 8192
+#elif !defined(THREADCACHEMAXBINS)
+ #ifdef __GNUC__
+  #warning If you are changing THREADCACHEMAX, do you also need to change THREADCACHEMAXBINS=(topbitpos(THREADCACHEMAX)-4)?
+ #elif defined(_MSC_VER)
+  #pragma message(__FILE__ ": WARNING: If you are changing THREADCACHEMAX, do you also need to change THREADCACHEMAXBINS=(topbitpos(THREADCACHEMAX)-4)?")
+ #endif
 #endif
+#ifndef THREADCACHEMAXBINS
 #if 0
 /* The number of cache entries for finer grained bins. This is (topbitpos(THREADCACHEMAX)-4)*2 */
 #define THREADCACHEMAXBINS ((13-4)*2)
 #else
 /* The number of cache entries. This is (topbitpos(THREADCACHEMAX)-4) */
 #define THREADCACHEMAXBINS (13-4)
+#endif
 #endif
 /* Point at which the free space in a thread cache is garbage collected */
 #ifndef THREADCACHEMAXFREESPACE
@@ -183,17 +191,7 @@ static FORCEINLINE void *CallMalloc(void *RESTRICT mspace, size_t size, size_t a
 	_alignment=0;
 #endif
 #if USE_ALLOCATOR==0
-	ret=_alignment ? 
-#ifdef _MSC_VER
-	/* This is the MSVCRT equivalent */
-		_aligned_malloc(size, _alignment)
-#elif defined(__linux__) || defined(__FreeBSD__) || defined(__APPLE__)
-	/* This is the glibc/ptmalloc2/dlmalloc/BSD libc equivalent.  */
-		memalign(_alignment, size)
-#else
-#error Cannot aligned allocate with the memory allocator of an unknown system!
-#endif
-		: malloc(size);
+	ret=malloc(size);	/* magic headers takes care of alignment */
 #elif USE_ALLOCATOR==1
 	ret=_alignment ? mspace_memalign((mstate) mspace, _alignment, size) : mspace_malloc((mstate) mspace, size);
 #ifndef ENABLE_FAST_HEAP_DETECTION
