@@ -13,10 +13,11 @@ AddOption('--replacesystemallocator', dest='replacesystemallocator', nargs='?', 
 AddOption('--tolerant', dest='tolerant', nargs=1, default=1, help='enable tolerance of the system allocator (not guaranteed). On by default.')
 AddOption('--magicheaders', dest='magicheaders', nargs='?', const=True, help='enable magic headers (guaranteed tolerance of the system allocator)')
 AddOption('--useallocator', dest='useallocator', nargs=1, type='int', default=1, help='which allocator to use')
+AddOption('--uselocks', dest='uselocks', nargs=1, type='int', default=1, help='which form of locking to use')
 AddOption('--largepages', dest='largepages', nargs='?', const=True, help='enable large page support')
 AddOption('--fastheapdetection', dest='fastheapdetection', nargs='?', const=True, help='enable fast system-specific heap detection')
 AddOption('--defaultgranularity', dest='defaultgranularity', nargs=1, type='int', help='sets how much memory to claim or release from the system at one time')
-AddOption('--threadcachemax', dest='threadcachemax', nargs=1, type='int', help='sets what allocations should use the threadcache')
+AddOption('--threadcachemax', dest='threadcachemax', nargs=1, type='string', help='sets what allocations should use the threadcache')
 AddOption('--threadcachemaxbins', dest='threadcachemaxbins', nargs=1, type='int', help='sets the threadcache binning')
 AddOption('--threadcachemaxfreespace', dest='threadcachemaxfreespace', nargs=1, type='int', help='sets when the threadcache should be garbage collected')
 
@@ -36,13 +37,16 @@ if env.GetOption('replacesystemallocator'): env['CPPDEFINES']+=["REPLACE_SYSTEM_
 if env.GetOption('tolerant'): env['CPPDEFINES']+=["ENABLE_TOLERANT_NEDMALLOC"]
 if env.GetOption('magicheaders'): env['CPPDEFINES']+=["USE_MAGIC_HEADERS"]
 env['CPPDEFINES']+=[("USE_ALLOCATOR",env.GetOption('useallocator'))]
+env['CPPDEFINES']+=[("USE_LOCKS",env.GetOption('uselocks'))]
 if env.GetOption('largepages'): env['CPPDEFINES']+=["ENABLE_LARGE_PAGES"]
 if env.GetOption('fastheapdetection'): env['CPPDEFINES']+=["ENABLE_FAST_HEAP_DETECTION"]
 if env.GetOption('defaultgranularity'): env['CPPDEFINES']+=[("DEFAULT_GRANULARITY",env.GetOption('defaultgranularity'))]
 if env.GetOption('threadcachemax'):
-    env['CPPDEFINES']+=[("THREADCACHEMAX",env.GetOption('threadcachemax'))]
-    if not env.GetOption('threadcachemaxbins'):
-        maxbins=bitscanrev(env.GetOption('threadcachemax'))-4;
+    threadcachemax=int(env.GetOption('threadcachemax'))
+    if threadcachemax<=32: threadcachemax=0
+    env['CPPDEFINES']+=[("THREADCACHEMAX",threadcachemax)]
+    if not env.GetOption('threadcachemaxbins') and threadcachemax:
+        maxbins=bitscanrev(threadcachemax)-4;
         print "THREADCACHEMAX set but not THREADCACHEMAXBINS, so auto-setting THREADCACHEMAXBINS =", maxbins
         env['CPPDEFINES']+=[("THREADCACHEMAXBINS",maxbins)]
 if env.GetOption('threadcachemaxbins'): env['CPPDEFINES']+=[("THREADCACHEMAXBINS",env.GetOption('threadcachemaxbins'))]
@@ -114,7 +118,8 @@ else:
         env['CCFLAGS']+=["-O0", "-g"]
     else:
         env['CCFLAGS']+=["-O2", "-g"]
-    env['LIBS']+=["pthread"]
+    if env.GetOption('uselocks'):
+        env['LIBS']+=["pthread"]
     env['LINKFLAGS']+=[]
 
 # Build

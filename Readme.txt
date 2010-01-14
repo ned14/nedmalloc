@@ -1,4 +1,4 @@
-nedalloc v1.06 beta 1 13th January 2010:
+nedalloc v1.06 ?:
 -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
@@ -216,6 +216,10 @@ Fixing memory bugs now tends to be worth it in the long run.
 
 E. ChangeLog:
 -=-=-=-=-=-=-
+v1.06 ?:
+ * { 1154 } Fixed nedmalloc trying to use MLOCK_T even when USE_LOCKS=0. Thanks
+to Ariel Manzur for reporting this.
+
 v1.06 beta 1 13th January 2010:
  * { 1079 } Fixed misdeclaration of struct mallinfo as C++ type. Thanks to
 James Mansion for reporting this.

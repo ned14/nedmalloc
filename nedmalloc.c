@@ -49,9 +49,12 @@ DEALINGS IN THE SOFTWARE.
 
 
 #include "nedmalloc.h"
-#ifdef WIN32
+#if defined(WIN32)
  #include <malloc.h>
- #include <stddef.h>
+#endif
+#ifdef __linux__
+/* Sadly we can't include <malloc.h> as it causes a redefinition error */
+extern size_t malloc_usable_size(void *);
 #endif
 #if USE_ALLOCATOR==1
  #define MSPACES 1
@@ -114,7 +117,7 @@ DEALINGS IN THE SOFTWARE.
 /* The maximum size to be allocated from the thread cache */
 #ifndef THREADCACHEMAX
 #define THREADCACHEMAX 8192
-#elif !defined(THREADCACHEMAXBINS)
+#elif THREADCACHEMAX && !defined(THREADCACHEMAXBINS)
  #ifdef __GNUC__
   #warning If you are changing THREADCACHEMAX, do you also need to change THREADCACHEMAXBINS=(topbitpos(THREADCACHEMAX)-4)?
  #elif defined(_MSC_VER)
@@ -136,6 +139,7 @@ DEALINGS IN THE SOFTWARE.
 #endif
 
 
+#if USE_LOCKS
 #ifdef WIN32
  #define TLSVAR			DWORD
  #define TLSALLOC(k)	(*(k)=TlsAlloc(), TLS_OUT_OF_INDEXES==*(k))
@@ -158,6 +162,13 @@ static LPVOID ChkedTlsGetValue(DWORD idx)
  #define TLSFREE(k)		pthread_key_delete(k)
  #define TLSGET(k)		pthread_getspecific(k)
  #define TLSSET(k, a)	pthread_setspecific(k, a)
+#endif
+#else /* Probably if you're not using locks then you don't want ANY pthread stuff at all */
+ #define TLSVAR			void *
+ #define TLSALLOC(k)	(*k=0)
+ #define TLSFREE(k)		(k=0)
+ #define TLSGET(k)		k
+ #define TLSSET(k, a)	(k=a, 0)
 #endif
 
 #if defined(__cplusplus)
@@ -182,11 +193,17 @@ static void *RESTRICT leastusedaddress;
 static size_t largestusedblock;
 #endif
 /* Used to redirect system allocator ops if needed */
-extern void *(*sysmalloc)(size_t)=malloc;
-extern void *(*syscalloc)(size_t, size_t)=calloc;
-extern void *(*sysrealloc)(void *, size_t)=realloc;
-extern void (*sysfree)(void *)=free;
-extern size_t (*sysblksize)(void *)=
+extern void *(*sysmalloc)(size_t);
+extern void *(*syscalloc)(size_t, size_t);
+extern void *(*sysrealloc)(void *, size_t);
+extern void (*sysfree)(void *);
+extern size_t (*sysblksize)(void *);
+
+void *(*sysmalloc)(size_t)=malloc;
+void *(*syscalloc)(size_t, size_t)=calloc;
+void *(*sysrealloc)(void *, size_t)=realloc;
+void (*sysfree)(void *)=free;
+size_t (*sysblksize)(void *)=
 #ifdef _MSC_VER
 	/* This is the MSVCRT equivalent */
 	_msize;
@@ -553,7 +570,9 @@ typedef struct threadcache_t
 } threadcache;
 struct nedpool_t
 {
+#if USE_LOCKS
 	MLOCK_T mutex;
+#endif
 	void *uservalue;
 	int threads;						/* Max entries in m to use */
 	threadcache *caches[THREADCACHEMAXCACHES];
@@ -710,27 +729,40 @@ static NOINLINE threadcache *AllocCache(nedpool *RESTRICT p) THROWSPEC
 {
 	threadcache *tc=0;
 	int n, end;
+#if USE_LOCKS
 	ACQUIRE_LOCK(&p->mutex);
+#endif
 	for(n=0; n<THREADCACHEMAXCACHES && p->caches[n]; n++);
 	if(THREADCACHEMAXCACHES==n)
 	{	/* List exhausted, so disable for this thread */
+#if USE_LOCKS
 		RELEASE_LOCK(&p->mutex);
+#endif
 		return 0;
 	}
 	tc=p->caches[n]=(threadcache *) CallCalloc(p->m[0], sizeof(threadcache), 0);
 	if(!tc)
 	{
+#if USE_LOCKS
 		RELEASE_LOCK(&p->mutex);
+#endif
 		return 0;
 	}
 #ifdef FULLSANITYCHECKS
 	tc->magic1=*(unsigned int *)"NEDMALC1";
 	tc->magic2=*(unsigned int *)"NEDMALC2";
 #endif
-	tc->threadid=(long)(size_t)CURRENT_THREAD;
+	tc->threadid=
+#if USE_LOCKS
+		(long)(size_t)CURRENT_THREAD;
+#else
+		1;
+#endif
 	for(end=0; p->m[end]; end++);
 	tc->mymspace=abs(tc->threadid) % end;
+#if USE_LOCKS
 	RELEASE_LOCK(&p->mutex);
+#endif
 	if(TLSSET(p->mycache, (void *)(size_t)(n+1))) abort();
 	return tc;
 }
@@ -825,14 +857,18 @@ static void *threadcache_malloc(nedpool *RESTRICT p, threadcache *RESTRICT tc, s
 static NOINLINE void ReleaseFreeInCache(nedpool *RESTRICT p, threadcache *RESTRICT tc, int mymspace) THROWSPEC
 {
 	unsigned int age=THREADCACHEMAXFREESPACE/8192;
+#if USE_LOCKS
 	/*ACQUIRE_LOCK(&p->m[mymspace]->mutex);*/
+#endif
 	while(age && tc->freeInCache>=THREADCACHEMAXFREESPACE)
 	{
 		RemoveCacheEntries(p, tc, age);
 		/*printf("*** Removing cache entries older than %u (%u)\n", age, (unsigned int) tc->freeInCache);*/
 		age>>=1;
 	}
+#if USE_LOCKS
 	/*RELEASE_LOCK(&p->m[mymspace]->mutex);*/
+#endif
 }
 static void threadcache_free(nedpool *RESTRICT p, threadcache *RESTRICT tc, int mymspace, void *RESTRICT mem, size_t size) THROWSPEC
 {
@@ -905,7 +941,9 @@ static NOINLINE int InitPool(nedpool *RESTRICT p, size_t capacity, int threads) 
 	ensure_initialization();
 	ACQUIRE_MALLOC_GLOBAL_LOCK();
 	if(p->threads) goto done;
+#if USE_LOCKS
 	if(INITIAL_LOCK(&p->mutex)) goto err;
+#endif
 	if(TLSALLOC(&p->mycache)) goto err;
 #if USE_ALLOCATOR==0
 	p->m[0]=(mstate) mspacecounter++;
@@ -942,7 +980,9 @@ static NOINLINE mstate FindMSpace(nedpool *RESTRICT p, threadcache *RESTRICT tc,
 	unlocked one and if we fail, we create a new one so long as we don't
 	exceed p->threads */
 	int n, end;
-	for(n=end=*lastUsed+1; p->m[n]; end=++n)
+	n=end=*lastUsed+1;
+#if USE_LOCKS
+	for(; p->m[n]; end=++n)
 	{
 		if(TRY_LOCK(&p->m[n]->mutex)) goto found;
 	}
@@ -984,6 +1024,7 @@ static NOINLINE mstate FindMSpace(nedpool *RESTRICT p, threadcache *RESTRICT tc,
 badexit:
 	ACQUIRE_LOCK(&p->m[*lastUsed]->mutex);
 	return p->m[*lastUsed];
+#endif
 found:
 	*lastUsed=n;
 	if(tc)
@@ -1005,7 +1046,9 @@ typedef struct PoolList_t
 	nedpool *list[16];
 #endif
 } PoolList;
+#if USE_LOCKS
 static MLOCK_T poollistlock;
+#endif
 static PoolList *poollist;
 NEDMALLOCPTRATTR nedpool *nedcreatepool(size_t capacity, int threads) THROWSPEC
 {
@@ -1014,13 +1057,17 @@ NEDMALLOCPTRATTR nedpool *nedcreatepool(size_t capacity, int threads) THROWSPEC
 	{
 		PoolList *newpoollist=0;
 		if(!(newpoollist=(PoolList *) nedpcalloc(0, 1, sizeof(PoolList)+sizeof(nedpool *)))) return 0;
+#if USE_LOCKS
 		INITIAL_LOCK(&poollistlock);
 		ACQUIRE_LOCK(&poollistlock);
+#endif
 		poollist=newpoollist;
 		poollist->size=sizeof(poollist->list)/sizeof(nedpool *);
 	}
+#if USE_LOCKS
 	else
 		ACQUIRE_LOCK(&poollistlock);
+#endif
 	if(poollist->length==poollist->size)
 	{
 		PoolList *newpoollist=0;
@@ -1040,13 +1087,19 @@ NEDMALLOCPTRATTR nedpool *nedcreatepool(size_t capacity, int threads) THROWSPEC
 	}
 	poollist->list[poollist->length++]=ret;
 badexit:
-	RELEASE_LOCK(&poollistlock);
+	{
+#if USE_LOCKS
+		RELEASE_LOCK(&poollistlock);
+#endif
+	}
 	return ret;
 }
 void neddestroypool(nedpool *p) THROWSPEC
 {
 	unsigned int n;
+#if USE_LOCKS
 	ACQUIRE_LOCK(&p->mutex);
+#endif
 	DestroyCaches(p);
 	for(n=0; p->m[n]; n++)
 	{
@@ -1055,10 +1108,14 @@ void neddestroypool(nedpool *p) THROWSPEC
 #endif
 		p->m[n]=0;
 	}
+#if USE_LOCKS
 	RELEASE_LOCK(&p->mutex);
+#endif
 	if(TLSFREE(p->mycache)) abort();
 	nedpfree(0, p);
+#if USE_LOCKS
 	ACQUIRE_LOCK(&poollistlock);
+#endif
 	assert(poollist);
 	for(n=0; n<poollist->length && poollist->list[n]!=p; n++);
 	assert(n!=poollist->length);
@@ -1069,13 +1126,17 @@ void neddestroypool(nedpool *p) THROWSPEC
 		nedpfree(0, poollist);
 		poollist=0;
 	}
+#if USE_LOCKS
 	RELEASE_LOCK(&poollistlock);
+#endif
 }
 void neddestroysyspool() THROWSPEC
 {
 	nedpool *p=&syspool;
 	int n;
+#if USE_LOCKS
 	ACQUIRE_LOCK(&p->mutex);
+#endif
 	DestroyCaches(p);
 	for(n=0; p->m[n]; n++)
 	{
@@ -1090,18 +1151,26 @@ void neddestroysyspool() THROWSPEC
 	for(n=0; n<MAXTHREADSINPOOL+1; n++)
 		p->m[n]=(mstate)(size_t)(sizeof(size_t)>4 ? 0xdeadbeefdeadbeefULL : 0xdeadbeefUL);
 	if(TLSFREE(p->mycache)) abort();
+#if USE_LOCKS
 	RELEASE_LOCK(&p->mutex);
+#endif
 }
 nedpool **nedpoollist() THROWSPEC
 {
 	nedpool **ret=0;
 	if(poollist)
 	{
+#if USE_LOCKS
 		ACQUIRE_LOCK(&poollistlock);
+#endif
 		if(!(ret=(nedpool **) nedmalloc((poollist->length+1)*sizeof(nedpool *)))) goto badexit;
 		memcpy(ret, poollist->list, (poollist->length+1)*sizeof(nedpool *));
 badexit:
-		RELEASE_LOCK(&poollistlock);
+		{
+#if USE_LOCKS
+			RELEASE_LOCK(&poollistlock);
+#endif
+		}
 	}
 	return ret;
 }
@@ -1159,19 +1228,28 @@ void neddisablethreadcache(nedpool *p) THROWSPEC
 	nedtrimthreadcache(p, 1);
 }
 
+#if USE_LOCKS && USE_ALLOCATOR==1
 #define GETMSPACE(m,p,tc,ms,s,action)                 \
   do                                                  \
   {                                                   \
     mstate m = GetMSpace((p),(tc),(ms),(s));          \
     action;                                           \
-	if(USE_ALLOCATOR==1) { RELEASE_LOCK(&m->mutex); } \
+	RELEASE_LOCK(&m->mutex);                          \
   } while (0)
+#else
+#define GETMSPACE(m,p,tc,ms,s,action)                 \
+  do                                                  \
+  {                                                   \
+    mstate m = GetMSpace((p),(tc),(ms),(s));          \
+    action;                                           \
+  } while (0)
+#endif
 
 static FORCEINLINE mstate GetMSpace(nedpool *RESTRICT p, threadcache *RESTRICT tc, int mymspace, size_t size) THROWSPEC
 {	/* Returns a locked and ready for use mspace */
 	mstate m=p->m[mymspace];
 	assert(m);
-#if USE_ALLOCATOR==1
+#if USE_LOCKS && USE_ALLOCATOR==1
 	if(!TRY_LOCK(&p->m[mymspace]->mutex)) m=FindMSpace(p, tc, &mymspace, size);
 	/*assert(IS_LOCKED(&p->m[mymspace]->mutex));*/
 #endif
@@ -1215,7 +1293,9 @@ static FORCEINLINE void GetThreadCache(nedpool *RESTRICT *RESTRICT p, threadcach
 	}
 	else GetThreadCache_cold2(p, tc, mymspace, mycache);
 	assert(*mymspace>=0);
+#if USE_LOCKS
 	assert(!(*tc) || (long)(size_t)CURRENT_THREAD==(*tc)->threadid);
+#endif
 #ifdef FULLSANITYCHECKS
 	if(*tc)
 	{
