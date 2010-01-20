@@ -229,7 +229,7 @@
 				LargeAddressAware="2"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
-				LinkTimeCodeGeneration="4"
+				LinkTimeCodeGeneration="1"
 				EntryPointSymbol="DllPreMainCRTStartup"
 				RandomizedBaseAddress="2"
 				TargetMachine="1"

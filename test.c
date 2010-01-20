@@ -7,9 +7,9 @@ An example of how to use nedalloc
 #include <stdlib.h>
 #include "nedmalloc.h"
 
-#define THREADS 5
-#define RECORDS (100000/THREADS)
-/*#define TORTURETEST*/
+#define THREADS 1
+#define RECORDS (10000/THREADS)
+#define TORTURETEST
 /*#define USE_NEDMALLOC_DLL*/
 /*#define ENABLE_FAST_HEAP_DETECTION*/
 
@@ -351,7 +351,7 @@ int main(void)
 	}
 #endif
 
-	if(1)
+	if(0)
 	{
 		printf("\nTesting standard allocator with %d threads ...\n", THREADS);
 		std=runtest();
