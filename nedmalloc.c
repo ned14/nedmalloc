@@ -547,11 +547,13 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedindependent_comalloc(size_t elem
 struct threadcacheblk_t;
 typedef struct threadcacheblk_t threadcacheblk;
 struct threadcacheblk_t
-{	/* Keep less than 16 bytes on 32 bit systems and 32 bytes on 64 bit systems */
+{	/* Keep less than 32 bytes as sizeof(threadcacheblk) is the minimum allocation size */
 #ifdef FULLSANITYCHECKS
 	unsigned int magic;
 #endif
-	unsigned int lastUsed, size;
+	int isforeign;
+	unsigned int lastUsed;
+	size_t size;
 	threadcacheblk *next, *prev;
 };
 typedef struct threadcache_t
@@ -634,8 +636,10 @@ static void tcsanitycheck(threadcacheblk **ptr) THROWSPEC
 	assert((ptr[0] && ptr[1]) || (!ptr[0] && !ptr[1]));
 	if(ptr[0] && ptr[1])
 	{
-		assert(nedblksize(ptr[0])>=sizeof(threadcacheblk));
-		assert(nedblksize(ptr[1])>=sizeof(threadcacheblk));
+		assert(ptr[0]->isforeign || nedblkmstate(ptr[0]));
+		assert(ptr[1]->isforeign || nedblkmstate(ptr[1]));
+		assert(nedblksize(0, ptr[0])>=sizeof(threadcacheblk));
+		assert(nedblksize(0, ptr[1])>=sizeof(threadcacheblk));
 		assert(*(unsigned int *) "NEDN"==ptr[0]->magic);
 		assert(*(unsigned int *) "NEDN"==ptr[1]->magic);
 		assert(!ptr[0]->prev);
@@ -657,6 +661,8 @@ static void tcfullsanitycheck(threadcache *tc) THROWSPEC
 		tcsanitycheck(tcbptr);
 		for(b=tcbptr[0]; b; ob=b, b=b->next)
 		{
+			assert(b->isforeign || nedblkmstate(b));
+			assert(nedblksize(0, b)>=sizeof(threadcacheblk));
 			assert(*(unsigned int *) "NEDN"==b->magic);
 			assert(!ob || ob->next==b);
 			assert(!ob || b->prev==ob);
@@ -694,7 +700,7 @@ static NOINLINE void RemoveCacheEntries(nedpool *RESTRICT p, threadcache *RESTRI
 					*tcbptr=0;
 				tc->freeInCache-=blksize;
 				assert((long) tc->freeInCache>=0);
-				CallFree(0, f, 0);
+				CallFree(0, f, f->isforeign);
 				/*tcsanitycheck(tcbptr);*/
 			}
 		}
@@ -870,7 +876,7 @@ static NOINLINE void ReleaseFreeInCache(nedpool *RESTRICT p, threadcache *RESTRI
 	/*RELEASE_LOCK(&p->m[mymspace]->mutex);*/
 #endif
 }
-static void threadcache_free(nedpool *RESTRICT p, threadcache *RESTRICT tc, int mymspace, void *RESTRICT mem, size_t size) THROWSPEC
+static void threadcache_free(nedpool *RESTRICT p, threadcache *RESTRICT tc, int mymspace, void *RESTRICT mem, size_t size, int isforeign) THROWSPEC
 {
 	unsigned int bestsize;
 	unsigned int idx=size2binidx(size);
@@ -910,6 +916,7 @@ static void threadcache_free(nedpool *RESTRICT p, threadcache *RESTRICT tc, int 
 #ifdef FULLSANITYCHECKS
 	tck->magic=*(unsigned int *) "NEDN";
 #endif
+	tck->isforeign=isforeign;
 	tck->lastUsed=++tc->frees;
 	tck->size=(unsigned int) size;
 	tck->next=*binsptr;
@@ -1377,7 +1384,7 @@ NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPE
 		{
 			memcpy(ret, mem, memsize<size ? memsize : size);
 			if(memsize>=sizeof(threadcacheblk) && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
-				threadcache_free(p, tc, mymspace, mem, memsize);
+				threadcache_free(p, tc, mymspace, mem, memsize, isforeign);
 			else
 				CallFree(0, mem, isforeign);
 		}
@@ -1413,7 +1420,7 @@ void   nedpfree(nedpool *p, void *mem) THROWSPEC
 	GetThreadCache(&p, &tc, &mymspace, 0);
 #if THREADCACHEMAX
 	if(mem && tc && memsize>=sizeof(threadcacheblk) && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
-		threadcache_free(p, tc, mymspace, mem, memsize);
+		threadcache_free(p, tc, mymspace, mem, memsize, isforeign);
 	else
 #endif
 		CallFree(0, mem, isforeign);

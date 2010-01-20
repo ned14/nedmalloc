@@ -224,6 +224,8 @@ preventing failed-to-RTM user bug reports :)
  * { 1154 } Fixed nedmalloc trying to use MLOCK_T even when USE_LOCKS=0. Thanks
 to Ariel Manzur for reporting this.
  * { 1155 } Fixed USE_SPIN_LOCKS=0 not compiling on Windows.
+ * { 1157 } Fixed bug where foreign blocks entering the threadcache weren't
+being marked as such, thus typically causing a segfault on process exit.
 
 v1.06 beta 1 13th January 2010:
  * { 1079 } Fixed misdeclaration of struct mallinfo as C++ type. Thanks to
