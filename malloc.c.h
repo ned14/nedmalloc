@@ -1585,7 +1585,9 @@ static FORCEINLINE void* win32mmap(size_t size) {
   isn't around the size of a large page */
   if(largepagesavailable && size >= 1*1024*1024) {
     ptr = VirtualAlloc(baseaddress, size, MEM_RESERVE|MEM_COMMIT|MEM_LARGE_PAGES, PAGE_READWRITE);
-    if(!ptr && ERROR_PRIVILEGE_NOT_HELD==GetLastError()) largepagesavailable=0;
+    if(!ptr) {
+        if(ERROR_PRIVILEGE_NOT_HELD==GetLastError()) largepagesavailable=0;
+    }
   }
 #endif
   if(!ptr) {
@@ -1968,10 +1970,10 @@ static int pthread_init_lock (MLOCK_T *sl) {
 /* Win32 critical sections */
 #define MLOCK_T               CRITICAL_SECTION
 #define CURRENT_THREAD        GetCurrentThreadId()
-#define INITIAL_LOCK(s)       (!InitializeCriticalSectionAndSpinCount((s), 0x80000000|4000))
-#define ACQUIRE_LOCK(s)       (EnterCriticalSection(sl), 0)
-#define RELEASE_LOCK(s)       LeaveCriticalSection(sl)
-#define TRY_LOCK(s)           TryEnterCriticalSection(sl)
+#define INITIAL_LOCK(sl)      (!InitializeCriticalSectionAndSpinCount((sl), 0x80000000|4000))
+#define ACQUIRE_LOCK(sl)      (EnterCriticalSection(sl), 0)
+#define RELEASE_LOCK(sl)      LeaveCriticalSection(sl)
+#define TRY_LOCK(sl)          TryEnterCriticalSection(sl)
 #define NEED_GLOBAL_LOCK_INIT
 
 static MLOCK_T malloc_global_mutex;

@@ -14,8 +14,10 @@ AddOption('--tolerant', dest='tolerant', nargs=1, default=1, help='enable tolera
 AddOption('--magicheaders', dest='magicheaders', nargs='?', const=True, help='enable magic headers (guaranteed tolerance of the system allocator)')
 AddOption('--useallocator', dest='useallocator', nargs=1, type='int', default=1, help='which allocator to use')
 AddOption('--uselocks', dest='uselocks', nargs=1, type='int', default=1, help='which form of locking to use')
+AddOption('--nospinlocks', dest='nospinlocks', nargs='?', const=True, help='use system mutexs rather than CPU spinlocks')
 AddOption('--largepages', dest='largepages', nargs='?', const=True, help='enable large page support')
 AddOption('--fastheapdetection', dest='fastheapdetection', nargs='?', const=True, help='enable fast system-specific heap detection')
+AddOption('--maxthreadsinpool', dest='maxthreadsinpool', nargs=1, type='int', help='sets how much memory bloating to cause for more performance')
 AddOption('--defaultgranularity', dest='defaultgranularity', nargs=1, type='int', help='sets how much memory to claim or release from the system at one time')
 AddOption('--threadcachemax', dest='threadcachemax', nargs=1, type='string', help='sets what allocations should use the threadcache')
 AddOption('--threadcachemaxbins', dest='threadcachemaxbins', nargs=1, type='int', help='sets the threadcache binning')
@@ -38,8 +40,10 @@ if env.GetOption('tolerant'): env['CPPDEFINES']+=["ENABLE_TOLERANT_NEDMALLOC"]
 if env.GetOption('magicheaders'): env['CPPDEFINES']+=["USE_MAGIC_HEADERS"]
 env['CPPDEFINES']+=[("USE_ALLOCATOR",env.GetOption('useallocator'))]
 env['CPPDEFINES']+=[("USE_LOCKS",env.GetOption('uselocks'))]
+if env.GetOption('nospinlocks'): env['CPPDEFINES']+=[("USE_SPIN_LOCKS",0)]
 if env.GetOption('largepages'): env['CPPDEFINES']+=["ENABLE_LARGE_PAGES"]
 if env.GetOption('fastheapdetection'): env['CPPDEFINES']+=["ENABLE_FAST_HEAP_DETECTION"]
+if env.GetOption('maxthreadsinpool'): env['CPPDEFINES']+=[("MAXTHREADSINPOOL",env.GetOption('maxthreadsinpool'))]
 if env.GetOption('defaultgranularity'): env['CPPDEFINES']+=[("DEFAULT_GRANULARITY",env.GetOption('defaultgranularity'))]
 if env.GetOption('threadcachemax'):
     threadcachemax=int(env.GetOption('threadcachemax'))
@@ -95,7 +99,7 @@ if sys.platform=='win32':
         env['CCFLAGS']+=["/Od", "/MDd"]
     else:
         env['CCFLAGS']+=["/O2", "/MD"]
-        #env['CCFLAGS']+=["/GL"]
+        #env['CCFLAGS']+=["/GL"]         # Do link time code generation
     env['LIBS']+=["psapi", "user32", "advapi32"]
     env['LINKFLAGS']+=["/DEBUG"]                # Output debug symbols
     env['LINKFLAGS']+=["/LARGEADDRESSAWARE"]    # Works past 2Gb

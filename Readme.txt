@@ -217,8 +217,13 @@ Fixing memory bugs now tends to be worth it in the long run.
 E. ChangeLog:
 -=-=-=-=-=-=-
 v1.06 ?:
+ * { 1153 } Added detection of whether host process is using MSVCRT or MSVCRTD
+and the fixing up of which runtime tolerant nedmalloc should use if nedmalloc
+was linked differently. This ought to save a great deal of hassle later on by
+preventing failed-to-RTM user bug reports :)
  * { 1154 } Fixed nedmalloc trying to use MLOCK_T even when USE_LOCKS=0. Thanks
 to Ariel Manzur for reporting this.
+ * { 1155 } Fixed USE_SPIN_LOCKS=0 not compiling on Windows.
 
 v1.06 beta 1 13th January 2010:
  * { 1079 } Fixed misdeclaration of struct mallinfo as C++ type. Thanks to
