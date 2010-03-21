@@ -226,6 +226,8 @@ to Ariel Manzur for reporting this.
  * { 1155 } Fixed USE_SPIN_LOCKS=0 not compiling on Windows.
  * { 1157 } Fixed bug where foreign blocks entering the threadcache weren't
 being marked as such, thus typically causing a segfault on process exit.
+ * { 1158 } Fixed compilation problems on mingw. Thanks to Amanieu d'Antras for
+reporting these.
 
 v1.06 beta 1 13th January 2010:
  * { 1079 } Fixed misdeclaration of struct mallinfo as C++ type. Thanks to

@@ -1299,7 +1299,7 @@ int mspace_mallopt(int, int);
 
 /*------------------------------ internal #includes ---------------------- */
 
-#ifdef WIN32
+#ifdef _MSC_VER
 #pragma warning( disable : 4146 ) /* no "unsigned" warnings */
 #endif /* WIN32 */
 
@@ -1365,7 +1365,7 @@ extern void*     sbrk(ptrdiff_t);
 #if defined (__SVR4) && defined (__sun)  /* solaris */
 #include <thread.h>
 #endif /* solaris */
-#else
+#elif defined(_MSC_VER)
 #ifndef _M_AMD64
 /* These are already defined on AMD64 builds */
 #ifdef __cplusplus
@@ -1381,6 +1381,10 @@ LONG __cdecl _InterlockedExchange(LONG volatile *Target, LONG Value);
 #pragma intrinsic (_InterlockedExchange)
 #define interlockedcompareexchange _InterlockedCompareExchange
 #define interlockedexchange _InterlockedExchange
+#elif defined(WIN32) && defined(__GNUC__)
+/* MinGW or something like it */
+#define interlockedcompareexchange(a, b, c) __sync_val_compare_and_swap(a, c, b)
+#define interlockedexchange __sync_lock_test_and_set
 #endif /* Win32 */
 #endif /* USE_LOCKS */
 
@@ -1880,7 +1884,7 @@ struct win32_mlock_t {
 #define TRY_LOCK(sl)          win32_try_lock(sl)
 #define SPINS_PER_YIELD       63
 
-static MLOCK_T malloc_global_mutex = { 0, 0, 0};
+static MLOCK_T malloc_global_mutex = {0, "", 0, 0};
 
 static FORCEINLINE int win32_acquire_lock (MLOCK_T *sl) {
   int spins = 0;

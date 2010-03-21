@@ -204,7 +204,7 @@ void *(*syscalloc)(size_t, size_t)=calloc;
 void *(*sysrealloc)(void *, size_t)=realloc;
 void (*sysfree)(void *)=free;
 size_t (*sysblksize)(void *)=
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__MINGW32__)
 	/* This is the MSVCRT equivalent */
 	_msize;
 #elif defined(__linux__)
@@ -442,7 +442,11 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 		}
 #else
 #ifdef WIN32
+#ifdef _MSC_VER
 		__try
+#elif defined(__MINGW32__)
+		__try1
+#endif
 #endif
 		{
 			/* We try to return zero here if it isn't one of our own blocks, however
@@ -470,22 +474,29 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 				/* Having sanity checked prev_foot and head, check next block */
 				if(!ismmapped && (!next_pinuse(p) || (next_chunk(p)->head & FLAG4_BIT))) return 0;
 				/* Reduced uncertainty by 0.5^5 = 3.13% or 0.5^18 = 0.00038% */
-	#if 0
+#if 0
 				/* If previous block is free, check that its next block pointer equals us */
 				if(!ismmapped && !pinuse(p))
 					if(next_chunk(prev_chunk(p))!=p) return 0;
 				/* We could start comparing prev_foot's for similarity but it starts getting slow. */
-	#endif
+#endif
 				fm = get_mstate_for(p);
 				if(!is_aligned(fm) || (void *)fm<leastusedaddress_) return 0;
+#if 0
+				/* See if mem is lower in memory than mem */
 				if((size_t)mem-(size_t)fm>=(size_t)1<<(SIZE_T_BITSIZE-1)) return 0;
+#endif
 				assert(ok_magic(fm));	/* If this fails, someone tried to free a block twice */
 				if(ok_magic(fm))
 					return fm;
 			}
 		}
 #ifdef WIN32
+#ifdef _MSC_VER
 		__except(1) { }
+#elif defined(__MINGW32__)
+		__except1(1) { }
+#endif
 #endif
 #endif
 #endif
