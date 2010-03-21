@@ -216,7 +216,7 @@ Fixing memory bugs now tends to be worth it in the long run.
 
 E. ChangeLog:
 -=-=-=-=-=-=-
-v1.06 ?:
+v1.06 beta 2 21st March 2010:
  * { 1153 } Added detection of whether host process is using MSVCRT or MSVCRTD
 and the fixing up of which runtime tolerant nedmalloc should use if nedmalloc
 was linked differently. This ought to save a great deal of hassle later on by
@@ -228,6 +228,7 @@ to Ariel Manzur for reporting this.
 being marked as such, thus typically causing a segfault on process exit.
  * { 1158 } Fixed compilation problems on mingw. Thanks to Amanieu d'Antras for
 reporting these.
+ * { 1159 } Released as beta2.
 
 v1.06 beta 1 13th January 2010:
  * { 1079 } Fixed misdeclaration of struct mallinfo as C++ type. Thanks to
