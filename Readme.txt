@@ -1,4 +1,4 @@
-nedalloc v1.06 ?:
+nedalloc v1.10 ?:
 -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 by Niall Douglas (http://www.nedprod.com/programs/portable/nedmalloc/)
@@ -25,6 +25,7 @@ code!
 
 Table of Contents:
   A: How to use
+     A1: Windows-only features
   B: Notes
   C: Speed Comparisons
   D: Troubleshooting
@@ -46,8 +47,8 @@ If you'd like nedmalloc as a Windows DLL or ELF shared object, the easiest
 thing to do is to use scons (http://www.scons.org/) to build nedmalloc (or
 use the enclosed MSVC project files).
 
-Windows-only features:
--=-=-=-=-=-=-=-=-=-=-=
+A1: Windows-only features:
+-=-=-=-=-=-=-=-=-=-=-=-=-=
 If you are running on Windows, there are quite a few extra options available
 thanks to work generously sponsored by Applied Research Associates (USA).
 Firstly you can build nedmalloc as a DLL and link that into your application
@@ -55,6 +56,8 @@ Firstly you can build nedmalloc as a DLL and link that into your application
 your application and therefore call neddisablethreadcache() on all currently
 existing nedpool's for you.
 
+A1a: Replacing the system allocator in the whole process
+--------------------------------------------------------
 If you define REPLACE_SYSTEM_ALLOCATOR when building the DLL then the DLL
 will replace most usage of the MSVCRT allocator within any process it is
 loaded into with nedmalloc's routines instead, whilst remaining able to
@@ -75,14 +78,8 @@ For those not able to use Microsoft Detours, there is an enclosed
 nedmalloc_loader program which does one variant of the same thing. It may
 or may not be useful to you - it is not intended to be maintained.
 
-When building the nedmalloc DLL for the purposes of DLL insertion, you NEED
-to match MSVCRT versions or you will have a CRT heap conflict. In other words,
-if the program using nedmalloc is linked against MSVCRTD, then so must be
-nedmalloc or vice versa. As a result of this issue, by default nedmalloc
-ALWAYS LINKS TO MSVCRT EVEN IN DEBUG BUILDS unless configured otherwise.
-This allows problem-free usage with release build applications which is
-where nedmalloc tends to be most commonly deployed.
-
+A1b: Large Page support
+-----------------------
 Lastly for some applications defining ENABLE_LARGE_PAGES can give a 10-15%
 performance increase by having nedmalloc allocate using large pages only.
 Large pages take much less space in the TLB cache and can greatly benefit
@@ -96,26 +93,36 @@ using the DLL you will have to do this manually yourself.
 B. Notes:
 -=-=-=-=-
 If you want the very latest version of this allocator, get it from the
-TnFOX SVN repository at svn://svn.berlios.de/viewcvs/tnfox/trunk/src/nedmalloc
+TnFOX GIT repository at either of (both are identical mirrors):
+ * git://tnfox.git.sourceforge.net/gitroot/tnfox/tnfox/src/nedmalloc
+ * git://github.com/ned14/tnfox.git/src/nedmalloc
 
+IF YOU THINK YOU HAVE FOUND A BUG, PLEASE CHECK ONE OF THESE REPOS FIRST
+BEFORE REPORTING IT!
+
+B1: Memory Bloating
+-------------------
 Because of how nedalloc allocates an mspace per thread, it can cause
 severe bloating of memory usage under certain allocation patterns.
-You can substantially reduce this wastage by setting MAXTHREADSINPOOL
+You can substantially reduce this wastage by setting DEFAULTMAXTHREADSINPOOL
 or the threads parameter to nedcreatepool() to a fraction of the number of
 threads which would normally be in a pool at once. This will reduce
-bloating at the cost of an increase in lock contention. If allocated size
-is less than THREADCACHEMAX, locking is avoided 90-99% of the time and
-if most of your allocations are below this value, you can safely set
-MAXTHREADSINPOOL to one.
+bloating at the cost of an increase in lock contention, with
+DEFAULTMAXTHREADSINPOOL=1 removing almost all bloating. If the block sizes
+typically allocated are less than THREADCACHEMAX, locking is avoided 90-99%
+of the time and if most of your allocations are below this value, you can
+safely set DEFAULTMAXTHREADSINPOOL or even MAXTHREADSINPOOL to one.
 
+B2: Memory Leakage
+------------------
 You will suffer memory leakage unless you call neddisablethreadcache()
-per pool for every thread which exits. This is because nedalloc cannot
-portably know when a thread exits and thus when its thread cache can
-be returned for use by other code. Don't forget pool zero, the system pool.
-This of course is not an issue if you use nedmalloc as a DLL on Windows.
-On some POSIX threads implementations there exists a pthread_atexit() which
-registers a termination handler for thread exit - if you don't have one of
-these then you'll have to do it manually.
+per pool for every thread which exits unless you are using nedmalloc from
+its DLL on Windows. This is because nedalloc cannot portably know when a
+thread exits and thus when its thread cache can be returned for use by other
+code. Don't forget pool zero, the system pool. On some POSIX threads
+implementations there exists a pthread_atexit() which registers a termination
+handler for thread exit - if you don't have one of these then you'll have to
+do it manually.
 
 Equally if you use nedmalloc from a dynamically loaded DLL or shared object
 which you later kick out of memory, you will leak memory if you don't disable
@@ -123,6 +130,8 @@ all thread caches for all pools (as per the preceding paragraph), destroy all
 thread pools using neddestroypool() and destroy the system pool using
 neddestroysyspool().
 
+B3: The Threadcache
+-------------------
 For C++ type allocation patterns (where the same sizes of memory are
 regularly allocated and deallocated as objects are created and destroyed),
 the threadcache always benefits performance. If however your allocation
@@ -133,16 +142,50 @@ printing in release mode) then you should disable the thread cache for
 that thread. You can compile out the threadcache code by setting
 THREADCACHEMAX to zero.
 
+B4: Memory Mapping Remap Support
+--------------------------------
+On Linux there is a non-portable function mremap() which lets you resize a
+mmapped region and on Windows dlmalloc implements a functional equivalent
+to mremap(). These functions can VERY significantly improve the speed of
+resizing large memory allocations - i.e. the ones which use mmap() directly
+as their size exceeds DEFAULT_MMAP_THRESHOLD - because it avoids a costly
+memory copy from the old location into the new location. As this is normally
+a good thing, HAVE_MREMAP is by default set to 1 on Linux and Windows.
+
+Unfortunately HAVE_MREMAP introduces a significant penalty on 32 bit processors.
+In order for mmap extensions to have a chance of working, nedmalloc reserves
+twice as much address space as the mmapped size requested. This is unimportant
+on 64 bit systems where address space is in abundance, but it can lead to
+address space exhaustion long before memory exhaustion on 32 bit systems.
+On a platform like say Windows, an x86 process only gets about 1.5Gb of
+address space - in a worst case scenario, a process using just 768Mb of RAM
+could no longer be able to allocate new memory.
+
+Such a scenario could only occur if the process does a LOT of allocations
+exceeding DEFAULT_MMAP_THRESHOLD as this is the only case where this problem
+occurs. If this becomes a problem for you, you can set HAVE_MREMAP=0 to
+disable the remapping code and the speculative address space reservation, or
+else indeed you could significantly increase DEFAULT_MMAP_THRESHOLD instead.
+
 C. Speed comparisons:
 -=-=-=-=-=-=-=-=-=-=-
 See Benchmarks.xls for details.
 
-The enclosed test.c can do two things: it can be a torture test or a speed
-test. The speed test is designed to be a representative synthetic
-memory allocator test. It works by randomly mixing allocations with frees
-with half of the allocation sizes being a two power multiple less than
-512 bytes (to mimic C++ stack instantiated objects) and the other half
-being a simple random value less than 16Kb. 
+The enclosed test.c can do one of two things: it can be a torture test which
+mostly hammers realloc() or it can be a pure speed test which sticks to simple
+malloc() and free(). If you enable C++ mode, half of the allocation sizes will
+be a two power multiple less than 512 bytes (to mimic C++ stack instantiated
+objects) which are extremely common in C++ code.
+
+The torture test is designed to mercilessly work realloc() which is the most
+complex and complete code path in any memory allocator. Most allocators have
+*very* poor realloc() performance - not so nedmalloc which makes use of mremap()
+support on Linux and Windows. Even without mremap() support nedmalloc's realloc()
+tends to be significantly faster than any standard allocator.
+
+The speed test is designed to be a representative synthetic memory allocator
+test where most allocations follow a stack pattern. It works by randomly mixing
+allocations with frees with sizes being a random value less than 16Kb. 
 
 The real world code results are from Tn's TestIO benchmark. This is a
 heavily multithreaded and memory intensive benchmark with a lot of branching
@@ -169,8 +212,8 @@ Even though debugging an application for memory errors is a true black art made
 possible only with a great deal of patience, intuition and skill, here is a checklist
 for things to do before reporting a bug in nedmalloc:
 
-1. Make SURE you try nedmalloc from SVN HEAD. For around six months of 2007 I kept
-getting the same report of a bug long fixed in SVN HEAD.
+1. Make SURE you try nedmalloc from GIT HEAD. For around six months of 2007 I kept
+getting the same report of a bug long fixed in GIT HEAD.
 
 2. Make use of nedmalloc's internal debug routines. Try turning on full sanity
 checks by #define FULLSANITYCHECKS 1. Also make use of all the assertion checking
@@ -216,6 +259,11 @@ Fixing memory bugs now tends to be worth it in the long run.
 
 E. ChangeLog:
 -=-=-=-=-=-=-
+v1.10 beta 1 ?:
+ * { master xxxxxxx] Moved from SVN to GIT. Bumped version to v1.10 as new ARA
+contract will involve significant further improvements mainly centering around
+realloc() performance.
+ 
 v1.06 beta 2 21st March 2010:
  * { 1153 } Added detection of whether host process is using MSVCRT or MSVCRTD
 and the fixing up of which runtime tolerant nedmalloc should use if nedmalloc
