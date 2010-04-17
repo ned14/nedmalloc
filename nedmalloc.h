@@ -1,5 +1,5 @@
 /* nedalloc, an alternative malloc implementation for multiple threads without
-lock contention based on dlmalloc v2.8.3. (C) 2005-2009 Niall Douglas
+lock contention based on dlmalloc v2.8.4. (C) 2005-2010 Niall Douglas
 
 Boost Software License - Version 1.0 - August 17th, 2003
 
@@ -200,6 +200,8 @@ system allocator - note that there is a small (>0.01%) but real chance of segfau
 systems when passing non-nedmalloc blocks if you don't use USE_MAGIC_HEADERS.
 */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT mem) THROWSPEC;
+/* Identical to nedblksize() except without the isforeign */
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR size_t nedmemsize(void *RESTRICT mem) THROWSPEC;
 
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void nedsetvalue(void *v) THROWSPEC;
 

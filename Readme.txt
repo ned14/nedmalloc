@@ -260,9 +260,12 @@ Fixing memory bugs now tends to be worth it in the long run.
 E. ChangeLog:
 -=-=-=-=-=-=-
 v1.10 beta 1 ?:
- * { master xxxxxxx] Moved from SVN to GIT. Bumped version to v1.10 as new ARA
+ * [master 89f1806] Moved from SVN to GIT. Bumped version to v1.10 as new ARA
 contract will involve significant further improvements mainly centering around
 realloc() performance.
+ * [master xxxxxxx] Added nedmemsize() for API compatibility with other
+allocators. Added DEFAULTMAXTHREADSINPOOL and set it to FOUR which is a
+BREAKING CHANGE from previous versions of nedmalloc (which set it to 16).
  
 v1.06 beta 2 21st March 2010:
  * { 1153 } Added detection of whether host process is using MSVCRT or MSVCRTD

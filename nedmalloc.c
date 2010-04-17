@@ -1,5 +1,5 @@
 /* Alternative malloc implementation for multiple threads without
-lock contention based on dlmalloc. (C) 2005-2009 Niall Douglas
+lock contention based on dlmalloc. (C) 2005-2010 Niall Douglas
 
 Boost Software License - Version 1.0 - August 17th, 2003
 
@@ -106,13 +106,9 @@ extern size_t malloc_usable_size(void *);
  #endif
 #endif
 
-/* The maximum concurrent threads in a pool possible */
-#ifndef MAXTHREADSINPOOL
-#define MAXTHREADSINPOOL 16
-#endif
-/* The maximum number of threadcaches which can be allocated */
-#ifndef THREADCACHEMAXCACHES
-#define THREADCACHEMAXCACHES 256
+/* The default number of threads allowed into a pool at once */
+#ifndef DEFAULTMAXTHREADSINPOOL
+#define DEFAULTMAXTHREADSINPOOL 4
 #endif
 /* The maximum size to be allocated from the thread cache */
 #ifndef THREADCACHEMAX
@@ -123,6 +119,14 @@ extern size_t malloc_usable_size(void *);
  #elif defined(_MSC_VER)
   #pragma message(__FILE__ ": WARNING: If you are changing THREADCACHEMAX, do you also need to change THREADCACHEMAXBINS=(topbitpos(THREADCACHEMAX)-4)?")
  #endif
+#endif
+/* The maximum concurrent threads in a pool possible */
+#ifndef MAXTHREADSINPOOL
+#define MAXTHREADSINPOOL 16
+#endif
+/* The maximum number of threadcaches which can be allocated */
+#ifndef THREADCACHEMAXCACHES
+#define THREADCACHEMAXCACHES 256
 #endif
 #ifndef THREADCACHEMAXBINS
 #if 0
@@ -540,6 +544,7 @@ NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT m
 	}
 	return 0;
 }
+NEDMALLOCNOALIASATTR size_t nedmemsize(void *RESTRICT mem) THROWSPEC { return nedblksize(0, mem); }
 
 NEDMALLOCNOALIASATTR void nedsetvalue(void *v) THROWSPEC											{ nedpsetvalue((nedpool *) 0, v); }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc(size_t size) THROWSPEC						{ return nedpmalloc((nedpool *) 0, size); }
@@ -969,7 +974,7 @@ static NOINLINE int InitPool(nedpool *RESTRICT p, size_t capacity, int threads) 
 	if(!(p->m[0]=(mstate) create_mspace(capacity, 1))) goto err;
 	p->m[0]->extp=p;
 #endif
-	p->threads=(threads<1 || threads>MAXTHREADSINPOOL) ? MAXTHREADSINPOOL : threads;
+	p->threads=(threads>MAXTHREADSINPOOL) ? MAXTHREADSINPOOL : (!threads) ? DEFAULTMAXTHREADSINPOOL : threads;
 done:
 	RELEASE_MALLOC_GLOBAL_LOCK();
 	return 1;
