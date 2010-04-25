@@ -1529,8 +1529,9 @@ unsigned char _BitScanReverse(unsigned long *index, unsigned long mask);
 #define SIZE_T_TWO          ((size_t)2)
 #define SIZE_T_FOUR         ((size_t)4)
 #define TWO_SIZE_T_SIZES    (SIZE_T_SIZE<<1)
+#define THREE_SIZE_T_SIZES  (TWO_SIZE_T_SIZES+SIZE_T_SIZE)
 #define FOUR_SIZE_T_SIZES   (SIZE_T_SIZE<<2)
-#define SIX_SIZE_T_SIZES    (FOUR_SIZE_T_SIZES+TWO_SIZE_T_SIZES)
+#define SEVEN_SIZE_T_SIZES  (FOUR_SIZE_T_SIZES+TWO_SIZE_T_SIZES+SIZE_T_SIZE)
 #define HALF_MAX_SIZE_T     (MAX_SIZE_T / 2U)
 
 /* The bit mask value corresponding to MALLOC_ALIGNMENT */
@@ -1676,22 +1677,14 @@ static FORCEINLINE void* posix_direct_mmap(size_t size) {
   return (ptr != 0)? ptr: MFAIL;
 }
 
-/* Implementation of mremap for direct MMAP */
-static FORCEINLINE void* posix_direct_mremap(void *ptr, size_t oldsize, size_t newsize, int flags) {
-  void* newptr = 0;
-  if (newsize != oldsize) {
-    newptr = mremap(ptr, oldsize, newsize, flags);
-  }
-#if DEBUG && 0
-  printf("mremap(%p, %u, %u, %d) returns %p!\n", ptr, oldsize, newsize, flags, newptr);
-#endif
-  return (newptr != 0)? newptr: MFAIL;
-}
-
 #define MMAP_DEFAULT(s)                     posix_mmap(s)
-#define MUNMAP_DEFAULT(a, s)                munmap((a), (s))
-#define DIRECT_MMAP_DEFAULT(s)              posix_direct_mmap(s)
-#define DIRECT_MREMAP_DEFAULT(a, os, ns, f) posix_direct_mremap((a), (os), (ns), (f))
+#define MUNMAP_DEFAULT(h, a, s)             munmap((a), (s))
+#define DIRECT_MMAP_DEFAULT(h, s, f)        posix_direct_mmap(s)
+#if HAVE_MREMAP
+#define MREMAP_DEFAULT(addr, osz, nsz, mv)  mremap((addr), (osz), (nsz), (mv))
+#define DIRECT_MREMAP_DEFAULT(h, addr, osz, nsz, mv, f) mremap((addr), (osz), (nsz), (mv))
+#endif /* HAVE_MREMAP */
+
 #else /* WIN32 */
 
 /* Win32 MMAP via VirtualAlloc */
@@ -1749,7 +1742,7 @@ static FORCEINLINE void* win32mmap(size_t size) {
 }
 
 /* For direct MMAP, use MEM_TOP_DOWN to minimize interference */
-static FORCEINLINE void* win32direct_mmap(size_t size) {
+static FORCEINLINE void* win32direct_mmap(void **handle, size_t size, unsigned flags) {
   /* Windows treats address space reservation as different to page allocation */
   void* ptr = 0, *ptr2;
   ptr2 = VirtualAlloc(0, MMAP_OVERALLOCATION(size), MEM_RESERVE|MEM_TOP_DOWN|((MMAP_OVERALLOCATION(1024) == 1024) ? MEM_COMMIT : 0), PAGE_READWRITE);
@@ -1761,11 +1754,12 @@ static FORCEINLINE void* win32direct_mmap(size_t size) {
 #if DEBUG && 0
   printf("VirtualAlloc returns %p size %u\n", ptr, size);
 #endif
+  *handle = (void*)(size_t)0xdeadbeef;
   return (ptr != 0)? ptr: MFAIL;
 }
 
 /* Implementation of mremap for direct MMAP */
-static FORCEINLINE void* win32direct_mremap(void *ptr, size_t oldsize, size_t newsize, int flags) {
+static FORCEINLINE void* win32direct_mremap(void **handle, void *ptr, size_t oldsize, size_t newsize, int flags, unsigned flags2) {
   void* newptr = 0;
   if (newsize == oldsize) {
     return ptr;
@@ -1806,10 +1800,11 @@ static FORCEINLINE void* win32direct_mremap(void *ptr, size_t oldsize, size_t ne
 }
 
 /* This function supports releasing coalesed segments */
-static FORCEINLINE int win32munmap(void* ptr, size_t size) {
+static FORCEINLINE int win32munmap(void *handle, void* ptr, size_t size) {
   MEMORY_BASIC_INFORMATION minfo = {0};
   char* cptr = (char*)ptr;
   size_t osize = MMAP_OVERALLOCATION(size);
+  assert(handle==(void*)(size_t)0xdeadbeef);
   while (size) {
     if (VirtualQuery(cptr, &minfo, sizeof(minfo)) == 0)
       return -1;
@@ -1838,18 +1833,20 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
   return 0;
 }
 
-#define MMAP_DEFAULT(s)                     win32mmap(s)
-#define MUNMAP_DEFAULT(a, s)                win32munmap((a), (s))
-#define DIRECT_MMAP_DEFAULT(s)              win32direct_mmap(s)
-#define DIRECT_MREMAP_DEFAULT(a, os, ns, f) win32direct_mremap((a), (os), (ns), (f))
+#define MMAP_DEFAULT(s)                        win32mmap(s)
+#define MUNMAP_DEFAULT(h, a, s)                win32munmap((h), (a), (s))
+#define DIRECT_MMAP_DEFAULT(h, s, f)           win32direct_mmap((h), (s), (f))
+#define DIRECT_MREMAP_DEFAULT(h, a, os, ns, f, f2) win32direct_mremap((h), (a), (os), (ns), (f), (f2))
 #endif /* WIN32 */
-#endif /* HAVE_MMAP */
 
-#if HAVE_MREMAP
-#ifndef WIN32
-#define MREMAP_DEFAULT(addr, osz, nsz, mv) mremap((addr), (osz), (nsz), (mv))
-#endif /* WIN32 */
-#endif /* HAVE_MREMAP */
+#ifndef MREMAP_DEFAULT
+#define MREMAP_DEFAULT(addr, osz, nsz, mv)  MFAIL
+#endif /* MREMAP_DEFAULT */
+#ifndef DIRECT_MREMAP_DEFAULT
+#define DIRECT_MREMAP_DEFAULT(h, addr, osz, nsz, mv) MFAIL
+#endif /* DIRECT_MREMAP_DEFAULT */
+
+#endif /* HAVE_MMAP */
 
 
 /**
@@ -1869,53 +1866,49 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
  * Define CALL_MMAP/CALL_MUNMAP/CALL_DIRECT_MMAP
  */
 #if HAVE_MMAP
-    #define USE_MMAP_BIT            (SIZE_T_ONE)
+    #define USE_MMAP_BIT                       (SIZE_T_ONE)
 
-    #ifdef MMAP
-        #define CALL_MMAP(s, f)     MMAP((s), (f))
-    #else /* MMAP */
-        #define CALL_MMAP(s, f)     MMAP_DEFAULT(s)
-    #endif /* MMAP */
     #ifdef MUNMAP
-        #define CALL_MUNMAP(a, s)   MUNMAP((a), (s))
+        #define CALL_MUNMAP(h, a, s)            MUNMAP((h), (a), (s))
     #else /* MUNMAP */
-        #define CALL_MUNMAP(a, s)   MUNMAP_DEFAULT((a), (s))
+        #define CALL_MUNMAP(h, a, s)            MUNMAP_DEFAULT((h), (a), (s))
     #endif /* MUNMAP */
+    #ifdef MMAP
+        #define CALL_MMAP(s, f)                 MMAP((s), (f))
+    #else /* MMAP */
+        #define CALL_MMAP(s, f)                 MMAP_DEFAULT(s)
+    #endif /* MMAP */
+    #ifdef MREMAP
+        #define CALL_MREMAP(a, os, ns, f)   MREMAP((a), (os), (ns), (f))
+    #else /* MREMAP */
+        #define CALL_MREMAP(a, os, ns, f)   MREMAP_DEFAULT((a), (os), (ns), (f))
+    #endif /* MREMAP */
+
     #ifdef DIRECT_MMAP
-        #define CALL_DIRECT_MMAP(s, f) DIRECT_MMAP((s), (f))
+        #define CALL_DIRECT_MMAP(h, s, f)       DIRECT_MMAP((h), (s), (f))
     #else /* DIRECT_MMAP */
-        #define CALL_DIRECT_MMAP(s, f) DIRECT_MMAP_DEFAULT(s)
+        #define CALL_DIRECT_MMAP(h, s, f)       DIRECT_MMAP_DEFAULT((h), (s), (f))
     #endif /* DIRECT_MMAP */
     #ifdef DIRECT_MREMAP
-        #define CALL_DIRECT_MREMAP(a, os, ns, f, f2) DIRECT_MREMAP((a), (os), (ns), (f), (f2))
+        #define CALL_DIRECT_MREMAP(h, a, os, ns, f, f2) DIRECT_MREMAP((h), (a), (os), (ns), (f), (f2))
     #else /* DIRECT_MMAP */
-        #define CALL_DIRECT_MREMAP(a, os, ns, f, f2) DIRECT_MREMAP_DEFAULT((a), (os), (ns), (f))
+        #define CALL_DIRECT_MREMAP(h, a, os, ns, f, f2) DIRECT_MREMAP_DEFAULT((h), (a), (os), (ns), (f), (f2))
     #endif /* DIRECT_MMAP */
 #else  /* HAVE_MMAP */
-    #define USE_MMAP_BIT                         (SIZE_T_ZERO)
+    #define USE_MMAP_BIT                            (SIZE_T_ZERO)
 
-    #define MMAP(s, f)                           MFAIL
-    #define MUNMAP(a, s)                         (-1)
-    #define DIRECT_MMAP(s, f)                    MFAIL
-    #define DIRECT_MREMAP(a, os, ns, f, f2)      MFAIL
-    #define CALL_DIRECT_MMAP(s, f)               DIRECT_MMAP((s), (f))
-    #define CALL_DIRECT_MREMAP(a, os, ns, f, f2) DIRECT_MREMAP((a), (os), (ns), (f), (f2))
-    #define CALL_MMAP(s)                         MMAP(s)
-    #define CALL_MUNMAP(a, s)                    MUNMAP((a), (s))
+    #define MUNMAP(h, a, s)                         (-1)
+    #define MMAP(s, f)                              MFAIL
+    #define MREMAP(a, os, ns, f)                    MFAIL
+    #define DIRECT_MMAP(h, s, f)                    MFAIL
+    #define DIRECT_MREMAP(h, a, os, ns, f, f2)      MFAIL
+
+    #define CALL_MUNMAP(h, a, s)                    MUNMAP((h), (a), (s))
+    #define CALL_MMAP(s, f)                         MMAP((s), (f))
+    #define CALL_MREMAP(a, os, ns, f)               MREMAP((a), (os), (ns), (f))
+    #define CALL_DIRECT_MMAP(h, s, f)               DIRECT_MMAP((h), (s), (f))
+    #define CALL_DIRECT_MREMAP(h, a, os, ns, f, f2) DIRECT_MREMAP((h), (a), (os), (ns), (f), (f2))
 #endif /* HAVE_MMAP */
-
-/**
- * Define CALL_MREMAP
- */
-#if HAVE_MMAP && HAVE_MREMAP
-    #ifdef MREMAP
-        #define CALL_MREMAP(addr, osz, nsz, mv) MREMAP((addr), (osz), (nsz), (mv))
-    #else /* MREMAP */
-        #define CALL_MREMAP(addr, osz, nsz, mv) MREMAP_DEFAULT((addr), (osz), (nsz), (mv))
-    #endif /* MREMAP */
-#else  /* HAVE_MMAP && HAVE_MREMAP */
-    #define CALL_MREMAP(addr, osz, nsz, mv)     MFAIL
-#endif /* HAVE_MMAP && HAVE_MREMAP */
 
 /* mstate bit set if continguous morecore disabled or failed */
 #define USE_NONCONTIGUOUS_BIT (4U)
@@ -2390,8 +2383,9 @@ typedef unsigned int binmap_t;         /* Described below */
 #define CHUNK_OVERHEAD      (SIZE_T_SIZE)
 #endif /* FOOTERS */
 
-/* MMapped chunks need a second word of overhead ... */
-#define MMAP_CHUNK_OVERHEAD (TWO_SIZE_T_SIZES)
+/* MMapped chunks need three words of overhead, two for normal
+chunk and one for handle ... */
+#define MMAP_CHUNK_OVERHEAD (THREE_SIZE_T_SIZES)
 /* ... and additional padding for fake next-chunk at foot */
 #define MMAP_FOOT_PAD       (FOUR_SIZE_T_SIZES)
 
@@ -3989,17 +3983,24 @@ static void* mspace_malloc_implementation(mstate ms, size_t bytes, unsigned flag
   allows reconstruction of the required argument to MUNMAP when freed,
   and also allows adjustment of the returned chunk to meet alignment
   requirements (especially in memalign).
+
+  Directly mmapped chunks store a void* handle which can be used by
+  the DIRECT_MMAP implementation to keep a per-chunk state. This
+  handle is currently stored right at the front of the mmapped region,
+  but do not rely on this - use the supplied parameter.
 */
 
 /* Malloc using mmap */
 static void* mmap_alloc(mstate m, size_t nb, unsigned flags) {
-  size_t mmsize = mmap_align(nb + SIX_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
+  size_t mmsize = mmap_align(nb + SEVEN_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
   if (mmsize > nb) {     /* Check for wrap around 0 */
-    char* mm = (char*)(CALL_DIRECT_MMAP(mmsize, flags));
+    void* mmaph = 0;
+    char* mm = (char*)(CALL_DIRECT_MMAP(&mmaph, mmsize, flags));
     if (mm != CMFAIL) {
-      size_t offset = align_offset(chunk2mem(mm));
+      size_t offset = align_offset(chunk2mem(mm+SIZE_T_SIZE/* for the handle */));
       size_t psize = mmsize - offset - MMAP_FOOT_PAD;
       mchunkptr p = (mchunkptr)(mm + offset);
+      *(void**)mm = mmaph;
       p->prev_foot = offset;
       p->head = psize;
       mark_inuse_foot(m, p, psize);
@@ -4030,12 +4031,14 @@ static mchunkptr mmap_resize(mstate m, mchunkptr oldp, size_t nb, unsigned flags
   else {
     size_t offset = oldp->prev_foot;
     size_t oldmmsize = oldsize + offset + MMAP_FOOT_PAD;
-    size_t newmmsize = mmap_align(nb + SIX_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
-    char* cp = (char*)CALL_DIRECT_MREMAP((char*)oldp - offset,
-                                  oldmmsize, newmmsize, MREMAP_MAYMOVE, flags);
+    size_t newmmsize = mmap_align(nb + SEVEN_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
+    char* mm = (char*)oldp - offset;
+    void* mmaph = *(void**)mm;
+    char* cp = (char*)CALL_DIRECT_MREMAP(&mmaph, mm, oldmmsize, newmmsize, MREMAP_MAYMOVE, flags);
     if (cp != CMFAIL) {
       mchunkptr newp = (mchunkptr)(cp + offset);
       size_t psize = newmmsize - offset - MMAP_FOOT_PAD;
+      *(void**)cp = mmaph;
       newp->head = psize;
       mark_inuse_foot(m, newp, psize);
       chunk_plus_offset(newp, psize)->head = FENCEPOST_HEAD;
@@ -4423,7 +4426,7 @@ static size_t release_unused_segments(mstate m) {
         else {
           unlink_large_chunk(m, tp);
         }
-        if (CALL_MUNMAP(base, size) == 0) {
+        if (CALL_MUNMAP(0/*segment*/, base, size) == 0) {
           released += size;
           m->footprint -= size;
           /* unlink obsoleted record */
@@ -4467,7 +4470,7 @@ static int sys_trim(mstate m, size_t pad) {
             size_t newsize = sp->size - extra;
             /* Prefer mremap, fall back to munmap */
             if ((CALL_MREMAP(sp->base, sp->size, newsize, 0) != MFAIL) ||
-                (CALL_MUNMAP(sp->base + newsize, extra) == 0)) {
+                (CALL_MUNMAP(0/*segment*/, sp->base + newsize, extra) == 0)) {
               released = extra;
             }
           }
@@ -4623,20 +4626,10 @@ static void* tmalloc_small(mstate m, size_t nb) {
 }
 
 /* --------------------------- realloc support --------------------------- */
+static void* internal_memalign(mstate m, size_t alignment, size_t bytes, unsigned flags);
 
 static void* internal_realloc(mstate m, void* oldmem, size_t bytes, size_t alignment, unsigned flags) {
   if (bytes >= MAX_REQUEST) {
-    MALLOC_FAILURE_ACTION;
-    return 0;
-  }
-  if (alignment > MALLOC_ALIGNMENT) {
-    /* This isn't currently implemented, but it ought to be as it is a very
-    useful operation when dealing with SSE aligned vectors and such */
-#ifdef __GNUC__
- #warning Aligned realloc() still needs to be implemented!
-#elif defined(_MSC_VER)
- #pragma message(__FILE__ ": WARNING: Aligned realloc() still needs to be implemented!")
-#endif
     MALLOC_FAILURE_ACTION;
     return 0;
   }
@@ -4696,7 +4689,9 @@ static void* internal_realloc(mstate m, void* oldmem, size_t bytes, size_t align
       return chunk2mem(newp);
     }
     else if (!(flags & M2_PREVENT_MOVE)) {
-      void* newmem = internal_malloc(m, bytes, flags);
+      void* newmem = (alignment > MALLOC_ALIGNMENT) ?
+        internal_memalign(m, alignment, bytes, flags)
+        : internal_malloc(m, bytes, flags);
       if (newmem != 0) {
         size_t oc = oldsize - overhead_for(oldp);
         memcpy(newmem, oldmem, (oc < bytes)? oc : bytes);
@@ -5091,8 +5086,9 @@ void dlfree(void* mem) {
         if (!pinuse(p)) {
           size_t prevsize = p->prev_foot;
           if (is_mmapped(p)) {
+            char* mm = (char*)p - prevsize;
             psize += prevsize + MMAP_FOOT_PAD;
-            if (CALL_MUNMAP((char*)p - prevsize, psize) == 0)
+            if (CALL_MUNMAP(*(void**)mm, mm, psize) == 0)
               fm->footprint -= psize;
             goto postaction;
           }
@@ -5370,7 +5366,7 @@ size_t destroy_mspace(mspace msp) {
       flag_t flag = sp->sflags;
       sp = sp->next;
       if ((flag & USE_MMAP_BIT) && !(flag & EXTERN_BIT) &&
-          CALL_MUNMAP(base, size) == 0)
+          CALL_MUNMAP(0/*segment*/, base, size) == 0)
         freed += size;
     }
   }
@@ -5543,8 +5539,9 @@ void mspace_free(mspace msp, void* mem) {
         if (!pinuse(p)) {
           size_t prevsize = p->prev_foot;
           if (is_mmapped(p)) {
+            char* mm = (char*)p - prevsize;
             psize += prevsize + MMAP_FOOT_PAD;
-            if (CALL_MUNMAP((char*)p - prevsize, psize) == 0)
+            if (CALL_MUNMAP(*(void**)mm, mm, psize) == 0)
               fm->footprint -= psize;
             goto postaction;
           }
