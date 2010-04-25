@@ -7,12 +7,18 @@ An example of how to use nedalloc
 #include <stdlib.h>
 #include "nedmalloc.h"
 
-#define THREADS 1
-#define RECORDS (10000/THREADS)
-#define TORTURETEST
+/**** TEST CONFIGURATION ****/
+#define THREADS 1					/* How many threads to run */
+#define TESTCPLUSPLUS 0				/* =1 to make 50% of ops have blocksize<=512. This is typical for C++ allocator usage. */
+#define BLOCKSIZE (1024*1024)		/* Test will be with blocks up to BLOCKSIZE. Try 16Kb for typical app usage, 1Mb if you use large arrays etc. */
+#define TESTTYPE 2					/* =1 for maximum speed test, =2 for randomised test */
+#define MAXMEMORY (768*1024*1024)	/* Maximum memory to use (approx) */
 /*#define USE_NEDMALLOC_DLL*/
 /*#define ENABLE_FAST_HEAP_DETECTION*/
+/*#define HAVE_MREMAP 0*/
 
+#define RECORDS (10000/THREADS)
+#define MAXMEMORY2 (MAXMEMORY/THREADS)
 #ifdef _MSC_VER
 /*#pragma optimize("g", off)*/	/* Useful for debugging */
 #endif
@@ -48,7 +54,12 @@ static int whichmalloc;
 static int doRealloc;
 static struct threadstuff_t
 {
-	int ops;
+	struct
+	{
+		int mallocs;
+		int reallocs;
+		int frees;
+	} ops;
 	unsigned int *toalloc;
 	void **allocs;
 	char cachesync1[128];
@@ -96,6 +107,10 @@ static void *win32realloc(void *p, size_t size)
 {
 	return HeapReAlloc(win32heap, 0, p, size);
 }
+static size_t win32memsize(void *p)
+{
+	return HeapSize(win32heap, 0, p);
+}
 static void win32free(void *mem)
 {
 	HeapFree(win32heap, 0, mem);
@@ -103,6 +118,7 @@ static void win32free(void *mem)
 
 static void *(*const mallocs[])(size_t size)={ malloc, nedmalloc, win32malloc };
 static void *(*const reallocs[])(void *p, size_t size)={ realloc, nedrealloc, win32realloc };
+static size_t (*const memsizes[])(void *p)={ _msize, nedmemsize, win32memsize };
 static void (*const frees[])(void *mem)={ free, nedfree, win32free };
 #else
 #include <sys/time.h>
@@ -144,42 +160,60 @@ static void threadcode(int threadidx)
 	void **allocptr=threadstuff[threadidx].allocs;
 	unsigned int r, seed=threadidx;
 	usCount start;
+	size_t allocated=0, size;
 	threadstuff[threadidx].done=0;
 	/*neddisablethreadcache(0);*/
 	THREADSLEEP(100);
 	start=GetUsCount();
-#ifdef TORTURETEST
+#if 2==TESTTYPE
 	/* A randomised malloc/realloc/free test (torture test) */
 	for(n=0; n<RECORDS*100; n++)
 	{
 		unsigned int i;
 		r=myrandom(&seed);
 		i=(int)(r % RECORDS);
-		if(!allocptr[i])
-		{
-			allocptr[i]=mallocs[whichmalloc](r & 0x1FFF);
-			threadstuff[threadidx].ops++;
-		}
-		else if(r & (1<<31))
-		{
-			allocptr[i]=reallocs[whichmalloc](allocptr[i], r & 0x1FFF);
-			threadstuff[threadidx].ops++;
+#if TESTCPLUSPLUS
+		if(r&(1<<31))
+		{   /* Make it two power multiple of less than 512 bytes to
+			model frequent C++ new's */
+			size=4<<(r & 7);
 		}
 		else
+#endif
+			size=(size_t)(r & (BLOCKSIZE-1));
+		if(allocated<MAXMEMORY2 && !allocptr[i])
 		{
+			if(!(allocptr[i]=mallocs[whichmalloc](size))) abort();
+			allocated+=memsizes[whichmalloc](allocptr[i]);
+			threadstuff[threadidx].ops.mallocs++;
+		}
+		else if(allocated<MAXMEMORY2 && (r & (3<<30))) /* 75% the time realloc(), other 25% free() */
+		{
+			allocated-=memsizes[whichmalloc](allocptr[i]);
+			if(!(allocptr[i]=reallocs[whichmalloc](allocptr[i], size))) abort();
+			allocated+=memsizes[whichmalloc](allocptr[i]);
+			threadstuff[threadidx].ops.reallocs++;
+		}
+		else if(allocptr[i])
+		{
+			allocated-=memsizes[whichmalloc](allocptr[i]);
 			frees[whichmalloc](allocptr[i]);
 			allocptr[i]=0;
+			threadstuff[threadidx].ops.frees++;
 		}
 	}
 	for(n=0; n<RECORDS; n++)
 	{
 		if(allocptr[n])
 		{
+			allocated-=memsizes[whichmalloc](allocptr[n]);
 			frees[whichmalloc](allocptr[n]);
 			allocptr[n]=0;
+			threadstuff[threadidx].ops.frees++;
 		}
 	}
-#else
+	assert(!allocated);
+#elif 1==TESTTYPE
 	/* A simple stack which allocates and deallocates off the top (speed test) */
 	for(n=0; n<RECORDS;)
 	{
@@ -192,22 +226,24 @@ static void threadcode(int threadidx)
 			--n;
 			frees[whichmalloc](*allocptr);
 			*allocptr=0;
+			threadstuff[threadidx].ops.frees++;
 		}
 		else
 #endif
 		{
 			if(doRealloc && allocptr>threadstuff[threadidx].allocs && (r & 1))
 			{
-	            allocptr[-1]=reallocs[whichmalloc](allocptr[-1], *toallocptr);
+	            if(!(allocptr[-1]=reallocs[whichmalloc](allocptr[-1], *toallocptr))) abort();
+				threadstuff[threadidx].ops.reallocs++;
 			}
 			else
 			{
-	            allocptr[0]=mallocs[whichmalloc](*toallocptr);
+	            if(!(allocptr[0]=mallocs[whichmalloc](*toallocptr))) abort();
+				threadstuff[threadidx].ops.mallocs++;
 				allocptr++;
 			}
 			n++;
 			toallocptr++;
-			threadstuff[threadidx].ops++;
 			/*if(!(threadstuff[threadidx].ops & 0xff))
 				nedtrimthreadcache(0,0);*/
 		}
@@ -215,6 +251,7 @@ static void threadcode(int threadidx)
 	while(allocptr>threadstuff[threadidx].allocs)
 	{
 		frees[whichmalloc](*--allocptr);
+		threadstuff[threadidx].ops.frees++;
 	}
 #endif
 	times[threadidx]+=GetUsCount()-start;
@@ -232,33 +269,33 @@ static double runtest()
 	{
 		unsigned int *toallocptr;
 		int m;
-		threadstuff[n].ops=0;
+		memset(&threadstuff[n].ops, 0, sizeof(threadstuff[n].ops));
 		times[n]=0;
 		threadstuff[n].toalloc=toallocptr=calloc(RECORDS, sizeof(unsigned int));
 		threadstuff[n].allocs=calloc(RECORDS, sizeof(void *));
 		for(m=0; m<RECORDS; m++)
 		{
 			unsigned int size=myrandom(&seed);
-			if(size<(1<<30))
+#if TESTCPLUSPLUS
+			if(size&(1<<31))
 			{   /* Make it two power multiple of less than 512 bytes to
 				model frequent C++ new's */
 				size=4<<(size & 7);
 			}
 			else
+#endif
 			{
-				size&=0x3FFF;             /* < 16Kb */
-				/*size&=0x1FFF;*/			  /* < 8Kb */
-				/*size=(1<<6)<<(size & 7);*/  /* < 8Kb */
+				size&=BLOCKSIZE-1;
 			}
 			*toallocptr++=size;
 		}
 	}
-#ifdef TORTURETEST
+#if 2==TESTTYPE
 	for(n=0; n<THREADS; n++)
 	{
 		THREADINIT(&threads[n], n);
 	}
-	for(i=0; i<32; i++)
+	for(i=0; i<8; i++)
 	{
 		int found=-1;
 		do
@@ -314,7 +351,7 @@ static double runtest()
 		for(n=0; n<THREADS; n++)
 		{
 			totaltime+=times[n];
-			totalops+=threadstuff[n].ops;
+			totalops+=threadstuff[n].ops.mallocs+threadstuff[n].ops.reallocs;
 		}
 		opspersec=1000000000000.0*totalops/totaltime*THREADS;
 		printf("This allocator achieves %lfops/sec under %d threads\n", opspersec, THREADS);
@@ -350,7 +387,14 @@ int main(void)
 		SystemParametersInfo(SPI_GETBEEP, 0, &v, 0);
 	}
 #endif
-
+#if 2==TESTTYPE
+	printf("Running torture test\n"
+		   "-=-=-=-=-=-=-=-=-=-=\n");
+#elif 1==TESTTYPE
+	printf("Running speed test\n"
+		   "-=-=-=-=-=-=-=-=-=\n");
+#endif
+	printf("Block size <= %u, C++ test mode is %s\n", BLOCKSIZE, TESTCPLUSPLUS ? "on" : "off");
 	if(0)
 	{
 		printf("\nTesting standard allocator with %d threads ...\n", THREADS);

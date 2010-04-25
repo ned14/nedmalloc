@@ -266,7 +266,9 @@ realloc() performance.
  * [master 254fe7c] Added nedmemsize() for API compatibility with other
 allocators. Added DEFAULTMAXTHREADSINPOOL and set it to FOUR which is a
 BREAKING CHANGE from previous versions of nedmalloc (which set it to 16).
- * [master xxxxxxx] Added win32mremap() implementation.
+ * [master 6731085] Added win32mremap() implementation.
+ * [master xxxxxxx] Significantly improved test.c with new test options
+TESTCPLUSPLUS, BLOCKSIZE, TESTTYPE and MAXMEMORY.
  
 v1.06 beta 2 21st March 2010:
  * { 1153 } Added detection of whether host process is using MSVCRT or MSVCRTD
