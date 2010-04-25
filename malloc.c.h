@@ -354,9 +354,11 @@ HAVE_MMAP                 default: 1 (true)
   able to unmap memory that may have be allocated using multiple calls
   to MMAP, so long as they are adjacent.
 
-HAVE_MREMAP               default: 1 on linux, else 0
-  If true realloc() uses mremap() to re-allocate large blocks and
-  extend or shrink allocation spaces.
+HAVE_MREMAP               default: 1 on linux and win32, else 0
+  If 1 realloc() uses mremap() to re-allocate large blocks. If 2 mremap()
+  is additionally used to extend or shrink allocation spaces. Note that
+  dlmalloc will automatically coalesce segments if mmap() returns adjacent
+  chunks, so HAVE_MREMAP = 2 is somewhat unnecessary.
 
 MMAP_CLEARS               default: 1 except on WINCE.
   True if mmap clears memory so calloc doesn't need to. This is true
@@ -610,11 +612,11 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #define MMAP_CLEARS 1
 #endif  /* MMAP_CLEARS */
 #ifndef HAVE_MREMAP
-#ifdef linux
-#define HAVE_MREMAP 1
-#else   /* linux */
+#if defined(linux) || defined(WIN32)
+#define HAVE_MREMAP 1     /* Use mremap() for mmapped blocks only */
+#else   /* defined(linux) || defined(WIN32) */
 #define HAVE_MREMAP 0
-#endif  /* linux */
+#endif  /* defined(linux) || defined(WIN32) */
 #endif  /* HAVE_MREMAP */
 #ifndef MALLOC_FAILURE_ACTION
 #define MALLOC_FAILURE_ACTION  errno = ENOMEM;
@@ -1590,7 +1592,7 @@ static FORCEINLINE void* win32mmap(size_t size) {
   if(largepagesavailable && size >= 1*1024*1024) {
     ptr = VirtualAlloc(baseaddress, size, MEM_RESERVE|MEM_COMMIT|MEM_LARGE_PAGES, PAGE_READWRITE);
     if(!ptr) {
-        if(ERROR_PRIVILEGE_NOT_HELD==GetLastError()) largepagesavailable=0;
+        if (ERROR_PRIVILEGE_NOT_HELD==GetLastError()) largepagesavailable=0;
     }
   }
 #endif
@@ -1601,24 +1603,26 @@ static FORCEINLINE void* win32mmap(size_t size) {
     baseaddress = lastWin32mmap;
     for(;;) {
       void* reserveaddr = VirtualAlloc(baseaddress, size, MEM_RESERVE, PAGE_READWRITE);
-      if(!reserveaddr)
+      if (!reserveaddr)
         baseaddress = (void*)((size_t)baseaddress + mparams.granularity);
-      else if((size_t)reserveaddr & (mparams.granularity - SIZE_T_ONE)) {
+      else if ((size_t)reserveaddr & (mparams.granularity - SIZE_T_ONE)) {
         VirtualFree(reserveaddr, 0, MEM_RELEASE);
         baseaddress = (void*)(((size_t)reserveaddr + mparams.granularity) & ~(mparams.granularity - SIZE_T_ONE));
       }
       else break;
+      if (!baseaddress) /* If this wraps then we are out of address space */
+        return MFAIL;
     }
 #endif
-    if(!ptr) ptr = VirtualAlloc(baseaddress, size, baseaddress ? MEM_COMMIT : MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+    if (!ptr) ptr = VirtualAlloc(baseaddress, size, baseaddress ? MEM_COMMIT : MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
 #if DEBUG
-    if(lastWin32mmap && ptr!=lastWin32mmap) printf("Non-contiguous VirtualAlloc between %p and %p\n", ptr, lastWin32mmap);
+    if (lastWin32mmap && ptr!=lastWin32mmap) printf("Non-contiguous VirtualAlloc between %p and %p\n", ptr, lastWin32mmap);
 #endif
 #ifdef DEFAULT_GRANULARITY_ALIGNED
-    if(ptr) lastWin32mmap = (void*)((size_t) ptr + mparams.granularity);
+    if (ptr) lastWin32mmap = (void*)((size_t) ptr + mparams.granularity);
 #endif
   }
-#if DEBUG
+#if DEBUG && 0
 #ifdef ENABLE_LARGE_PAGES
   printf("VirtualAlloc returns %p size %u. LargePagesAvailable=%d\n", ptr, size, largepagesavailable);
 #else
@@ -1630,10 +1634,52 @@ static FORCEINLINE void* win32mmap(size_t size) {
 
 /* For direct MMAP, use MEM_TOP_DOWN to minimize interference */
 static FORCEINLINE void* win32direct_mmap(size_t size) {
-  void* ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN,
-                           PAGE_READWRITE);
+#if HAVE_MREMAP
+  /* Reserve twice the size so win32mremap() can succeed */
+  void* ptr = 0, *ptr2 = VirtualAlloc(0, size*2, MEM_RESERVE|MEM_TOP_DOWN, PAGE_READWRITE);
+  if (ptr2 != 0) {
+    ptr = VirtualAlloc(ptr2, size, MEM_COMMIT, PAGE_READWRITE);
+    if (ptr == 0)
+      VirtualFree(ptr2, size*2, MEM_RELEASE);
+  }
+#else /* HAVE_MREMAP */
+  void* ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN, PAGE_READWRITE);
+#endif /* HAVE_MREMAP */
+#if DEBUG && 0
+  printf("VirtualAlloc returns %p size %u\n", ptr, size);
+#endif
   return (ptr != 0)? ptr: MFAIL;
 }
+
+#if HAVE_MREMAP
+/* Implementation of mremap for win32 */
+#define MREMAP_MAYMOVE 1
+static FORCEINLINE void* win32mremap(void *ptr, size_t oldsize, size_t newsize, int flags) {
+  void* newptr;
+  if (newsize == oldsize) {
+    return ptr;
+  }
+  else if (newsize > oldsize) {
+    newptr = VirtualAlloc((void*)((size_t)ptr + oldsize), newsize - oldsize,
+                          MEM_COMMIT, PAGE_READWRITE);
+    if (newptr == 0)
+	  newptr = VirtualAlloc((void*)((size_t)ptr + oldsize), newsize - oldsize,
+                            MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+  }
+  else {
+    VirtualFree((void*)((size_t)ptr + newsize), oldsize - newsize, MEM_DECOMMIT);
+  }
+#if DEBUG && 0
+  printf("win32remap(%p, %u, %u, %d) returns %p!\n", ptr, oldsize, newsize, flags, newptr);
+#endif
+  if (newptr != 0)
+    return ptr;
+  if ((flags & MREMAP_MAYMOVE) == 0)
+    return MFAIL;
+  /* Currently we don't implement MREMAP_MAYMOVE */
+  return MFAIL;
+}
+#endif
 
 /* This function supports releasing coalesed segments */
 static FORCEINLINE int win32munmap(void* ptr, size_t size) {
@@ -1662,6 +1708,8 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
 #if HAVE_MREMAP
 #ifndef WIN32
 #define MREMAP_DEFAULT(addr, osz, nsz, mv) mremap((addr), (osz), (nsz), (mv))
+#else /* WIN32 */
+#define MREMAP_DEFAULT(addr, osz, nsz, mv) win32mremap((addr), (osz), (nsz), (mv))
 #endif /* WIN32 */
 #endif /* HAVE_MREMAP */
 
@@ -1712,16 +1760,22 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
 #endif /* HAVE_MMAP */
 
 /**
- * Define CALL_MREMAP
+ * Define CALL_MMAP_MREMAP and CALL_MREMAP
  */
 #if HAVE_MMAP && HAVE_MREMAP
     #ifdef MREMAP
-        #define CALL_MREMAP(addr, osz, nsz, mv) MREMAP((addr), (osz), (nsz), (mv))
+        #define CALL_MMAP_MREMAP(addr, osz, nsz, mv) MREMAP((addr), (osz), (nsz), (mv))
     #else /* MREMAP */
-        #define CALL_MREMAP(addr, osz, nsz, mv) MREMAP_DEFAULT((addr), (osz), (nsz), (mv))
+        #define CALL_MMAP_MREMAP(addr, osz, nsz, mv) MREMAP_DEFAULT((addr), (osz), (nsz), (mv))
     #endif /* MREMAP */
+    #if HAVE_MREMAP == 2
+        #define CALL_MREMAP(addr, osz, nsz, mv) CALL_MMAP_MREMAP((addr), (osz), (nsz), (mv))
+    #else
+        #define CALL_MREMAP(addr, osz, nsz, mv) MFAIL
+    #endif
 #else  /* HAVE_MMAP && HAVE_MREMAP */
-    #define CALL_MREMAP(addr, osz, nsz, mv)     MFAIL
+    #define CALL_MMAP_MREMAP(addr, osz, nsz, mv)     MFAIL
+    #define CALL_MREMAP(addr, osz, nsz, mv)          MFAIL
 #endif /* HAVE_MMAP && HAVE_MREMAP */
 
 /* mstate bit set if continguous morecore disabled or failed */
@@ -2632,11 +2686,11 @@ static struct malloc_state _gm_;
 
 
 /* For mmap, use granularity alignment on windows, else page-align */
-#ifdef WIN32
+/*#ifdef WIN32
 #define mmap_align(S) granularity_align(S)
-#else
+#else*/
 #define mmap_align(S) page_align(S)
-#endif
+/*#endif*/
 
 /* For sys_alloc, enough padding to ensure can malloc request on success */
 #define SYS_ALLOC_PADDING (TOP_FOOT_SIZE + MALLOC_ALIGNMENT)
@@ -3818,8 +3872,8 @@ static mchunkptr mmap_resize(mstate m, mchunkptr oldp, size_t nb) {
     size_t offset = oldp->prev_foot;
     size_t oldmmsize = oldsize + offset + MMAP_FOOT_PAD;
     size_t newmmsize = mmap_align(nb + SIX_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
-    char* cp = (char*)CALL_MREMAP((char*)oldp - offset,
-                                  oldmmsize, newmmsize, 1);
+    char* cp = (char*)CALL_MMAP_MREMAP((char*)oldp - offset,
+                                  oldmmsize, newmmsize, MREMAP_MAYMOVE);
     if (cp != CMFAIL) {
       mchunkptr newp = (mchunkptr)(cp + offset);
       size_t psize = newmmsize - offset - MMAP_FOOT_PAD;
