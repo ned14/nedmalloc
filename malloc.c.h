@@ -354,11 +354,15 @@ HAVE_MMAP                 default: 1 (true)
   able to unmap memory that may have be allocated using multiple calls
   to MMAP, so long as they are adjacent.
 
-HAVE_MREMAP               default: 1 on linux and win32, else 0
-  If 1 realloc() uses mremap() to re-allocate large blocks. If 2 mremap()
-  is additionally used to extend or shrink allocation spaces. Note that
-  dlmalloc will automatically coalesce segments if mmap() returns adjacent
-  chunks, so HAVE_MREMAP = 2 is somewhat unnecessary.
+HAVE_MREMAP               default: 1 on linux, else 0
+  If true realloc() uses mremap() to re-allocate large blocks and
+  extend or shrink allocation spaces.
+
+MMAP_OVERALLOCATION(size) default: (((size)*3)/2) on 32 bit, ((size)*4) on 64 bit.
+  Causes malloc to reserve MMAP_OVERALLOCATION(size) of address
+  space for every allocation which uses mmap() due to size >= mmap_threshold.
+  This permits such blocks to grow without requiring a memory copy, but at
+  the cost of address space which is especially precious on 32 bit systems.
 
 MMAP_CLEARS               default: 1 except on WINCE.
   True if mmap clears memory so calloc doesn't need to. This is true
@@ -382,13 +386,17 @@ malloc_getpagesize         default: derive from system includes, or 4096.
 
 ENABLE_LARGE_PAGES         default: NOT defined
   Causes the system page size to be the value of GetLargePageMinimum()
-  if that function is available (Windows Server 2003/Vista or later).
+  if that function is available (Windows Server 2003/Vista or later)
+  or gethugepagesize() if the libhugetlbfs library is loaded into this
+  process (Linux, BSD and others, see http://libhugetlbfs.sourceforge.net/).
   This allows the use of large page entries in the MMU which can
   significantly improve performance in large working set applications
-  as TLB cache load is reduced by a factor of three. Note that enabling
-  this option is equal to locking the process' memory in current
+  as TLB cache load is reduced by a factor of three. Note that on Windows
+  enabling this option is equal to locking the process' memory in current
   implementations of Windows and requires the SE_LOCK_MEMORY_PRIVILEGE
-  to be held by the process in order to succeed.
+  to be held by the process in order to succeed. For POSIX to make
+  large page support work you need to link against libhugetlbfs, otherwise
+  support silently disables itself.
 
 USE_DEV_RANDOM             default: 0 (i.e., not used)
   Causes malloc to use /dev/random to initialize secure magic seed for
@@ -612,12 +620,15 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #define MMAP_CLEARS 1
 #endif  /* MMAP_CLEARS */
 #ifndef HAVE_MREMAP
-#if defined(linux) || defined(WIN32)
-#define HAVE_MREMAP 1     /* Use mremap() for mmapped blocks only */
-#else   /* defined(linux) || defined(WIN32) */
+#ifdef linux
+#define HAVE_MREMAP 1
+#else   /* linux */
 #define HAVE_MREMAP 0
-#endif  /* defined(linux) || defined(WIN32) */
+#endif  /* linux */
 #endif  /* HAVE_MREMAP */
+#ifndef MMAP_OVERALLOCATION
+#define MMAP_OVERALLOCATION(size) (sizeof(size_t)<8?(((size)*3)/2):((size)*4))
+#endif /* MMAP_OVERALLOCATION */
 #ifndef MALLOC_FAILURE_ACTION
 #define MALLOC_FAILURE_ACTION  errno = ENOMEM;
 #endif  /* MALLOC_FAILURE_ACTION */
@@ -679,6 +690,20 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #ifndef NO_SEGMENT_TRAVERSAL
 #define NO_SEGMENT_TRAVERSAL 0
 #endif /* NO_SEGMENT_TRAVERSAL */
+
+/*
+  malloc2 flag options. These non-portable functions provide
+  additional functionality beyond those traditionally provided by
+  a memory allocator. You may pass custom flags in the bits
+  specified by M2_CUSTOM_FLAGS_MASK.
+*/
+
+#define M2_ZERO_MEMORY          (1<<0)
+#define M2_PREVENT_MOVE         (1<<1)
+#define M2_ALWAYS_MMAP          (1<<2)
+#define M2_FLAGS_MASK           0x0000ffff
+#define M2_CUSTOM_FLAGS_BEGIN   (1<<16)
+#define M2_CUSTOM_FLAGS_MASK    0xffff0000
 
 /*
   mallopt tuning options.  SVID/XPG defines four standard parameter
@@ -1241,6 +1266,39 @@ void** mspace_independent_comalloc(mspace msp, size_t n_elements,
                                    size_t sizes[], void* chunks[]);
 
 /*
+  mspace_malloc2 behaves as mspace_malloc, but provides additional
+  functionality. Setting alignment to a non-zero value is
+  identical to using mspace_memalign(). Flags may be set to:
+
+  * M2_ZERO_MEMORY: Sets the contents of the allocated chunk to zero.
+  * M2_ALWAYS_MMAP: Always allocate as though mmap_threshold were
+                    being exceeded. This is useful for large arrays
+                    which frequently extend.
+*/
+void* mspace_malloc2(mspace msp, size_t bytes, size_t alignment, unsigned flags);
+
+/*
+  mspace_realloc2 behaves as mspace_realloc, but provides additional
+  functionality. Setting alignment to a non-zero value is
+  identical to using mspace_memalign(). Flags may be set to:
+
+  * M2_ZERO_MEMORY:  Sets any increase in the allocated chunk to zero.
+                     Note that this zeroes only the increase from what
+                     dlmalloc thinks the chunk's size is, so if you
+                     didn't use this flag when allocating with malloc2
+                     (which zeroes up to chunk size) you may have
+                     garbage just before the new space.
+  * M2_PREVENT_MOVE: Prevents relocation of the chunk (useful for C++).
+  * M2_ALWAYS_MMAP:  Always allocate as though mmap_threshold were
+                     being exceeded. This is useful for large arrays
+                     which frequently extend. Note that setting this
+                     bit will not necessarily mmap a chunk which isn't
+                     already mmapped, but it will prevent a mmapped
+                     chunk being resized into a non-mmapped chunk.
+*/
+void* mspace_realloc2(mspace msp, void* mem, size_t newsize, size_t alignment, unsigned flags);
+
+/*
   mspace_footprint() returns the number of bytes obtained from the
   system for this space.
 */
@@ -1522,77 +1580,134 @@ static struct malloc_params mparams;
 
 #if HAVE_MMAP
 
+#ifndef MREMAP_MAYMOVE
+#define MREMAP_MAYMOVE 1
+#endif /* MREMAP_MAYMOVE */
+
+#ifdef ENABLE_LARGE_PAGES
+static int largepagesize = 0;
+#endif /* ENABLE_LARGE_PAGES */
 #ifndef WIN32
 #if !defined(MAP_ANONYMOUS) && defined(MAP_ANON)
 #define MAP_ANONYMOUS        MAP_ANON
 #endif /* MAP_ANON */
-#ifdef DEFAULT_GRANULARITY_ALIGNED
-#define MMAP_IMPL mmap_aligned
-static void* lastAlignedmmap; /* Used as a hint */
-static void* mmap_aligned(void *start, size_t length, int prot, int flags, int fd, off_t offset) {
-  void* baseaddress = 0;
-  void* ptr = 0;
-  if(!start) {
-    baseaddress = lastAlignedmmap;
-    for(;;) {
-      if(baseaddress) flags|=MAP_FIXED;
-      ptr = mmap(baseaddress, length, prot, flags, fd, offset);
-      if(!ptr)
-        baseaddress = (void*)((size_t)baseaddress + mparams.granularity);
-      else if((size_t)ptr & (mparams.granularity - SIZE_T_ONE)) {
-        munmap(ptr, length);
-        baseaddress = (void*)(((size_t)ptr + mparams.granularity) & ~(mparams.granularity - SIZE_T_ONE));
-      }
-      else break;
-    }
-  }
-  else ptr = mmap(start, length, prot, flags, fd, offset);
-  if(ptr) lastAlignedmmap = (void*)((size_t) ptr + mparams.granularity);
-  return ptr;
-}
-#else
-#define MMAP_IMPL mmap
-#endif /* DEFAULT_GRANULARITY_ALIGNED */
-#define MUNMAP_DEFAULT(a, s)  munmap((a), (s))
 #define MMAP_PROT            (PROT_READ|PROT_WRITE)
 #ifdef MAP_ANONYMOUS
 #define MMAP_FLAGS           (MAP_PRIVATE|MAP_ANONYMOUS)
 #define MMAP_DEFAULT(s)       MMAP_IMPL(0, (s), MMAP_PROT, MMAP_FLAGS, -1, 0)
 #else /* MAP_ANONYMOUS */
-/*
-   Nearly all versions of mmap support MAP_ANONYMOUS, so the following
-   is unlikely to be needed, but is supplied just in case.
-*/
 #define MMAP_FLAGS           (MAP_PRIVATE)
 static int dev_zero_fd = -1; /* Cached file descriptor for /dev/zero. */
-#define MMAP_DEFAULT(s) ((dev_zero_fd < 0) ? \
-           (dev_zero_fd = open("/dev/zero", O_RDWR), \
-            MMAP_IMPL(0, (s), MMAP_PROT, MMAP_FLAGS, dev_zero_fd, 0)) : \
-            MMAP_IMPL(0, (s), MMAP_PROT, MMAP_FLAGS, dev_zero_fd, 0))
 #endif /* MAP_ANONYMOUS */
 
-#define DIRECT_MMAP_DEFAULT(s) MMAP_DEFAULT(s)
+#ifdef DEFAULT_GRANULARITY_ALIGNED
+static void* lastAlignedmmap; /* Used as a hint */
+#endif /* DEFAULT_GRANULARITY_ALIGNED */
+static FORCEINLINE void* posix_mmap(size_t size) {
+  void* baseaddress = 0;
+  void* ptr = 0;
+  int flags = MMAP_FLAGS, fd = -1;
+#ifndef MAP_ANONYMOUS
+  if (dev_zero_fd < 0)
+    dev_zero_fd = open("/dev/zero", O_RDWR);
+  fd = dev_zero_fd;
+#endif
+#ifdef ENABLE_LARGE_PAGES
+#ifdef MAP_LARGEPAGE
+#define MMAP_FLAGS_LARGEPAGE MAP_LARGEPAGE
+#elif defined(MAP_HUGE_TLB)
+#define MMAP_FLAGS_LARGEPAGE MAP_LARGEPAGE
+#else
+#error Cannot figure out how to enable large page support for this system!
+#endif
+  if(largepagesize && size >= largepagesize && !(size & (largepagesize-1))
+    ptr = mmap(baseaddress, size, MMAP_PROT, flags|MMAP_FLAGS_LARGEPAGE, fd, 0);
+#endif
+  if (!ptr) {
+#ifdef DEFAULT_GRANULARITY_ALIGNED
+    void* originalbaseaddress;
+    baseaddress = originalbaseaddress = lastAlignedmmap;
+    for(;;) {
+      if (baseaddress) flags|=MAP_FIXED;
+      ptr = mmap(baseaddress, size, MMAP_PROT, flags, fd, 0);
+      if (!ptr)
+        baseaddress = (void*)((size_t)baseaddress + mparams.granularity);
+      else if ((size_t)ptr & (mparams.granularity - SIZE_T_ONE)) {
+        munmap(ptr, size);
+        baseaddress = (void*)(((size_t)ptr + mparams.granularity) & ~(mparams.granularity - SIZE_T_ONE));
+      }
+      else break;
+      if (baseaddress == originalbaseaddress) /* If this wraps then we are out of address space */
+        return MFAIL;
+    }
+#else
+    ptr = mmap(baseaddress, size, MMAP_PROT, flags, fd, 0);
+#endif
+  }
+#if DEBUG
+    if (lastAlignedmmap && ptr!=lastAlignedmmap) printf("Non-contiguous mmap between %p and %p\n", ptr, lastAlignedmmap);
+#endif
+#ifdef DEFAULT_GRANULARITY_ALIGNED
+  if (ptr) lastAlignedmmap = (void*)((size_t) ptr + mparams.granularity);
+#endif
+  return ptr;
+}
 
+/* For direct MMAP, use MAP_GROWSDOWN (linux)|MAP_STACK (bsd) to minimize interference */
+static FORCEINLINE void* posix_direct_mmap(size_t size) {
+  void* ptr = 0;
+  int flags = MMAP_FLAGS, fd = -1;
+#ifndef MAP_ANONYMOUS
+  if (dev_zero_fd < 0)
+    dev_zero_fd = open("/dev/zero", O_RDWR);
+  fd = dev_zero_fd;
+#endif
+#ifdef MAP_GROWSDOWN
+  flags |= MAP_GROWSDOWN;
+#elif defined(MAP_STACK)
+  flags |= MAP_STACK;
+#else
+#warning Cannot figure out how to request memory from the top of the address space!
+#endif
+  ptr = mmap(0, size, MMAP_PROT, flags, fd, 0);
+#if DEBUG && 0
+  printf("mmap returns %p size %u\n", ptr, size);
+#endif
+  return (ptr != 0)? ptr: MFAIL;
+}
+
+/* Implementation of mremap for direct MMAP */
+static FORCEINLINE void* posix_direct_mremap(void *ptr, size_t oldsize, size_t newsize, int flags) {
+  void* newptr = 0;
+  if (newsize != oldsize) {
+    newptr = mremap(ptr, oldsize, newsize, flags);
+  }
+#if DEBUG && 0
+  printf("mremap(%p, %u, %u, %d) returns %p!\n", ptr, oldsize, newsize, flags, newptr);
+#endif
+  return (newptr != 0)? newptr: MFAIL;
+}
+
+#define MMAP_DEFAULT(s)                     posix_mmap(s)
+#define MUNMAP_DEFAULT(a, s)                munmap((a), (s))
+#define DIRECT_MMAP_DEFAULT(s)              posix_direct_mmap(s)
+#define DIRECT_MREMAP_DEFAULT(a, os, ns, f) posix_direct_mremap((a), (os), (ns), (f))
 #else /* WIN32 */
 
 /* Win32 MMAP via VirtualAlloc */
+static size_t win32AllocationGranularity;
 #ifdef DEFAULT_GRANULARITY_ALIGNED
 static void* lastWin32mmap; /* Used as a hint */
 #endif /* DEFAULT_GRANULARITY_ALIGNED */
-#ifdef ENABLE_LARGE_PAGES
-static int largepagesavailable = 1;
-#endif /* ENABLE_LARGE_PAGES */
 static FORCEINLINE void* win32mmap(size_t size) {
   void* baseaddress = 0;
   void* ptr = 0;
 #ifdef ENABLE_LARGE_PAGES
-  /* Note that large pages are *always* allocated on a large page boundary.
-  If however granularity is small then don't waste a kernel call if size
-  isn't around the size of a large page */
-  if(largepagesavailable && size >= 1*1024*1024) {
+  /* Note that large pages are *always* allocated on a large page boundary */
+  if(largepagesize && size >= largepagesize && !(size & (largepagesize-1)) {
     ptr = VirtualAlloc(baseaddress, size, MEM_RESERVE|MEM_COMMIT|MEM_LARGE_PAGES, PAGE_READWRITE);
     if(!ptr) {
-        if (ERROR_PRIVILEGE_NOT_HELD==GetLastError()) largepagesavailable=0;
+        if (ERROR_PRIVILEGE_NOT_HELD==GetLastError()) largepagesize=0;
     }
   }
 #endif
@@ -1600,7 +1715,8 @@ static FORCEINLINE void* win32mmap(size_t size) {
 #ifdef DEFAULT_GRANULARITY_ALIGNED
     /* We try to avoid overhead by speculatively reserving at aligned
     addresses until we succeed */
-    baseaddress = lastWin32mmap;
+    void* originalbaseaddress;
+    baseaddress = originalbaseaddress = lastWin32mmap;
     for(;;) {
       void* reserveaddr = VirtualAlloc(baseaddress, size, MEM_RESERVE, PAGE_READWRITE);
       if (!reserveaddr)
@@ -1610,7 +1726,7 @@ static FORCEINLINE void* win32mmap(size_t size) {
         baseaddress = (void*)(((size_t)reserveaddr + mparams.granularity) & ~(mparams.granularity - SIZE_T_ONE));
       }
       else break;
-      if (!baseaddress) /* If this wraps then we are out of address space */
+      if (baseaddress == originalbaseaddress) /* If this wraps then we are out of address space */
         return MFAIL;
     }
 #endif
@@ -1634,57 +1750,66 @@ static FORCEINLINE void* win32mmap(size_t size) {
 
 /* For direct MMAP, use MEM_TOP_DOWN to minimize interference */
 static FORCEINLINE void* win32direct_mmap(size_t size) {
-#if HAVE_MREMAP
-  /* Reserve twice the size so win32mremap() can succeed */
-  void* ptr = 0, *ptr2 = VirtualAlloc(0, size*2, MEM_RESERVE|MEM_TOP_DOWN, PAGE_READWRITE);
-  if (ptr2 != 0) {
+  /* Windows treats address space reservation as different to page allocation */
+  void* ptr = 0, *ptr2;
+  ptr2 = VirtualAlloc(0, MMAP_OVERALLOCATION(size), MEM_RESERVE|MEM_TOP_DOWN|((MMAP_OVERALLOCATION(1024) == 1024) ? MEM_COMMIT : 0), PAGE_READWRITE);
+  if (MMAP_OVERALLOCATION(1024) > 1024 && ptr2 != 0) {
     ptr = VirtualAlloc(ptr2, size, MEM_COMMIT, PAGE_READWRITE);
     if (ptr == 0)
-      VirtualFree(ptr2, size*2, MEM_RELEASE);
+      VirtualFree(ptr2, 0, MEM_RELEASE);
   }
-#else /* HAVE_MREMAP */
-  void* ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN, PAGE_READWRITE);
-#endif /* HAVE_MREMAP */
 #if DEBUG && 0
   printf("VirtualAlloc returns %p size %u\n", ptr, size);
 #endif
   return (ptr != 0)? ptr: MFAIL;
 }
 
-#if HAVE_MREMAP
-/* Implementation of mremap for win32 */
-#define MREMAP_MAYMOVE 1
-static FORCEINLINE void* win32mremap(void *ptr, size_t oldsize, size_t newsize, int flags) {
-  void* newptr;
+/* Implementation of mremap for direct MMAP */
+static FORCEINLINE void* win32direct_mremap(void *ptr, size_t oldsize, size_t newsize, int flags) {
+  void* newptr = 0;
   if (newsize == oldsize) {
     return ptr;
   }
   else if (newsize > oldsize) {
-    newptr = VirtualAlloc((void*)((size_t)ptr + oldsize), newsize - oldsize,
-                          MEM_COMMIT, PAGE_READWRITE);
-    if (newptr == 0)
-	  newptr = VirtualAlloc((void*)((size_t)ptr + oldsize), newsize - oldsize,
+    if (MMAP_OVERALLOCATION(1024) > 1024)
+      newptr = VirtualAlloc((void*)((size_t)ptr + oldsize), newsize - oldsize,
+                            MEM_COMMIT, PAGE_READWRITE);
+    if (newptr == 0) {
+      newptr = VirtualAlloc((void*)((size_t)ptr + oldsize), newsize - oldsize,
                             MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+    }
   }
   else {
-    VirtualFree((void*)((size_t)ptr + newsize), oldsize - newsize, MEM_DECOMMIT);
+    MEMORY_BASIC_INFORMATION minfo;
+    size_t size = oldsize - newsize;
+    char* cptr = (char*)ptr + newsize;
+    VirtualFree(cptr, size, MEM_DECOMMIT);
+    while (size) {
+      if (VirtualQuery(cptr, &minfo, sizeof(minfo)) == 0)
+        break;
+      if (minfo.AllocationBase == cptr)
+        VirtualFree(cptr, 0, MEM_RELEASE);
+      if (minfo.RegionSize >= size)
+        break;
+      cptr += minfo.RegionSize;
+      size -= minfo.RegionSize;
+    }
+    newptr = ptr;
   }
 #if DEBUG && 0
   printf("win32remap(%p, %u, %u, %d) returns %p!\n", ptr, oldsize, newsize, flags, newptr);
 #endif
   if (newptr != 0)
     return ptr;
-  if ((flags & MREMAP_MAYMOVE) == 0)
-    return MFAIL;
   /* Currently we don't implement MREMAP_MAYMOVE */
   return MFAIL;
 }
-#endif
 
 /* This function supports releasing coalesed segments */
 static FORCEINLINE int win32munmap(void* ptr, size_t size) {
-  MEMORY_BASIC_INFORMATION minfo;
+  MEMORY_BASIC_INFORMATION minfo = {0};
   char* cptr = (char*)ptr;
+  size_t osize = MMAP_OVERALLOCATION(size);
   while (size) {
     if (VirtualQuery(cptr, &minfo, sizeof(minfo)) == 0)
       return -1;
@@ -1695,21 +1820,34 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
       return -1;
     cptr += minfo.RegionSize;
     size -= minfo.RegionSize;
+    osize -= minfo.RegionSize;
+  }
+  if (MMAP_OVERALLOCATION(1024) > 1024) {
+    while (osize && minfo.State == MEM_RESERVE) {
+      if (VirtualQuery(cptr, &minfo, sizeof(minfo)) == 0)
+        return -1;
+      if (minfo.BaseAddress != cptr || minfo.AllocationBase != cptr ||
+          minfo.State != MEM_RESERVE || minfo.RegionSize > size)
+        return -1;
+      if (VirtualFree(cptr, 0, MEM_RELEASE) == 0)
+        return -1;
+      cptr += minfo.RegionSize;
+      osize -= minfo.RegionSize;
+    }
   }
   return 0;
 }
 
-#define MMAP_DEFAULT(s)             win32mmap(s)
-#define MUNMAP_DEFAULT(a, s)        win32munmap((a), (s))
-#define DIRECT_MMAP_DEFAULT(s)      win32direct_mmap(s)
+#define MMAP_DEFAULT(s)                     win32mmap(s)
+#define MUNMAP_DEFAULT(a, s)                win32munmap((a), (s))
+#define DIRECT_MMAP_DEFAULT(s)              win32direct_mmap(s)
+#define DIRECT_MREMAP_DEFAULT(a, os, ns, f) win32direct_mremap((a), (os), (ns), (f))
 #endif /* WIN32 */
 #endif /* HAVE_MMAP */
 
 #if HAVE_MREMAP
 #ifndef WIN32
 #define MREMAP_DEFAULT(addr, osz, nsz, mv) mremap((addr), (osz), (nsz), (mv))
-#else /* WIN32 */
-#define MREMAP_DEFAULT(addr, osz, nsz, mv) win32mremap((addr), (osz), (nsz), (mv))
 #endif /* WIN32 */
 #endif /* HAVE_MREMAP */
 
@@ -1734,9 +1872,9 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
     #define USE_MMAP_BIT            (SIZE_T_ONE)
 
     #ifdef MMAP
-        #define CALL_MMAP(s)        MMAP(s)
+        #define CALL_MMAP(s, f)     MMAP((s), (f))
     #else /* MMAP */
-        #define CALL_MMAP(s)        MMAP_DEFAULT(s)
+        #define CALL_MMAP(s, f)     MMAP_DEFAULT(s)
     #endif /* MMAP */
     #ifdef MUNMAP
         #define CALL_MUNMAP(a, s)   MUNMAP((a), (s))
@@ -1744,38 +1882,39 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
         #define CALL_MUNMAP(a, s)   MUNMAP_DEFAULT((a), (s))
     #endif /* MUNMAP */
     #ifdef DIRECT_MMAP
-        #define CALL_DIRECT_MMAP(s) DIRECT_MMAP(s)
+        #define CALL_DIRECT_MMAP(s, f) DIRECT_MMAP((s), (f))
     #else /* DIRECT_MMAP */
-        #define CALL_DIRECT_MMAP(s) DIRECT_MMAP_DEFAULT(s)
+        #define CALL_DIRECT_MMAP(s, f) DIRECT_MMAP_DEFAULT(s)
+    #endif /* DIRECT_MMAP */
+    #ifdef DIRECT_MREMAP
+        #define CALL_DIRECT_MREMAP(a, os, ns, f, f2) DIRECT_MREMAP((a), (os), (ns), (f), (f2))
+    #else /* DIRECT_MMAP */
+        #define CALL_DIRECT_MREMAP(a, os, ns, f, f2) DIRECT_MREMAP_DEFAULT((a), (os), (ns), (f))
     #endif /* DIRECT_MMAP */
 #else  /* HAVE_MMAP */
-    #define USE_MMAP_BIT            (SIZE_T_ZERO)
+    #define USE_MMAP_BIT                         (SIZE_T_ZERO)
 
-    #define MMAP(s)                 MFAIL
-    #define MUNMAP(a, s)            (-1)
-    #define DIRECT_MMAP(s)          MFAIL
-    #define CALL_DIRECT_MMAP(s)     DIRECT_MMAP(s)
-    #define CALL_MMAP(s)            MMAP(s)
-    #define CALL_MUNMAP(a, s)       MUNMAP((a), (s))
+    #define MMAP(s, f)                           MFAIL
+    #define MUNMAP(a, s)                         (-1)
+    #define DIRECT_MMAP(s, f)                    MFAIL
+    #define DIRECT_MREMAP(a, os, ns, f, f2)      MFAIL
+    #define CALL_DIRECT_MMAP(s, f)               DIRECT_MMAP((s), (f))
+    #define CALL_DIRECT_MREMAP(a, os, ns, f, f2) DIRECT_MREMAP((a), (os), (ns), (f), (f2))
+    #define CALL_MMAP(s)                         MMAP(s)
+    #define CALL_MUNMAP(a, s)                    MUNMAP((a), (s))
 #endif /* HAVE_MMAP */
 
 /**
- * Define CALL_MMAP_MREMAP and CALL_MREMAP
+ * Define CALL_MREMAP
  */
 #if HAVE_MMAP && HAVE_MREMAP
     #ifdef MREMAP
-        #define CALL_MMAP_MREMAP(addr, osz, nsz, mv) MREMAP((addr), (osz), (nsz), (mv))
+        #define CALL_MREMAP(addr, osz, nsz, mv) MREMAP((addr), (osz), (nsz), (mv))
     #else /* MREMAP */
-        #define CALL_MMAP_MREMAP(addr, osz, nsz, mv) MREMAP_DEFAULT((addr), (osz), (nsz), (mv))
+        #define CALL_MREMAP(addr, osz, nsz, mv) MREMAP_DEFAULT((addr), (osz), (nsz), (mv))
     #endif /* MREMAP */
-    #if HAVE_MREMAP == 2
-        #define CALL_MREMAP(addr, osz, nsz, mv) CALL_MMAP_MREMAP((addr), (osz), (nsz), (mv))
-    #else
-        #define CALL_MREMAP(addr, osz, nsz, mv) MFAIL
-    #endif
 #else  /* HAVE_MMAP && HAVE_MREMAP */
-    #define CALL_MMAP_MREMAP(addr, osz, nsz, mv)     MFAIL
-    #define CALL_MREMAP(addr, osz, nsz, mv)          MFAIL
+    #define CALL_MREMAP(addr, osz, nsz, mv)     MFAIL
 #endif /* HAVE_MMAP && HAVE_MREMAP */
 
 /* mstate bit set if continguous morecore disabled or failed */
@@ -2301,12 +2440,15 @@ typedef unsigned int binmap_t;         /* Described below */
 /* extraction of fields from head words */
 #define cinuse(p)           ((p)->head & CINUSE_BIT)
 #define pinuse(p)           ((p)->head & PINUSE_BIT)
+#define flag4inuse(p)       ((p)->head & FLAG4_BIT)
 #define is_inuse(p)         (((p)->head & INUSE_BITS) != PINUSE_BIT)
 #define is_mmapped(p)       (((p)->head & INUSE_BITS) == 0)
 
 #define chunksize(p)        ((p)->head & ~(FLAG_BITS))
 
 #define clear_pinuse(p)     ((p)->head &= ~PINUSE_BIT)
+#define set_flag4(p)        ((p)->head |= FLAG4_BIT)
+#define clear_flag4(p)      ((p)->head &= ~FLAG4_BIT)
 
 /* Treat space at ptr +/- offset as a chunk */
 #define chunk_plus_offset(p, s)  ((mchunkptr)(((char*)(p)) + (s)))
@@ -2685,12 +2827,12 @@ static struct malloc_state _gm_;
    & ~(mparams.granularity - SIZE_T_ONE))
 
 
-/* For mmap, use granularity alignment on windows, else page-align */
-/*#ifdef WIN32
-#define mmap_align(S) granularity_align(S)
-#else*/
+/* For mmap, use win32 granularity alignment on windows, else page-align */
+#ifdef WIN32
+#define mmap_align(S) (((S) + (win32AllocationGranularity - SIZE_T_ONE)) & ~(win32AllocationGranularity - SIZE_T_ONE))
+#else
 #define mmap_align(S) page_align(S)
-/*#endif*/
+#endif
 
 /* For sys_alloc, enough padding to ensure can malloc request on success */
 #define SYS_ALLOC_PADDING (TOP_FOOT_SIZE + MALLOC_ALIGNMENT)
@@ -3102,7 +3244,11 @@ static size_t traverse_and_check(mstate m);
 /* ---------------------------- setting mparams -------------------------- */
 
 #ifdef ENABLE_LARGE_PAGES
+#ifndef WIN32
+typedef long (*gethugepagesize_t)(void);
+#else
 typedef size_t (WINAPI *GetLargePageMinimum_t)(void);
+#endif
 #endif
 
 /* Initialize mparams */
@@ -3128,22 +3274,34 @@ static int init_mparams(void) {
       psize = system_info.dwPageSize;
       gsize = ((DEFAULT_GRANULARITY != 0)?
                DEFAULT_GRANULARITY : system_info.dwAllocationGranularity);
-#ifdef ENABLE_LARGE_PAGES
-      { 
-          GetLargePageMinimum_t GetLargePageMinimum_ = (GetLargePageMinimum_t) GetProcAddress(GetModuleHandle(__T("kernel32.dll")), "GetLargePageMinimum");
-          if(GetLargePageMinimum_) {
-              size_t largepagesize = GetLargePageMinimum_();
-              if(largepagesize) {
-                  psize = largepagesize;
-                  gsize = ((DEFAULT_GRANULARITY != 0)?
-                           DEFAULT_GRANULARITY : largepagesize);
-                  if(gsize < largepagesize) gsize = largepagesize;
-              }
-          }
-      }
-#endif
+      win32AllocationGranularity = system_info.dwAllocationGranularity;
     }
 #endif /* WIN32 */
+#ifdef ENABLE_LARGE_PAGES
+#ifndef WIN32
+    { /* gethugepagesize() is part of the portable libhugetlbfs
+      (http://sourceforge.net/projects/libhugetlbfs/). However we
+      want to avoid requiring a dependency on that library if
+      possible, so if it's in our process then great and if not
+      then that's okay too. */
+      gethugepagesize_t gethugepagesize_ = (gethugepagesize_t) dlsym(RTLD_DEFAULT, "gethugepagesize");
+      if(gethugepagesize_)
+        largepagesize = gethugepagesize_();
+    }
+#else /* WIN32 */
+    { 
+      GetLargePageMinimum_t GetLargePageMinimum_ = (GetLargePageMinimum_t) GetProcAddress(GetModuleHandle(__T("kernel32.dll")), "GetLargePageMinimum");
+      if(GetLargePageMinimum_)
+        largepagesize = GetLargePageMinimum_();
+    }
+#endif /* WIN32 */
+    if(largepagesize) {
+      psize = largepagesize;
+      gsize = ((DEFAULT_GRANULARITY != 0)?
+              DEFAULT_GRANULARITY : largepagesize);
+      if(gsize < largepagesize) gsize = largepagesize;
+    }
+#endif /* ENABLE_LARGE_PAGES */
 
     /* Sanity-check configuration:
        size_t must be unsigned and as wide as pointer type.
@@ -3806,18 +3964,19 @@ static void internal_malloc_stats(mstate m) {
 
 
 /* Relays to internal calls to malloc/free from realloc, memalign etc */
-
 #if ONLY_MSPACES
-#define internal_malloc(m, b) mspace_malloc(m, b)
+static void* mspace_malloc_implementation(mstate ms, size_t bytes, unsigned flags);
+#define internal_malloc(m, b, f) mspace_malloc_implementation(m, b, f)
 #define internal_free(m, mem) mspace_free(m,mem);
 #else /* ONLY_MSPACES */
 #if MSPACES
-#define internal_malloc(m, b)\
-   (m == gm)? dlmalloc(b) : mspace_malloc(m, b)
+static void* mspace_malloc_implementation(mstate ms, size_t bytes, unsigned flags);
+#define internal_malloc(m, b, f)\
+   (m == gm)? dlmalloc(b) : mspace_malloc_implementation(m, b, f)
 #define internal_free(m, mem)\
    if (m == gm) dlfree(mem); else mspace_free(m,mem);
 #else /* MSPACES */
-#define internal_malloc(m, b) dlmalloc(b)
+#define internal_malloc(m, b, f) dlmalloc(b)
 #define internal_free(m, mem) dlfree(mem)
 #endif /* MSPACES */
 #endif /* ONLY_MSPACES */
@@ -3833,10 +3992,10 @@ static void internal_malloc_stats(mstate m) {
 */
 
 /* Malloc using mmap */
-static void* mmap_alloc(mstate m, size_t nb) {
+static void* mmap_alloc(mstate m, size_t nb, unsigned flags) {
   size_t mmsize = mmap_align(nb + SIX_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
   if (mmsize > nb) {     /* Check for wrap around 0 */
-    char* mm = (char*)(CALL_DIRECT_MMAP(mmsize));
+    char* mm = (char*)(CALL_DIRECT_MMAP(mmsize, flags));
     if (mm != CMFAIL) {
       size_t offset = align_offset(chunk2mem(mm));
       size_t psize = mmsize - offset - MMAP_FOOT_PAD;
@@ -3860,7 +4019,7 @@ static void* mmap_alloc(mstate m, size_t nb) {
 }
 
 /* Realloc using mmap */
-static mchunkptr mmap_resize(mstate m, mchunkptr oldp, size_t nb) {
+static mchunkptr mmap_resize(mstate m, mchunkptr oldp, size_t nb, unsigned flags) {
   size_t oldsize = chunksize(oldp);
   if (is_small(nb)) /* Can't shrink mmap regions below small size */
     return 0;
@@ -3872,8 +4031,8 @@ static mchunkptr mmap_resize(mstate m, mchunkptr oldp, size_t nb) {
     size_t offset = oldp->prev_foot;
     size_t oldmmsize = oldsize + offset + MMAP_FOOT_PAD;
     size_t newmmsize = mmap_align(nb + SIX_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
-    char* cp = (char*)CALL_MMAP_MREMAP((char*)oldp - offset,
-                                  oldmmsize, newmmsize, MREMAP_MAYMOVE);
+    char* cp = (char*)CALL_DIRECT_MREMAP((char*)oldp - offset,
+                                  oldmmsize, newmmsize, MREMAP_MAYMOVE, flags);
     if (cp != CMFAIL) {
       mchunkptr newp = (mchunkptr)(cp + offset);
       size_t psize = newmmsize - offset - MMAP_FOOT_PAD;
@@ -4037,7 +4196,7 @@ static void add_segment(mstate m, char* tbase, size_t tsize, flag_t mmapped) {
 /* -------------------------- System allocation -------------------------- */
 
 /* Get memory from system using MORECORE or MMAP */
-static void* sys_alloc(mstate m, size_t nb) {
+static void* sys_alloc(mstate m, size_t nb, unsigned flags) {
   char* tbase = CMFAIL;
   size_t tsize = 0;
   flag_t mmap_flag = 0;
@@ -4045,9 +4204,9 @@ static void* sys_alloc(mstate m, size_t nb) {
   ensure_initialization();
 
   /* Directly map large chunks, but only if already initialized */
-  if (use_mmap(m) && nb >= mparams.mmap_threshold && m->topsize != 0) {
-    void* mem = mmap_alloc(m, nb);
-    if (mem != 0)
+  if (use_mmap(m) && (nb >= mparams.mmap_threshold || (flags & M2_ALWAYS_MMAP)) && m->topsize != 0) {
+    void* mem = mmap_alloc(m, nb, flags);
+    if (mem != 0 || (flags & M2_ALWAYS_MMAP))
       return mem;
   }
 
@@ -4135,7 +4294,7 @@ static void* sys_alloc(mstate m, size_t nb) {
   if (HAVE_MMAP && tbase == CMFAIL) {  /* Try MMAP */
     size_t rsize = granularity_align(nb + SYS_ALLOC_PADDING);
     if (rsize > nb) { /* Fail if wraps around zero */
-      char* mp = (char*)(CALL_MMAP(rsize));
+      char* mp = (char*)(CALL_MMAP(rsize, flags));
       if (mp != CMFAIL) {
         tbase = mp;
         tsize = rsize;
@@ -4465,8 +4624,19 @@ static void* tmalloc_small(mstate m, size_t nb) {
 
 /* --------------------------- realloc support --------------------------- */
 
-static void* internal_realloc(mstate m, void* oldmem, size_t bytes) {
+static void* internal_realloc(mstate m, void* oldmem, size_t bytes, size_t alignment, unsigned flags) {
   if (bytes >= MAX_REQUEST) {
+    MALLOC_FAILURE_ACTION;
+    return 0;
+  }
+  if (alignment > MALLOC_ALIGNMENT) {
+    /* This isn't currently implemented, but it ought to be as it is a very
+    useful operation when dealing with SSE aligned vectors and such */
+#ifdef __GNUC__
+ #warning Aligned realloc() still needs to be implemented!
+#elif defined(_MSC_VER)
+ #pragma message(__FILE__ ": WARNING: Aligned realloc() still needs to be implemented!")
+#endif
     MALLOC_FAILURE_ACTION;
     return 0;
   }
@@ -4483,7 +4653,7 @@ static void* internal_realloc(mstate m, void* oldmem, size_t bytes) {
                 ok_next(oldp, next) && ok_pinuse(next))) {
       size_t nb = request2size(bytes);
       if (is_mmapped(oldp))
-        newp = mmap_resize(m, oldp, nb);
+        newp = mmap_resize(m, oldp, nb, flags);
       else if (oldsize >= nb) { /* already big enough */
         size_t rsize = oldsize - nb;
         newp = oldp;
@@ -4525,8 +4695,8 @@ static void* internal_realloc(mstate m, void* oldmem, size_t bytes) {
       }
       return chunk2mem(newp);
     }
-    else {
-      void* newmem = internal_malloc(m, bytes);
+    else if (!(flags & M2_PREVENT_MOVE)) {
+      void* newmem = internal_malloc(m, bytes, flags);
       if (newmem != 0) {
         size_t oc = oldsize - overhead_for(oldp);
         memcpy(newmem, oldmem, (oc < bytes)? oc : bytes);
@@ -4540,9 +4710,9 @@ static void* internal_realloc(mstate m, void* oldmem, size_t bytes) {
 
 /* --------------------------- memalign support -------------------------- */
 
-static void* internal_memalign(mstate m, size_t alignment, size_t bytes) {
+static void* internal_memalign(mstate m, size_t alignment, size_t bytes, unsigned flags) {
   if (alignment <= MALLOC_ALIGNMENT)    /* Can just use malloc */
-    return internal_malloc(m, bytes);
+    return internal_malloc(m, bytes, flags);
   if (alignment <  MIN_CHUNK_SIZE) /* must be at least a minimum chunk size */
     alignment = MIN_CHUNK_SIZE;
   if ((alignment & (alignment-SIZE_T_ONE)) != 0) {/* Ensure a power of 2 */
@@ -4559,7 +4729,7 @@ static void* internal_memalign(mstate m, size_t alignment, size_t bytes) {
   else {
     size_t nb = request2size(bytes);
     size_t req = nb + alignment + MIN_CHUNK_SIZE - CHUNK_OVERHEAD;
-    char* mem = (char*)internal_malloc(m, req);
+    char* mem = (char*)internal_malloc(m, req, flags);
     if (mem != 0) {
       void* leader = 0;
       void* trailer = 0;
@@ -4664,7 +4834,7 @@ static void** ialloc(mstate m,
   else {
     /* if empty req, must still return chunk representing empty array */
     if (n_elements == 0)
-      return (void**)internal_malloc(m, 0);
+      return (void**)internal_malloc(m, 0, 0);
     marray = 0;
     array_size = request2size(n_elements * (sizeof(void*)));
   }
@@ -4690,7 +4860,7 @@ static void** ialloc(mstate m,
   */
   was_enabled = use_mmap(m);
   disable_mmap(m);
-  mem = internal_malloc(m, size - CHUNK_OVERHEAD);
+  mem = internal_malloc(m, size - CHUNK_OVERHEAD, 0);
   if (was_enabled)
     enable_mmap(m);
   if (mem == 0)
@@ -5150,7 +5320,7 @@ mspace create_mspace(size_t capacity, int locked) {
     size_t rs = ((capacity == 0)? mparams.granularity :
                  (capacity + TOP_FOOT_SIZE + msize));
     size_t tsize = granularity_align(rs);
-    char* tbase = (char*)(CALL_MMAP(tsize));
+    char* tbase = (char*)(CALL_MMAP(tsize, 0));
     if (tbase != CMFAIL) {
       m = init_user_mstate(tbase, tsize);
       m->seg.sflags = USE_MMAP_BIT;
@@ -5215,112 +5385,108 @@ size_t destroy_mspace(mspace msp) {
   versions. This is not so nice but better than the alternatives.
 */
 
-
-void* mspace_malloc(mspace msp, size_t bytes) {
-  mstate ms = (mstate)msp;
-  if (!ok_magic(ms)) {
-    USAGE_ERROR_ACTION(ms,ms);
-    return 0;
-  }
+static FORCEINLINE void* mspace_malloc_implementation(mstate ms, size_t bytes, unsigned flags) {
   if (!PREACTION(ms)) {
     void* mem;
-    size_t nb;
-    if (bytes <= MAX_SMALL_REQUEST) {
-      bindex_t idx;
-      binmap_t smallbits;
-      nb = (bytes < MIN_REQUEST)? MIN_CHUNK_SIZE : pad_request(bytes);
-      idx = small_index(nb);
-      smallbits = ms->smallmap >> idx;
+    size_t nb = bytes;
+    if (!(flags & M2_ALWAYS_MMAP)) {
+      if (bytes <= MAX_SMALL_REQUEST) {
+        bindex_t idx;
+        binmap_t smallbits;
+        nb = (bytes < MIN_REQUEST)? MIN_CHUNK_SIZE : pad_request(bytes);
+        idx = small_index(nb);
+        smallbits = ms->smallmap >> idx;
 
-      if ((smallbits & 0x3U) != 0) { /* Remainderless fit to a smallbin. */
-        mchunkptr b, p;
-        idx += ~smallbits & 1;       /* Uses next bin if idx empty */
-        b = smallbin_at(ms, idx);
-        p = b->fd;
-        assert(chunksize(p) == small_index2size(idx));
-        unlink_first_small_chunk(ms, b, p, idx);
-        set_inuse_and_pinuse(ms, p, small_index2size(idx));
-        mem = chunk2mem(p);
-        check_malloced_chunk(ms, mem, nb);
-        goto postaction;
-      }
-
-      else if (nb > ms->dvsize) {
-        if (smallbits != 0) { /* Use chunk in next nonempty smallbin */
-          mchunkptr b, p, r;
-          size_t rsize;
-          bindex_t i;
-          binmap_t leftbits = (smallbits << idx) & left_bits(idx2bit(idx));
-          binmap_t leastbit = least_bit(leftbits);
-          compute_bit2idx(leastbit, i);
-          b = smallbin_at(ms, i);
+        if ((smallbits & 0x3U) != 0) { /* Remainderless fit to a smallbin. */
+          mchunkptr b, p;
+          idx += ~smallbits & 1;       /* Uses next bin if idx empty */
+          b = smallbin_at(ms, idx);
           p = b->fd;
-          assert(chunksize(p) == small_index2size(i));
-          unlink_first_small_chunk(ms, b, p, i);
-          rsize = small_index2size(i) - nb;
-          /* Fit here cannot be remainderless if 4byte sizes */
-          if (SIZE_T_SIZE != 4 && rsize < MIN_CHUNK_SIZE)
-            set_inuse_and_pinuse(ms, p, small_index2size(i));
-          else {
-            set_size_and_pinuse_of_inuse_chunk(ms, p, nb);
-            r = chunk_plus_offset(p, nb);
-            set_size_and_pinuse_of_free_chunk(r, rsize);
-            replace_dv(ms, r, rsize);
-          }
+          assert(chunksize(p) == small_index2size(idx));
+          unlink_first_small_chunk(ms, b, p, idx);
+          set_inuse_and_pinuse(ms, p, small_index2size(idx));
           mem = chunk2mem(p);
           check_malloced_chunk(ms, mem, nb);
           goto postaction;
         }
 
-        else if (ms->treemap != 0 && (mem = tmalloc_small(ms, nb)) != 0) {
+        else if (nb > ms->dvsize) {
+          if (smallbits != 0) { /* Use chunk in next nonempty smallbin */
+            mchunkptr b, p, r;
+            size_t rsize;
+            bindex_t i;
+            binmap_t leftbits = (smallbits << idx) & left_bits(idx2bit(idx));
+            binmap_t leastbit = least_bit(leftbits);
+            compute_bit2idx(leastbit, i);
+            b = smallbin_at(ms, i);
+            p = b->fd;
+            assert(chunksize(p) == small_index2size(i));
+            unlink_first_small_chunk(ms, b, p, i);
+            rsize = small_index2size(i) - nb;
+            /* Fit here cannot be remainderless if 4byte sizes */
+            if (SIZE_T_SIZE != 4 && rsize < MIN_CHUNK_SIZE)
+              set_inuse_and_pinuse(ms, p, small_index2size(i));
+            else {
+              set_size_and_pinuse_of_inuse_chunk(ms, p, nb);
+              r = chunk_plus_offset(p, nb);
+              set_size_and_pinuse_of_free_chunk(r, rsize);
+              replace_dv(ms, r, rsize);
+            }
+            mem = chunk2mem(p);
+            check_malloced_chunk(ms, mem, nb);
+            goto postaction;
+          }
+
+          else if (ms->treemap != 0 && (mem = tmalloc_small(ms, nb)) != 0) {
+            check_malloced_chunk(ms, mem, nb);
+            goto postaction;
+          }
+        }
+      }
+      else if (bytes >= MAX_REQUEST)
+        nb = MAX_SIZE_T; /* Too big to allocate. Force failure (in sys alloc) */
+      else {
+        nb = pad_request(bytes);
+        if (ms->treemap != 0 && (mem = tmalloc_large(ms, nb)) != 0) {
           check_malloced_chunk(ms, mem, nb);
           goto postaction;
         }
       }
-    }
-    else if (bytes >= MAX_REQUEST)
-      nb = MAX_SIZE_T; /* Too big to allocate. Force failure (in sys alloc) */
-    else {
-      nb = pad_request(bytes);
-      if (ms->treemap != 0 && (mem = tmalloc_large(ms, nb)) != 0) {
+
+      if (nb <= ms->dvsize) {
+        size_t rsize = ms->dvsize - nb;
+        mchunkptr p = ms->dv;
+        if (rsize >= MIN_CHUNK_SIZE) { /* split dv */
+          mchunkptr r = ms->dv = chunk_plus_offset(p, nb);
+          ms->dvsize = rsize;
+          set_size_and_pinuse_of_free_chunk(r, rsize);
+          set_size_and_pinuse_of_inuse_chunk(ms, p, nb);
+        }
+        else { /* exhaust dv */
+          size_t dvs = ms->dvsize;
+          ms->dvsize = 0;
+          ms->dv = 0;
+          set_inuse_and_pinuse(ms, p, dvs);
+        }
+        mem = chunk2mem(p);
+        check_malloced_chunk(ms, mem, nb);
+        goto postaction;
+      }
+
+      else if (nb < ms->topsize) { /* Split top */
+        size_t rsize = ms->topsize -= nb;
+        mchunkptr p = ms->top;
+        mchunkptr r = ms->top = chunk_plus_offset(p, nb);
+        r->head = rsize | PINUSE_BIT;
+        set_size_and_pinuse_of_inuse_chunk(ms, p, nb);
+        mem = chunk2mem(p);
+        check_top_chunk(ms, ms->top);
         check_malloced_chunk(ms, mem, nb);
         goto postaction;
       }
     }
 
-    if (nb <= ms->dvsize) {
-      size_t rsize = ms->dvsize - nb;
-      mchunkptr p = ms->dv;
-      if (rsize >= MIN_CHUNK_SIZE) { /* split dv */
-        mchunkptr r = ms->dv = chunk_plus_offset(p, nb);
-        ms->dvsize = rsize;
-        set_size_and_pinuse_of_free_chunk(r, rsize);
-        set_size_and_pinuse_of_inuse_chunk(ms, p, nb);
-      }
-      else { /* exhaust dv */
-        size_t dvs = ms->dvsize;
-        ms->dvsize = 0;
-        ms->dv = 0;
-        set_inuse_and_pinuse(ms, p, dvs);
-      }
-      mem = chunk2mem(p);
-      check_malloced_chunk(ms, mem, nb);
-      goto postaction;
-    }
-
-    else if (nb < ms->topsize) { /* Split top */
-      size_t rsize = ms->topsize -= nb;
-      mchunkptr p = ms->top;
-      mchunkptr r = ms->top = chunk_plus_offset(p, nb);
-      r->head = rsize | PINUSE_BIT;
-      set_size_and_pinuse_of_inuse_chunk(ms, p, nb);
-      mem = chunk2mem(p);
-      check_top_chunk(ms, ms->top);
-      check_malloced_chunk(ms, mem, nb);
-      goto postaction;
-    }
-
-    mem = sys_alloc(ms, nb);
+    mem = sys_alloc(ms, nb, flags);
 
   postaction:
     POSTACTION(ms);
@@ -5329,10 +5495,36 @@ void* mspace_malloc(mspace msp, size_t bytes) {
 
   return 0;
 }
+void* mspace_malloc(mspace msp, size_t bytes) {
+  mstate ms = (mstate)msp;
+  if (!ok_magic(ms)) {
+    USAGE_ERROR_ACTION(ms,ms);
+    return 0;
+  }
+  return mspace_malloc_implementation(ms, bytes, 0);
+}
+void* mspace_malloc2(mspace msp, size_t bytes, size_t alignment, unsigned flags) {
+  void* mem;
+  mstate ms = (mstate)msp;
+  if (!ok_magic(ms)) {
+    USAGE_ERROR_ACTION(ms,ms);
+    return 0;
+  }
+  if (alignment <= MALLOC_ALIGNMENT)
+    mem = mspace_malloc_implementation(ms, bytes, flags);
+  else
+    mem = internal_memalign(ms, alignment, bytes, flags);
+  if (mem && (flags & M2_ZERO_MEMORY)) {
+    mchunkptr p = mem2chunk(mem);
+    if (calloc_must_clear(mem2chunk(p)))
+      memset(mem, 0, chunksize(p));
+  }
+  return mem;
+}
 
 void mspace_free(mspace msp, void* mem) {
   if (mem != 0) {
-    mchunkptr p  = mem2chunk(mem);
+    mchunkptr p = mem2chunk(mem);
 #if FOOTERS
     mstate fm = get_mstate_for(p);
     msp = msp; /* placate people compiling -Wunused */
@@ -5445,15 +5637,15 @@ void* mspace_calloc(mspace msp, size_t n_elements, size_t elem_size) {
         (req / n_elements != elem_size))
       req = MAX_SIZE_T; /* force downstream failure on overflow */
   }
-  mem = internal_malloc(ms, req);
+  mem = internal_malloc(ms, req, 0);
   if (mem != 0 && calloc_must_clear(mem2chunk(mem)))
     memset(mem, 0, req);
   return mem;
 }
 
-void* mspace_realloc(mspace msp, void* oldmem, size_t bytes) {
+void* mspace_realloc2(mspace msp, void* oldmem, size_t bytes, size_t alignment, unsigned flags) {
   if (oldmem == 0)
-    return mspace_malloc(msp, bytes);
+    return mspace_malloc2(msp, bytes, alignment, flags);
 #ifdef REALLOC_ZERO_BYTES_FREES
   if (bytes == 0) {
     mspace_free(msp, oldmem);
@@ -5461,8 +5653,10 @@ void* mspace_realloc(mspace msp, void* oldmem, size_t bytes) {
   }
 #endif /* REALLOC_ZERO_BYTES_FREES */
   else {
-#if FOOTERS
+    void* mem;
     mchunkptr p  = mem2chunk(oldmem);
+    size_t oldsize = chunksize(p);
+#if FOOTERS
     mstate ms = get_mstate_for(p);
 #else /* FOOTERS */
     mstate ms = (mstate)msp;
@@ -5471,8 +5665,16 @@ void* mspace_realloc(mspace msp, void* oldmem, size_t bytes) {
       USAGE_ERROR_ACTION(ms,ms);
       return 0;
     }
-    return internal_realloc(ms, oldmem, bytes);
+    mem = internal_realloc(ms, oldmem, bytes, alignment, flags);
+    if (mem && (flags & M2_ZERO_MEMORY) && bytes > oldsize && calloc_must_clear(p)) {
+      size_t newsize = chunksize(mem2chunk(mem));
+      memset((char*)mem + oldsize, 0, newsize - oldsize);
+    }
+    return mem;
   }
+}
+void* mspace_realloc(mspace msp, void* oldmem, size_t bytes) {
+  return mspace_realloc2(msp, oldmem, bytes, 0, 0);
 }
 
 void* mspace_memalign(mspace msp, size_t alignment, size_t bytes) {
@@ -5481,7 +5683,7 @@ void* mspace_memalign(mspace msp, size_t alignment, size_t bytes) {
     USAGE_ERROR_ACTION(ms,ms);
     return 0;
   }
-  return internal_memalign(ms, alignment, bytes);
+  return internal_memalign(ms, alignment, bytes, 0);
 }
 
 void** mspace_independent_calloc(mspace msp, size_t n_elements,
