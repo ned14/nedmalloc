@@ -358,12 +358,6 @@ HAVE_MREMAP               default: 1 on linux, else 0
   If true realloc() uses mremap() to re-allocate large blocks and
   extend or shrink allocation spaces.
 
-MMAP_OVERALLOCATION(size) default: (((size)*3)/2) on 32 bit, ((size)*4) on 64 bit.
-  Causes malloc to reserve MMAP_OVERALLOCATION(size) of address
-  space for every allocation which uses mmap() due to size >= mmap_threshold.
-  This permits such blocks to grow without requiring a memory copy, but at
-  the cost of address space which is especially precious on 32 bit systems.
-
 MMAP_CLEARS               default: 1 except on WINCE.
   True if mmap clears memory so calloc doesn't need to. This is true
   for standard unix mmap using /dev/zero and on WIN32 except for WINCE.
@@ -626,9 +620,6 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #define HAVE_MREMAP 0
 #endif  /* linux */
 #endif  /* HAVE_MREMAP */
-#ifndef MMAP_OVERALLOCATION
-#define MMAP_OVERALLOCATION(size) (sizeof(size_t)<8?(((size)*3)/2):((size)*4))
-#endif /* MMAP_OVERALLOCATION */
 #ifndef MALLOC_FAILURE_ACTION
 #define MALLOC_FAILURE_ACTION  errno = ENOMEM;
 #endif  /* MALLOC_FAILURE_ACTION */
@@ -701,6 +692,17 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #define M2_ZERO_MEMORY          (1<<0)
 #define M2_PREVENT_MOVE         (1<<1)
 #define M2_ALWAYS_MMAP          (1<<2)
+#define M2_RESERVED1            (1<<3)
+#define M2_RESERVED2            (1<<4)
+#define M2_RESERVED3            (1<<5)
+#define M2_RESERVED4            (1<<6)
+#define M2_MREMAP_ISMULTIPLIER  (1<<7)
+/* 8 bits is given to the mremap address reservation specifier.
+This lets you set a multiplier (bit 7 set) or a 1<< shift value.
+*/
+#define M2_MREMAP_MASK          0x0000ff00
+#define M2_MREMAP_MULT(n)       (M2_MREMAP_ISMULTIPLIER|(((n)<<8)&M2_MREMAP_MASK))
+#define M2_MREMAP_SHIFT(n)      (((n)<<8)&M2_MREMAP_MASK)
 #define M2_FLAGS_MASK           0x0000ffff
 #define M2_CUSTOM_FLAGS_BEGIN   (1<<16)
 #define M2_CUSTOM_FLAGS_MASK    0xffff0000
@@ -1270,10 +1272,20 @@ void** mspace_independent_comalloc(mspace msp, size_t n_elements,
   functionality. Setting alignment to a non-zero value is
   identical to using mspace_memalign(). Flags may be set to:
 
-  * M2_ZERO_MEMORY: Sets the contents of the allocated chunk to zero.
-  * M2_ALWAYS_MMAP: Always allocate as though mmap_threshold were
-                    being exceeded. This is useful for large arrays
-                    which frequently extend.
+  * M2_ZERO_MEMORY:     Sets the contents of the allocated chunk to
+                        zero.
+  * M2_ALWAYS_MMAP:     Always allocate as though mmap_threshold
+                        were being exceeded. This is useful for large
+                        arrays which frequently extend.
+  * M2_MREMAP_MULT(n):  Reserve n times as much address space such
+                        that realloc() is much faster.
+  * M2_MREMAP_SHIFT(n): Reserve (1<<n) bytes of address space such
+                        that realloc() is much faster.
+
+  Note when setting MREMAP sizes that on some platforms (e.g. Windows)
+  page tables are constructed for the reservation size. On x86/x64
+  Windows this costs 2Kb of kernel memory per Mb reserved, and as on
+  x86 kernel memory is not abundant you should not be excessive.
 */
 void* mspace_malloc2(mspace msp, size_t bytes, size_t alignment, unsigned flags);
 
@@ -1282,19 +1294,30 @@ void* mspace_malloc2(mspace msp, size_t bytes, size_t alignment, unsigned flags)
   functionality. Setting alignment to a non-zero value is
   identical to using mspace_memalign(). Flags may be set to:
 
-  * M2_ZERO_MEMORY:  Sets any increase in the allocated chunk to zero.
-                     Note that this zeroes only the increase from what
-                     dlmalloc thinks the chunk's size is, so if you
-                     didn't use this flag when allocating with malloc2
-                     (which zeroes up to chunk size) you may have
-                     garbage just before the new space.
-  * M2_PREVENT_MOVE: Prevents relocation of the chunk (useful for C++).
-  * M2_ALWAYS_MMAP:  Always allocate as though mmap_threshold were
-                     being exceeded. This is useful for large arrays
-                     which frequently extend. Note that setting this
-                     bit will not necessarily mmap a chunk which isn't
-                     already mmapped, but it will prevent a mmapped
-                     chunk being resized into a non-mmapped chunk.
+  * M2_ZERO_MEMORY:     Sets any increase in the allocated chunk to
+                        zero. Note that this zeroes only the increase
+                        from what dlmalloc thinks the chunk's size is,
+                        so if you didn't use this flag when allocating
+                        with malloc2 (which zeroes up to chunk size)
+                        then you may have garbage just before the new
+                        space.
+  * M2_ALWAYS_MMAP:     Always allocate as though mmap_threshold
+                        were being exceeded. Note that setting this
+                        bit will not necessarily mmap a chunk which
+                        isn't already mmapped, but it will force a
+                        mmapped chunk if new memory needs allocating.
+  * M2_MREMAP_MULT(n):  Reserve n times as much address space such
+                        that realloc() is much faster.
+  * M2_MREMAP_SHIFT(n): Reserve (1<<n) bytes of address space such
+                        that realloc() is much faster.
+
+  Note when setting MREMAP sizes that on some platforms (e.g. Windows)
+  page tables are constructed for the reservation size. On x86/x64
+  Windows this costs 2Kb of kernel memory per Mb reserved, and as on
+  x86 kernel memory is not abundant you should not be excessive.
+  With regard to M2_MREMAP_*, these only take effect when the
+  mmapped chunk has exceeded its reservation space and a new
+  reservation space needs to be created.
 */
 void* mspace_realloc2(mspace msp, void* mem, size_t newsize, size_t alignment, unsigned flags);
 
@@ -1743,92 +1766,90 @@ static FORCEINLINE void* win32mmap(size_t size) {
 
 /* For direct MMAP, use MEM_TOP_DOWN to minimize interference */
 static FORCEINLINE void* win32direct_mmap(void **handle, size_t size, unsigned flags) {
-  /* Windows treats address space reservation as different to page allocation */
-  void* ptr = 0, *ptr2;
-  ptr2 = VirtualAlloc(0, MMAP_OVERALLOCATION(size), MEM_RESERVE|MEM_TOP_DOWN|((MMAP_OVERALLOCATION(1024) == 1024) ? MEM_COMMIT : 0), PAGE_READWRITE);
-  if (MMAP_OVERALLOCATION(1024) > 1024 && ptr2 != 0) {
-    ptr = VirtualAlloc(ptr2, size, MEM_COMMIT, PAGE_READWRITE);
-    if (ptr == 0)
-      VirtualFree(ptr2, 0, MEM_RELEASE);
+  void* ptr = 0;
+  unsigned mremapvalue = (flags & M2_MREMAP_MASK)>>8;
+#if 1
+  mremapvalue=28/*256Mb*/;
+#endif
+  if (!mremapvalue) {
+    ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_TOP_DOWN|MEM_COMMIT, PAGE_READWRITE);
+  }
+  else {
+    size_t reservesize = (flags & M2_MREMAP_ISMULTIPLIER) ? size*mremapvalue : SIZE_T_ONE<<mremapvalue;
+    HANDLE fmh;
+    if (reservesize < size)
+      reservesize = size;
+    fmh = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE|SEC_RESERVE,
+                            (DWORD)(reservesize>>32), (DWORD)(reservesize&((DWORD)-1)), NULL);
+    if (!fmh)
+      return MFAIL;
+    *handle = (void*)fmh;
+    ptr = MapViewOfFile(fmh, FILE_MAP_ALL_ACCESS, 0, 0, size);
+    if (ptr)
+      ptr = VirtualAlloc(ptr, size, MEM_COMMIT, PAGE_READWRITE);
+    if (!ptr) {
+      CloseHandle(fmh);
+      return MFAIL;
+    }
   }
 #if DEBUG && 0
   printf("VirtualAlloc returns %p size %u\n", ptr, size);
 #endif
-  *handle = (void*)(size_t)0xdeadbeef;
   return (ptr != 0)? ptr: MFAIL;
 }
 
 /* Implementation of mremap for direct MMAP */
 static FORCEINLINE void* win32direct_mremap(void **handle, void *ptr, size_t oldsize, size_t newsize, int flags, unsigned flags2) {
   void* newptr = 0;
-  if (newsize == oldsize) {
+  HANDLE fmh = (HANDLE) *handle;
+  if (!fmh)
+    return MFAIL; /* We only resize file mappings reserved with M2_MREMAP_* */
+  if (newsize == oldsize)
     return ptr;
-  }
-  else if (newsize > oldsize) {
-    if (MMAP_OVERALLOCATION(1024) > 1024)
-      newptr = VirtualAlloc((void*)((size_t)ptr + oldsize), newsize - oldsize,
-                            MEM_COMMIT, PAGE_READWRITE);
-    if (newptr == 0) {
-      newptr = VirtualAlloc((void*)((size_t)ptr + oldsize), newsize - oldsize,
-                            MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
-    }
-  }
-  else {
-    MEMORY_BASIC_INFORMATION minfo;
-    size_t size = oldsize - newsize;
-    char* cptr = (char*)ptr + newsize;
-    VirtualFree(cptr, size, MEM_DECOMMIT);
-    while (size) {
-      if (VirtualQuery(cptr, &minfo, sizeof(minfo)) == 0)
-        break;
-      if (minfo.AllocationBase == cptr)
-        VirtualFree(cptr, 0, MEM_RELEASE);
-      if (minfo.RegionSize >= size)
-        break;
-      cptr += minfo.RegionSize;
-      size -= minfo.RegionSize;
-    }
-    newptr = ptr;
-  }
+  /* It is VERY important to map a new view of a file mapping before
+  unmapping the old view. Otherwise the NT kernel will start writing
+  your file mapping in its entirety to the swap file which is otherwise
+  avoidable. Hence fail if can't move. */
+  if (!(flags & MREMAP_MAYMOVE))
+    return MFAIL;
+  newptr = MapViewOfFile(fmh, FILE_MAP_ALL_ACCESS, 0, 0, newsize);
+  if (newptr && newsize > oldsize)
+    newptr = VirtualAlloc(newptr, newsize, MEM_COMMIT, PAGE_READWRITE);
+  if (!newptr)
+    return MFAIL;
+  UnmapViewOfFile(ptr);
 #if DEBUG && 0
   printf("win32remap(%p, %u, %u, %d) returns %p!\n", ptr, oldsize, newsize, flags, newptr);
 #endif
-  if (newptr != 0)
-    return ptr;
-  /* Currently we don't implement MREMAP_MAYMOVE */
-  return MFAIL;
+  return newptr;
 }
 
 /* This function supports releasing coalesed segments */
 static FORCEINLINE int win32munmap(void *handle, void* ptr, size_t size) {
-  MEMORY_BASIC_INFORMATION minfo = {0};
-  char* cptr = (char*)ptr;
-  size_t osize = MMAP_OVERALLOCATION(size);
-  assert(handle==(void*)(size_t)0xdeadbeef);
-  while (size) {
-    if (VirtualQuery(cptr, &minfo, sizeof(minfo)) == 0)
-      return -1;
-    if (minfo.BaseAddress != cptr || minfo.AllocationBase != cptr ||
-        minfo.State != MEM_COMMIT || minfo.RegionSize > size)
-      return -1;
-    if (VirtualFree(cptr, 0, MEM_RELEASE) == 0)
-      return -1;
-    cptr += minfo.RegionSize;
-    size -= minfo.RegionSize;
-    osize -= minfo.RegionSize;
-  }
-  if (MMAP_OVERALLOCATION(1024) > 1024) {
-    while (osize && minfo.State == MEM_RESERVE) {
+  HANDLE fmh = (HANDLE) handle;
+  if (!fmh) {
+    MEMORY_BASIC_INFORMATION minfo;
+    char* cptr = (char*)ptr;
+    while (size) {
       if (VirtualQuery(cptr, &minfo, sizeof(minfo)) == 0)
         return -1;
       if (minfo.BaseAddress != cptr || minfo.AllocationBase != cptr ||
-          minfo.State != MEM_RESERVE || minfo.RegionSize > size)
+          minfo.State != MEM_COMMIT || minfo.RegionSize > size)
         return -1;
       if (VirtualFree(cptr, 0, MEM_RELEASE) == 0)
         return -1;
       cptr += minfo.RegionSize;
-      osize -= minfo.RegionSize;
+      size -= minfo.RegionSize;
     }
+  }
+  else {
+    /* As noted above in win32direct_mremap(), it is VERY important
+    to destroy the file mapping object before unmapping views as so
+    to avoid causing the system to write the file mapping to swap. */
+    if (CloseHandle(fmh) == 0)
+      return -1;
+    if (UnmapViewOfFile(ptr) == 0)
+      return -1;
   }
   return 0;
 }
@@ -3997,7 +4018,7 @@ static void* mmap_alloc(mstate m, size_t nb, unsigned flags) {
     void* mmaph = 0;
     char* mm = (char*)(CALL_DIRECT_MMAP(&mmaph, mmsize, flags));
     if (mm != CMFAIL) {
-      size_t offset = align_offset(chunk2mem(mm+SIZE_T_SIZE/* for the handle */));
+      size_t offset = MALLOC_ALIGNMENT + align_offset(chunk2mem(mm));
       size_t psize = mmsize - offset - MMAP_FOOT_PAD;
       mchunkptr p = (mchunkptr)(mm + offset);
       *(void**)mm = mmaph;
