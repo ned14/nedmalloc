@@ -1747,10 +1747,10 @@ static FORCEINLINE void* win32mmap(size_t size) {
     }
 #endif
     if (!ptr) ptr = VirtualAlloc(baseaddress, size, baseaddress ? MEM_COMMIT : MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+#ifdef DEFAULT_GRANULARITY_ALIGNED
 #if DEBUG
     if (lastWin32mmap && ptr!=lastWin32mmap) printf("Non-contiguous VirtualAlloc between %p and %p\n", ptr, lastWin32mmap);
 #endif
-#ifdef DEFAULT_GRANULARITY_ALIGNED
     if (ptr) lastWin32mmap = (void*)((size_t) ptr + mparams.granularity);
 #endif
   }
@@ -1764,23 +1764,61 @@ static FORCEINLINE void* win32mmap(size_t size) {
   return (ptr != 0)? ptr: MFAIL;
 }
 
-/* For direct MMAP, use MEM_TOP_DOWN to minimize interference */
+/* For direct MMAP, we have two allocation methods, one which is
+unresizeable and the other which is resizeable. The resizeable
+method is slower to allocate and free, but is much quicker to
+reallocate. Benchmarking shows that the crossover is at around
+512Kb-1Mb, so if you are reallocating blocks 1Mb or above then you
+ought to specify one of the M2_MREMAP_* flags which can specify
+a multiple of the allocation size or a fixed two power size.
+
+The mremap() Linux call is then effectively emulated by
+reserving the address space specified by M2_MREMAP_* and committing
+or decommitting memory as the block is resized. If the block
+exceeds its reservation size, the mremap() emulation fails and
+dlmalloc will allocate a new block, copy its contents and delete
+the old one.
+
+************ The WIN32_DIRECT_USE_FILE_MAPPINGS option ************
+Reserving excessive address space is not an issue on 64 bit
+machines, but on 32 bit one can very quickly expend 2Gb. A
+solution is to use a win32 file mapping of the swap file as the
+reservation and then to map views of differing sizes which exactly
+is what mremap() does on Linux.
+
+Unfortunately the file mapping method is benchmarked at around
+40-45% slower than using VirtualAlloc to over-reserve. It is still
+50% faster for avrg. 2Mb block sizes than no mremap() at all, so
+we turn it on on 32 bit and disable it on 64 bit.
+*/
+#if defined(_M_IA64) || defined(_M_X64) || defined(WIN64)
+#define WIN32_DIRECT_USE_FILE_MAPPINGS 0
+#else
+#define WIN32_DIRECT_USE_FILE_MAPPINGS 1
+#endif
+
 static FORCEINLINE void* win32direct_mmap(void **handle, size_t size, unsigned flags) {
   void* ptr = 0;
   unsigned mremapvalue = (flags & M2_MREMAP_MASK)>>8;
-#if 1
-  mremapvalue=28/*256Mb*/;
+#if 0
+  mremapvalue=4;
+  flags|=M2_MREMAP_ISMULTIPLIER;
+#endif
+#if 0
+  mremapvalue=22;/*4Mb*/
 #endif
   if (!mremapvalue) {
     ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_TOP_DOWN|MEM_COMMIT, PAGE_READWRITE);
   }
   else {
     size_t reservesize = (flags & M2_MREMAP_ISMULTIPLIER) ? size*mremapvalue : SIZE_T_ONE<<mremapvalue;
+#if WIN32_DIRECT_USE_FILE_MAPPINGS
     HANDLE fmh;
     if (reservesize < size)
       reservesize = size;
     fmh = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE|SEC_RESERVE,
-                            (DWORD)(reservesize>>32), (DWORD)(reservesize&((DWORD)-1)), NULL);
+                            (DWORD)(sizeof(size_t)==4 ? 0 : (reservesize>>32)),
+                            (DWORD)(reservesize&((DWORD)-1)), NULL);
     if (!fmh)
       return MFAIL;
     *handle = (void*)fmh;
@@ -1791,6 +1829,20 @@ static FORCEINLINE void* win32direct_mmap(void **handle, size_t size, unsigned f
       CloseHandle(fmh);
       return MFAIL;
     }
+#else
+    void* ptr2;
+    /* If on 32 bit, cap reservation to 1Gb */
+    if (sizeof(size_t) == 4 && reservesize > 1*1024*1024*1024)
+      reservesize = 1*1024*1024*1024;
+    ptr = VirtualAlloc(0, reservesize, MEM_RESERVE|MEM_TOP_DOWN, PAGE_READWRITE);
+    if (ptr) {
+      ptr2 = VirtualAlloc(ptr, size, MEM_COMMIT, PAGE_READWRITE);
+      if (ptr2)
+        *handle = (void*)reservesize;
+      else
+        VirtualFree(ptr, 0, MEM_RELEASE);
+    }
+#endif
   }
 #if DEBUG && 0
   printf("VirtualAlloc returns %p size %u\n", ptr, size);
@@ -1801,23 +1853,40 @@ static FORCEINLINE void* win32direct_mmap(void **handle, size_t size, unsigned f
 /* Implementation of mremap for direct MMAP */
 static FORCEINLINE void* win32direct_mremap(void **handle, void *ptr, size_t oldsize, size_t newsize, int flags, unsigned flags2) {
   void* newptr = 0;
-  HANDLE fmh = (HANDLE) *handle;
-  if (!fmh)
+  if (!*handle)
     return MFAIL; /* We only resize file mappings reserved with M2_MREMAP_* */
   if (newsize == oldsize)
     return ptr;
-  /* It is VERY important to map a new view of a file mapping before
-  unmapping the old view. Otherwise the NT kernel will start writing
-  your file mapping in its entirety to the swap file which is otherwise
-  avoidable. Hence fail if can't move. */
-  if (!(flags & MREMAP_MAYMOVE))
-    return MFAIL;
-  newptr = MapViewOfFile(fmh, FILE_MAP_ALL_ACCESS, 0, 0, newsize);
-  if (newptr && newsize > oldsize)
-    newptr = VirtualAlloc(newptr, newsize, MEM_COMMIT, PAGE_READWRITE);
-  if (!newptr)
-    return MFAIL;
-  UnmapViewOfFile(ptr);
+  {
+#if WIN32_DIRECT_USE_FILE_MAPPINGS
+    HANDLE fmh = (HANDLE) *handle;
+    /* It is VERY important to map a new view of a file mapping before
+    unmapping the old view. Otherwise the NT kernel will start writing
+    your file mapping in its entirety to the swap file which is otherwise
+    avoidable. Hence fail if can't move. */
+    if (!(flags & MREMAP_MAYMOVE))
+      return MFAIL;
+    newptr = MapViewOfFile(fmh, FILE_MAP_ALL_ACCESS, 0, 0, newsize);
+    if (newptr && newsize > oldsize)
+      newptr = VirtualAlloc(newptr, newsize, MEM_COMMIT, PAGE_READWRITE);
+    if (!newptr)
+      return MFAIL;
+    UnmapViewOfFile(ptr);
+#else
+    size_t reservesize = (size_t) *handle;
+    if (newsize > reservesize)
+      return MFAIL;
+    if (newsize > oldsize) {
+      if (VirtualAlloc((char*)ptr + oldsize, newsize - oldsize, MEM_COMMIT, PAGE_READWRITE) == 0)
+        return MFAIL;
+    }
+    else {
+      if (VirtualFree((char*)ptr + newsize, oldsize - newsize, MEM_DECOMMIT) == 0)
+        return MFAIL;
+    }
+    newptr = ptr;
+#endif
+  }
 #if DEBUG && 0
   printf("win32remap(%p, %u, %u, %d) returns %p!\n", ptr, oldsize, newsize, flags, newptr);
 #endif
@@ -1826,8 +1895,7 @@ static FORCEINLINE void* win32direct_mremap(void **handle, void *ptr, size_t old
 
 /* This function supports releasing coalesed segments */
 static FORCEINLINE int win32munmap(void *handle, void* ptr, size_t size) {
-  HANDLE fmh = (HANDLE) handle;
-  if (!fmh) {
+  if (!handle) {
     MEMORY_BASIC_INFORMATION minfo;
     char* cptr = (char*)ptr;
     while (size) {
@@ -1843,6 +1911,8 @@ static FORCEINLINE int win32munmap(void *handle, void* ptr, size_t size) {
     }
   }
   else {
+#if WIN32_DIRECT_USE_FILE_MAPPINGS
+    HANDLE fmh = (HANDLE) handle;
     /* As noted above in win32direct_mremap(), it is VERY important
     to destroy the file mapping object before unmapping views as so
     to avoid causing the system to write the file mapping to swap. */
@@ -1850,6 +1920,11 @@ static FORCEINLINE int win32munmap(void *handle, void* ptr, size_t size) {
       return -1;
     if (UnmapViewOfFile(ptr) == 0)
       return -1;
+#else
+    /* We know it's contiguous, so avoid the VirtualQuery() */
+    if (VirtualFree(ptr, 0, MEM_RELEASE) == 0)
+      return -1;
+#endif
   }
   return 0;
 }

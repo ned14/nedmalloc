@@ -10,14 +10,15 @@ An example of how to use nedalloc
 /**** TEST CONFIGURATION ****/
 #define THREADS 1					/* How many threads to run */
 #define TESTCPLUSPLUS 0				/* =1 to make 50% of ops have blocksize<=512. This is typical for C++ allocator usage. */
-#define BLOCKSIZE (1024*1024)		/* Test will be with blocks up to BLOCKSIZE. Try 16Kb for typical app usage, 1Mb if you use large arrays etc. */
+#define BLOCKSIZE (4*1024*1024)		/* Test will be with blocks up to BLOCKSIZE. Try 16Kb for typical app usage, 1Mb if you use large arrays etc. */
 #define TESTTYPE 2					/* =1 for maximum speed test, =2 for randomised test */
+#define TOUCH 1						/* Whether to touch all pages of an allocated region. Can make a huge difference to scores. */
 #define MAXMEMORY (768*1024*1024)	/* Maximum memory to use (approx) */
 /*#define USE_NEDMALLOC_DLL*/
 /*#define ENABLE_FAST_HEAP_DETECTION*/
 /*#define HAVE_MREMAP 0*/
 
-#define RECORDS (10000/THREADS)
+#define RECORDS (400/THREADS)
 #define MAXMEMORY2 (MAXMEMORY/THREADS)
 #ifdef _MSC_VER
 /*#pragma optimize("g", off)*/	/* Useful for debugging */
@@ -184,13 +185,27 @@ static void threadcode(int threadidx)
 		if(allocated<MAXMEMORY2 && !allocptr[i])
 		{
 			if(!(allocptr[i]=mallocs[whichmalloc](size))) abort();
+#if TOUCH
+			{
+				volatile char *mem=(volatile char *)allocptr[i];
+				volatile char *end=mem+size;
+				for(; mem<end; mem+=4096) *mem;
+			}
+#endif
 			allocated+=memsizes[whichmalloc](allocptr[i]);
 			threadstuff[threadidx].ops.mallocs++;
 		}
-		else if(allocated<MAXMEMORY2 && (r & (3<<30))) /* 75% the time realloc(), other 25% free() */
+		else if(allocated<MAXMEMORY2) /* 75% the time realloc(), other 25% free() */
 		{
 			allocated-=memsizes[whichmalloc](allocptr[i]);
 			if(!(allocptr[i]=reallocs[whichmalloc](allocptr[i], size))) abort();
+#if TOUCH
+			{
+				volatile char *mem=(volatile char *)allocptr[i];
+				volatile char *end=mem+size;
+				for(; mem<end; mem+=4096) *mem;
+			}
+#endif
 			allocated+=memsizes[whichmalloc](allocptr[i]);
 			threadstuff[threadidx].ops.reallocs++;
 		}
@@ -234,11 +249,25 @@ static void threadcode(int threadidx)
 			if(doRealloc && allocptr>threadstuff[threadidx].allocs && (r & 1))
 			{
 	            if(!(allocptr[-1]=reallocs[whichmalloc](allocptr[-1], *toallocptr))) abort();
+#if TOUCH
+				{
+					volatile char *mem=(volatile char *)allocptr[-1];
+					volatile char *end=mem+*toallocptr;
+					for(; mem<end; mem+=4096) *mem;
+				}
+#endif
 				threadstuff[threadidx].ops.reallocs++;
 			}
 			else
 			{
 	            if(!(allocptr[0]=mallocs[whichmalloc](*toallocptr))) abort();
+#if TOUCH
+				{
+					volatile char *mem=(volatile char *)allocptr[0];
+					volatile char *end=mem+*toallocptr;
+					for(; mem<end; mem+=4096) *mem;
+				}
+#endif
 				threadstuff[threadidx].ops.mallocs++;
 				allocptr++;
 			}
@@ -312,6 +341,22 @@ static double runtest()
 		} while(found<0);
 		THREADWAIT(threads[found]);
 		threads[found]=0;
+#if DEBUG
+	  {
+		  usCount totaltime=0;
+		  int totalops=0, totalmallocs=0, totalreallocs=0;
+		  for(n=0; n<THREADS; n++)
+		  {
+			  totaltime+=times[n];
+			  totalmallocs+=threadstuff[n].ops.mallocs;
+			  totalreallocs+=threadstuff[n].ops.reallocs;
+			  totalops+=threadstuff[n].ops.mallocs+threadstuff[n].ops.reallocs;
+		  }
+		  opspersec=1000000000000.0*totalops/totaltime*THREADS;
+		  printf("This test spent %f%% of its time doing reallocs\n", 100.0*totalreallocs/totalops);
+		  printf("This allocator achieves %lfops/sec under %d threads\n\n", opspersec, THREADS);
+	  }
+#endif
 		THREADINIT(&threads[found], found);
 		printf("Relaunched thread %d\n", found);
 	}
@@ -347,13 +392,16 @@ static double runtest()
 #endif
 	{
 		usCount totaltime=0;
-		int totalops=0;
+		int totalops=0, totalmallocs=0, totalreallocs=0;
 		for(n=0; n<THREADS; n++)
 		{
 			totaltime+=times[n];
+			totalmallocs+=threadstuff[n].ops.mallocs;
+			totalreallocs+=threadstuff[n].ops.reallocs;
 			totalops+=threadstuff[n].ops.mallocs+threadstuff[n].ops.reallocs;
 		}
 		opspersec=1000000000000.0*totalops/totaltime*THREADS;
+		printf("This test spent %f%% of its time doing reallocs\n", 100.0*totalreallocs/totalops);
 		printf("This allocator achieves %lfops/sec under %d threads\n", opspersec, THREADS);
 	}
 	for(n=THREADS-1; n>=0; n--)
