@@ -8,18 +8,28 @@ An example of how to use nedalloc
 #include "nedmalloc.h"
 
 /**** TEST CONFIGURATION ****/
-#define THREADS 1					/* How many threads to run */
-#define TESTCPLUSPLUS 0				/* =1 to make 50% of ops have blocksize<=512. This is typical for C++ allocator usage. */
-#define BLOCKSIZE (4*1024*1024)		/* Test will be with blocks up to BLOCKSIZE. Try 16Kb for typical app usage, 1Mb if you use large arrays etc. */
+#if 1 /* Test patterns typical of C++ code */
+#define THREADS 2					/* How many threads to run */
+#define TESTCPLUSPLUS 1				/* =1 to make 50% of ops have blocksize<=512. This is typical for C++ allocator usage. */
+#define BLOCKSIZE 8192				/* Test will be with blocks up to BLOCKSIZE. Try 8-16Kb for typical app usage, 1Mb if you use large arrays etc. */
 #define TESTTYPE 2					/* =1 for maximum speed test, =2 for randomised test */
-#define TOUCH 1						/* Whether to touch all pages of an allocated region. Can make a huge difference to scores. */
+#define TOUCH 0						/* Whether to touch all pages of an allocated region. Can make a huge difference to scores. */
 #define MAXMEMORY (768*1024*1024)	/* Maximum memory to use (approx) */
-/*#define USE_NEDMALLOC_DLL*/
-/*#define ENABLE_FAST_HEAP_DETECTION*/
-/*#define HAVE_MREMAP 0*/
+#define RECORDS (50000/THREADS)
+#define MAXMEMORY2 (MAXMEMORY/THREADS)
+#endif
 
+#if 0 /* Test avrg. 2Mb block realloc() speed */
+#define THREADS 1
+#define TESTCPLUSPLUS 0
+#define BLOCKSIZE (4*1024*1024)
+#define TESTTYPE 2
+#define TOUCH 1
+#define MAXMEMORY (768*1024*1024)
 #define RECORDS (400/THREADS)
 #define MAXMEMORY2 (MAXMEMORY/THREADS)
+#endif
+
 #ifdef _MSC_VER
 /*#pragma optimize("g", off)*/	/* Useful for debugging */
 #endif
@@ -170,14 +180,16 @@ static void threadcode(int threadidx)
 	/* A randomised malloc/realloc/free test (torture test) */
 	for(n=0; n<RECORDS*100; n++)
 	{
-		unsigned int i;
+		unsigned int i, dorealloc=1;
 		r=myrandom(&seed);
 		i=(int)(r % RECORDS);
 #if TESTCPLUSPLUS
+		dorealloc=!(r&(15<<28));
 		if(r&(1<<31))
 		{   /* Make it two power multiple of less than 512 bytes to
 			model frequent C++ new's */
 			size=4<<(r & 7);
+			dorealloc=0;
 		}
 		else
 #endif
@@ -195,7 +207,7 @@ static void threadcode(int threadidx)
 			allocated+=memsizes[whichmalloc](allocptr[i]);
 			threadstuff[threadidx].ops.mallocs++;
 		}
-		else if(allocated<MAXMEMORY2) /* 75% the time realloc(), other 25% free() */
+		else if(allocated<MAXMEMORY2 && dorealloc) /* If not TESTCPLUSPLUS, then how often realloc() gets called depends on how small RECORDS is. */
 		{
 			allocated-=memsizes[whichmalloc](allocptr[i]);
 			if(!(allocptr[i]=reallocs[whichmalloc](allocptr[i], size))) abort();

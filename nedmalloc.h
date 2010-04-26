@@ -205,11 +205,58 @@ NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR size_t nedmemsize(void *RESTRICT mem) THRO
 
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void nedsetvalue(void *v) THROWSPEC;
 
+/* The traditional malloc() interface */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc(size_t size) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedcalloc(size_t no, size_t size) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc(void *mem, size_t size) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedfree(void *mem) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC;
+
+/* The enhanced malloc() interface which is VERY useful for large
+   SSE/AVX aligned vectors and such. A quick summary of the flags (see
+   dlmalloc for loads more info):
+
+  * M2_ZERO_MEMORY:     Sets any increase in the allocated chunk to
+                        zero. Note that this zeroes only the increase
+                        from what malloc thinks the chunk's size is,
+                        so if you didn't use this flag when allocating
+                        with malloc2 (which zeroes up to chunk size)
+                        then you may have garbage just before the new
+                        space.
+  * M2_PREVENT_MOVE:    Prevent moves in realloc2() which is very
+                        useful for C++ container objects.
+  * M2_ALWAYS_MMAP:     Always allocate as though mmap_threshold
+                        were being exceeded. Note that setting this
+                        bit will not necessarily mmap a chunk which
+                        isn't already mmapped, but it will force a
+                        mmapped chunk if new memory needs allocating.
+  * M2_MREMAP_MULT(n):  Reserve n times as much address space such
+                        that mmapped realloc() is much faster.
+  * M2_MREMAP_SHIFT(n): Reserve (1<<n) bytes of address space such
+                        that mmapped realloc() is much faster.
+
+  Note when setting MREMAP sizes that on some platforms (e.g. Windows)
+  page tables are constructed for the reservation size. On x86/x64
+  Windows this costs 2Kb of kernel memory per Mb reserved, and as on
+  x86 kernel memory is not abundant you should not be excessive.
+  With regard to M2_MREMAP_*, these only take effect when the
+  mmapped chunk has exceeded its reservation space and a new
+  reservation space needs to be created. If you are on Windows, please
+  see the documentation for WIN32_DIRECT_USE_FILE_MAPPINGS before
+  you use the M2_MREMAP_* flags!
+
+  NOTE that setting alignment to anything other than zero or flags to
+  anything other than M2_ZERO_MEMORY inhibits the threadcache!
+*/
+#if defined(__cplusplus)
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
+#else
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment, unsigned flags) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC;
+#endif
+
+/* Other dlmalloc interfaces */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR struct nedmallinfo nedmallinfo(void) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR int    nedmallopt(int parno, int value) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void*  nedmalloc_internals(size_t *granularity, size_t *magic) THROWSPEC;
@@ -237,7 +284,7 @@ will *normally* be accessing the pool concurrently. Setting this to zero means i
 extends on demand, but be careful of this as it can rapidly consume system resources
 where bursts of concurrent threads use a pool at once.
 */
-NEDMALLOCEXTSPEC NEDMALLOCPTRATTR nedpool *nedcreatepool(size_t capacity, int threads) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR nedpool *nedcreatepool(size_t capacity, int threads) THROWSPEC;
 
 /* Destroys a memory pool previously created by nedcreatepool().
 */
@@ -273,18 +320,25 @@ system pool.
 NEDMALLOCEXTSPEC void neddisablethreadcache(nedpool *p) THROWSPEC;
 
 
-NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size) THROWSPEC;
-NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC;
-NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC;
 NEDMALLOCEXTSPEC void   nedpfree(nedpool *p, void *mem) THROWSPEC;
-NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes) THROWSPEC;
+#if defined(__cplusplus)
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpool *p, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
+#else
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpool *p, size_t size, size_t alignment, unsigned flags) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC;
+#endif
 NEDMALLOCEXTSPEC struct nedmallinfo nedpmallinfo(nedpool *p) THROWSPEC;
 NEDMALLOCEXTSPEC int    nedpmallopt(nedpool *p, int parno, int value) THROWSPEC;
 NEDMALLOCEXTSPEC int    nedpmalloc_trim(nedpool *p, size_t pad) THROWSPEC;
 NEDMALLOCEXTSPEC void   nedpmalloc_stats(nedpool *p) THROWSPEC;
 NEDMALLOCEXTSPEC size_t nedpmalloc_footprint(nedpool *p) THROWSPEC;
-NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void **nedpindependent_calloc(nedpool *p, size_t elemsno, size_t elemsize, void **chunks) THROWSPEC;
-NEDMALLOCEXTSPEC NEDMALLOCPTRATTR void **nedpindependent_comalloc(nedpool *p, size_t elems, size_t *sizes, void **chunks) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_calloc(nedpool *p, size_t elemsno, size_t elemsize, void **chunks) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_comalloc(nedpool *p, size_t elems, size_t *sizes, void **chunks) THROWSPEC;
 
 #if defined(__cplusplus)
 }

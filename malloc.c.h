@@ -1278,9 +1278,9 @@ void** mspace_independent_comalloc(mspace msp, size_t n_elements,
                         were being exceeded. This is useful for large
                         arrays which frequently extend.
   * M2_MREMAP_MULT(n):  Reserve n times as much address space such
-                        that realloc() is much faster.
+                        that mmapped realloc() is much faster.
   * M2_MREMAP_SHIFT(n): Reserve (1<<n) bytes of address space such
-                        that realloc() is much faster.
+                        that mmapped realloc() is much faster.
 
   Note when setting MREMAP sizes that on some platforms (e.g. Windows)
   page tables are constructed for the reservation size. On x86/x64
@@ -1301,15 +1301,17 @@ void* mspace_malloc2(mspace msp, size_t bytes, size_t alignment, unsigned flags)
                         with malloc2 (which zeroes up to chunk size)
                         then you may have garbage just before the new
                         space.
+  * M2_PREVENT_MOVE:    Prevent moves in realloc2() which is very
+                        useful for C++ container objects.
   * M2_ALWAYS_MMAP:     Always allocate as though mmap_threshold
                         were being exceeded. Note that setting this
                         bit will not necessarily mmap a chunk which
                         isn't already mmapped, but it will force a
                         mmapped chunk if new memory needs allocating.
   * M2_MREMAP_MULT(n):  Reserve n times as much address space such
-                        that realloc() is much faster.
+                        that mmapped realloc() is much faster.
   * M2_MREMAP_SHIFT(n): Reserve (1<<n) bytes of address space such
-                        that realloc() is much faster.
+                        that mmapped realloc() is much faster.
 
   Note when setting MREMAP sizes that on some platforms (e.g. Windows)
   page tables are constructed for the reservation size. On x86/x64
@@ -1791,10 +1793,12 @@ Unfortunately the file mapping method is benchmarked at around
 50% faster for avrg. 2Mb block sizes than no mremap() at all, so
 we turn it on on 32 bit and disable it on 64 bit.
 */
+#ifndef WIN32_DIRECT_USE_FILE_MAPPINGS
 #if defined(_M_IA64) || defined(_M_X64) || defined(WIN64)
 #define WIN32_DIRECT_USE_FILE_MAPPINGS 0
 #else
 #define WIN32_DIRECT_USE_FILE_MAPPINGS 1
+#endif
 #endif
 
 static FORCEINLINE void* win32direct_mmap(void **handle, size_t size, unsigned flags) {
