@@ -244,6 +244,16 @@ static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallMalloc(void *
 #endif
 #endif
 	if(!ret) return 0;
+#if DEBUG
+	if(flags & M2_ZERO_MEMORY)
+	{
+		const char *RESTRICT n;
+		for(n=(const char *)ret; n<(const char *)ret+size; n++)
+		{
+			assert(!*n);
+		}
+	}
+#endif
 #if USE_MAGIC_HEADERS
 	_ret=(size_t *) ret;
 	ret=(void *)(_ret+3);

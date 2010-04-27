@@ -5612,8 +5612,8 @@ void* mspace_malloc2(mspace msp, size_t bytes, size_t alignment, unsigned flags)
     mem = internal_memalign(ms, alignment, bytes, flags);
   if (mem && (flags & M2_ZERO_MEMORY)) {
     mchunkptr p = mem2chunk(mem);
-    if (calloc_must_clear(mem2chunk(p)))
-      memset(mem, 0, chunksize(p));
+    if (calloc_must_clear(p))
+      memset(mem, 0, chunksize(p) - overhead_for(p));
   }
   return mem;
 }
@@ -5735,8 +5735,11 @@ void* mspace_calloc(mspace msp, size_t n_elements, size_t elem_size) {
       req = MAX_SIZE_T; /* force downstream failure on overflow */
   }
   mem = internal_malloc(ms, req, 0);
-  if (mem != 0 && calloc_must_clear(mem2chunk(mem)))
-    memset(mem, 0, req);
+  if (mem != 0) {
+    mchunkptr p = mem2chunk(mem);
+    if (calloc_must_clear(p))
+      memset(mem, 0, chunksize(p) - overhead_for(p));
+  }
   return mem;
 }
 
@@ -5752,7 +5755,7 @@ void* mspace_realloc2(mspace msp, void* oldmem, size_t bytes, size_t alignment, 
   else {
     void* mem;
     mchunkptr p  = mem2chunk(oldmem);
-    size_t oldsize = chunksize(p);
+    size_t oldsize = chunksize(p) - overhead_for(p);
 #if FOOTERS
     mstate ms = get_mstate_for(p);
 #else /* FOOTERS */
@@ -5763,9 +5766,12 @@ void* mspace_realloc2(mspace msp, void* oldmem, size_t bytes, size_t alignment, 
       return 0;
     }
     mem = internal_realloc(ms, oldmem, bytes, alignment, flags);
-    if (mem && (flags & M2_ZERO_MEMORY) && bytes > oldsize && calloc_must_clear(p)) {
-      size_t newsize = chunksize(mem2chunk(mem));
-      memset((char*)mem + oldsize, 0, newsize - oldsize);
+    if (mem && (flags & M2_ZERO_MEMORY) && bytes > oldsize) {
+      p = mem2chunk(mem);
+      if (calloc_must_clear(p)) {
+        size_t newsize = chunksize(p) - overhead_for(p);
+        memset((char*)mem + oldsize, 0, newsize - oldsize);
+      }
     }
     return mem;
   }
