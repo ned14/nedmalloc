@@ -1,0 +1,522 @@
+﻿<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+<meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
+<title>nedalloc Readme</title>
+<style type="text/css">
+<!--
+h1, h2, h3, h4, h5, h6 {
+	margin-bottom: -0.5em;
+}
+h1 {
+	text-align: center;
+}
+h2 {
+	text-decoration: underline;
+	margin-bottom: -0.25em;
+}
+p {
+	margin-top: 0.5em;
+	margin-bottom: 0.5em;
+}
+ul li, ol li {
+	margin-top: 0.2em;
+	margin-bottom: 0.2em;
+}
+dl {
+	margin-left: 2em;
+}
+dl dt {
+	font-weight: bold;
+}
+dt + dd {
+	margin-bottom: 1em;
+}
+.gitcommit {
+	font-family: "Courier New", Courier, monospace;
+	font-size: smaller;
+}
+-->
+</style>
+</head>
+
+<body>
+
+<div style="text-align: center">
+	<h1 style="text-decoration: underline">nedalloc v1.10 ?</h1>
+	<h2 style="text-decoration: none;">by Niall Douglas</h2>
+	<p>Web site: <a href="http://www.nedprod.com/programs/portable/nedmalloc/">http://www.nedprod.com/programs/portable/nedmalloc/</a></p>
+	<hr /></div>
+<p>Enclosed is nedalloc, an alternative malloc implementation for multiple threads 
+without lock contention based on <a href="http://g.oswego.edu/" target="_blank">
+dlmalloc</a> v2.8.4. It is more or less a newer implementation of
+<a href="http://www.malloc.de/en/" target="_blank">ptmalloc2</a>, the standard allocator 
+in Linux (which is based on dlmalloc v2.7.0) but also contains a per-thread cache 
+for maximum CPU scalability, and other enhancements like the ability to patch Windows 
+binaries to modify how the STL and Qt implement their containers.</p>
+<p>It is licensed under the
+<a href="http://www.boost.org/LICENSE_1_0.txt" target="_blank">Boost Software License</a> 
+which basically means you can do anything you like with it. This does not apply 
+to the malloc.c.h file which remains copyright to others. Commercial support is 
+available from <a href="http://www.nedproductions.biz/" target="_blank">ned 
+Productions Limited</a>.</p>
+<p>It has been tested on win32 (x86), win64 (x64), Linux (x64), FreeBSD (x64) and 
+Apple Mac OS X (x86). It works very well on all of these and is very significantly 
+faster than the system allocator on Windows and FreeBSD. If you are using a recent 
+Apple Mac OS X then you probably won&#39;t see much improvement without modifying your 
+source to use the v2 malloc API (and kudos to Apple for adopting an excellent allocator).</p>
+<p>By literally dropping in this allocator as a replacement for your system allocator, 
+you can see real world improvements of up to three times in normal code!</p>
+<p style="text-decoration: underline"><strong>Table of Contents: </strong></p>
+<ol style="list-style-type: upper-alpha; position: relative; margin-top: -0.5em;">
+	<li><a href="#touse">How to use</a><ul style="list-style-type: none; margin-left: 0; padding-left: 0">
+		<li>A1. <a href="#v2mallocAPI">The v2 malloc API</a></li>
+	</ul>
+	</li>
+	<li><a href="#notes">Notes</a><ul style="list-style-type: none; margin-left: 0; padding-left: 0">
+		<li>B1. <a href="#memorybloat">Memory Bloating</a></li>
+		<li>B2. <a href="#memoryleaks">Memory Leakage</a></li>
+		<li>B3. <a href="#threadcache">The Threadcache</a></li>
+		<li>B4. <a href="#largepages">Large Page support</a></li>
+		<li>B5. <a href="#windowsonly">Windows-only features</a></li>
+	</ul>
+</li>
+	<li><a href="#speedcomparisons">Speed Comparisons</a></li>
+	<li><a href="#troubleshooting">Troubleshooting</a></li>
+	<li><a href="#changelog">Changelog</a></li>
+</ol>
+<h2><a name="touse">A. To use:</a></h2>
+<p>The quickest way is to drop nedmalloc.h, nedmalloc.c and malloc.c.h into your 
+project. Call nedmalloc(), nedcalloc(), nedrealloc() and nedfree() instead of your 
+normal allocator, or nedpmalloc(), nedpcalloc(), nedprealloc() and nedpfree() if 
+you want to segment your memory usage into pools. Make sure that you call neddisablethreadcache() 
+for every pool you use on thread exit, and don&#39;t forget neddisablethreadcache(0) 
+for the system pool if necessary. Run and enjoy!</p>
+<p>To test, compile test.c. It will run a comparison between your system allocator 
+and nedalloc and tell you how much faster nedalloc is. It also serves as an example 
+of usage.</p>
+<p>If you&#39;d like nedalloc as a Windows DLL or POSIX ELF shared object, the easiest 
+thing to do is to use <a href="http://www.scons.org/" target="_blank">scons</a> 
+which comes with a myriad of build options listed using scons -h. MSVC project files 
+are enclosed, but you&#39;ll need to manually change the defines as necessary.</p>
+<h3><a name="v2mallocAPI">A1: The v2 malloc API:</a></h3>
+<p>For the v1.10 release which was generously sponsored by
+<a href="http://www.ara.com/" target="_blank">Applied Research Associates (USA)</a>, 
+a new general purpose allocator API was designed which is intended to remedy many 
+of the long standing problems and inefficiencies introduced by the ISO C allocator 
+API. Internally nedalloc&#39;s implementations of nedmalloc(), nedcalloc(), nedmemalign() 
+and nedrealloc() call into this API:</p>
+<ul>
+	<li><code>void* malloc2(size_t bytes, size_t alignment, unsigned flags)</code></li>
+	<li><code>void* realloc2(void* mem, size_t bytes, size_t alignment, unsigned 
+	flags)</code></li>
+</ul>
+<p>If nedmalloc.h is being included by C++ code, the alignment and flags parameters 
+default to zero which makes the new API identical to the old API (roll on the introduction 
+of default parameters to C!). The ability for realloc2() to take an alignment is
+<em>particularly</em> useful for extending aligned vector arrays such as SSE/AVX 
+vector arrays. Hitherto SSE/AVX vector code had to jump through all sorts of unpleasant 
+hoops to maintain alignment :(.</p>
+<p>Flags can be any combination of the following:</p>
+<dl>
+	<dt>M2_ZERO_MEMORY:</dt>
+	<dd>Sets the contents of the allocated block (or any increase in the allocated 
+	block) to zero. Note that this zeroes only the increase from what dlmalloc thinks 
+	the chunk&#39;s size is, so if you realloc2() a block which wasn&#39;t allocated using 
+	malloc2() using this flag then you may have garbage just before the newly extended 
+	space.
+	<p><strong>Rationale:</strong> Memory returned by the system is guaranteed to 
+	be zero on most platforms, and hence dlmalloc knows when it can skip zeroing 
+	memory. This improves performance.</p>
+	</dd>
+	<dt>M2_PREVENT_MOVE</dt>
+	<dd>Cause realloc2() to attempt to extend a block in place, but to never move 
+	it.
+	<p><strong>Rationale:</strong> C++ makes almost no use of realloc(), even for 
+	contiguous arrays such as std::vector&lt;&gt; because most C++ objects cannot be relocated 
+	in memory without a copy or rvalue construction (though some clever STL implementations 
+	specialise for Plain Old Data (POD) types, and use realloc() then and only then). 
+	This flag allows C++ containers to speculatively try to extend in place, thus 
+	improving performance <em>especially</em> for large allocations which will use 
+	mmap().</p>
+	</dd>
+	<dt>M2_ALWAYS_MMAP</dt>
+	<dd>Always allocate as though mmap_threshold were being exceeded. In the case 
+	of realloc2(), note that setting this bit will not necessarily mmap a chunk 
+	which isn&#39;t already mmapped, but it will force a mmapped chunk if new memory 
+	needs allocating.
+	<p><strong>Rationale:</strong> If you know that an array you are allocating 
+	is going to be repeatedly extended up into the hundred of kilobytes range, then 
+	you can avoid the constant memory copying into larger blocks by specifying this 
+	flag at the beginning along with one of the M2_MREMAP_* flags below. This can
+	<strong>greatly</strong> improve performance for large arrays.</p>
+	</dd>
+	<dt>M2_MREMAP_MULT(n)</dt>
+	<dd>Reserve n times as much address space such that mmapped realloc2(size &lt;= 
+	n * original size) avoids memory copying and hence is much faster.</dd>
+	<dt>M2_MREMAP_SHIFT(n)</dt>
+	<dd>Reserve (1&lt;&lt;n) bytes of address space such that mmapped realloc2(size &lt;= 
+	(1&lt;&lt;n)) avoids memory copying and hence is much faster.</dd>
+</dl>
+<p>Currently MREMAP support is limited to Linux and Windows. Patches implementing 
+support for other platforms are welcome.</p>
+<p>On Linux the non portable mremap() kernel function is currently used, so in fact 
+the M2_MREMAP_* options are currently ignored.</p>
+<p>On Windows, there are two different MREMAP implementations which are chosen according 
+to whether a 32 bit or a 64 bit build is being performed. The 32 bit implementation 
+is based on Win32 file mappings where it reserves the address space within the Windows 
+VM system, so you can safely specify silly reservation quantities like 2Gb per block 
+and not exhaust local process address space. Note however that on x86 this costs 
+2Kb (1Kb if PAE is off) of kernel memory per Mb reserved, and as kernel memory has 
+a hard limit of 447Mb on x86 you will find the total address space reservable in 
+the system is limited. On x64, or if you define WIN32_DIRECT_USE_FILE_MAPPINGS=0 
+on x86, a much faster implementation of using VirtualAlloc(MEM_RESERVE) to directly 
+reserve the address space is used.</p>
+<p>When using M2_MREMAP_* with realloc2(), the setting only takes effect when the 
+mmapped chunk has exceeded its reservation space and a new reservation space needs 
+to be created. </p>
+<h2><a name="notes">B. Notes:</a></h2>
+<p>If you want the very latest version of this allocator, get it from the TnFOX 
+GIT repository at either of (both are identical mirrors):</p>
+<ul>
+	<li>
+	<a href="git://tnfox.git.sourceforge.net/gitroot/tnfox/tnfox/src/nedmalloc">
+	git://tnfox.git.sourceforge.net/gitroot/tnfox/tnfox/src/nedmalloc</a></li>
+	<li><a href="git://github.com/ned14/tnfox.git/src/nedmalloc">git://github.com/ned14/tnfox.git/src/nedmalloc</a></li>
+</ul>
+<p>IF YOU THINK YOU HAVE FOUND A BUG, PLEASE CHECK ONE OF THESE REPOS FIRST BEFORE 
+REPORTING IT!</p>
+<h3><a name="memorybloat">B1: Memory Bloating</a></h3>
+<p>Because of how nedalloc allocates an mspace per thread, it <em>can</em> cause 
+severe bloating of memory usage under certain allocation patterns. You can substantially 
+reduce this wastage by setting DEFAULTMAXTHREADSINPOOL or the threads parameter 
+to nedcreatepool() to a fraction of the number of threads which would normally be 
+in a pool at once. This will reduce bloating at the cost of an increase in lock 
+contention, with DEFAULTMAXTHREADSINPOOL=1 removing almost all bloating. If the 
+block sizes typically allocated are less than THREADCACHEMAX, locking is avoided 
+90-99% of the time and if most of your allocations are below this value, you can 
+safely set DEFAULTMAXTHREADSINPOOL or even MAXTHREADSINPOOL to one.</p>
+<p>If you have LOTS of threads you may find that the threadcache held per thread 
+is causing memory bloating. You can call nedtrimthreadcache() to trim the cache 
+in a thread when you know that it won&#39;t be doing memory allocation (e.g. just before 
+going to sleep), or alternatively you can set THREADCACHEMAXFREESPACE to something 
+smaller than its default of 512Kb.</p>
+<p>Lastly, some people find that memory is not returned to the system when they 
+think it ought to be. dlmalloc only returns free memory to the system when there 
+is DEFAULT_TRIM_THRESHOLD (default=2Mb) free in a mspace, and it only checks how 
+much there is free outside the topmost segment every MAX_RELEASE_CHECK_RATE free()&#39;s. 
+In other words, if your program very rapidly deallocates an awful lot of memory 
+and then does not call free() for some time thereafter, dlmalloc will not release 
+memory to the system. Generally in any real world code scenario free() will be called 
+fairly frequently, and if not then you can always force release using nedmalloc_trim().</p>
+<h3><a name="memoryleaks">B2: Memory Leakage</a></h3>
+<p>You will suffer memory leakage unless you call neddisablethreadcache() per pool 
+for every thread which exits (unless you are using nedalloc from its DLL on Windows). 
+This is because nedalloc cannot portably know when a thread exits and thus when 
+its thread cache can be returned for use by other code. Don&#39;t forget pool zero, 
+the system pool. On some POSIX threads implementations there exists a pthread_atexit() 
+which registers a termination handler for thread exit - if you don&#39;t have one of 
+these then you&#39;ll have to do it manually.</p>
+<p>Equally if you use nedalloc from a dynamically loaded DLL or shared object which 
+you later kick out of memory, you will leak memory if you don&#39;t disable all thread 
+caches for all pools (as per the preceding paragraph), destroy all thread pools 
+using neddestroypool() and destroy the system pool using neddestroysyspool().</p>
+<h3><a name="threadcache">B3: The Threadcache</a></h3>
+<p>For C++ type allocation patterns (where the same small sizes of memory are regularly 
+allocated and deallocated as objects are created and destroyed), the threadcache 
+always benefits performance as it will cache all malloc/free allocations under THREADCACHEMAX 
+in size. If however your allocation patterns are different, searching the threadcache 
+may significantly slow down your code - as a rule of thumb, if cache utilisation 
+is below 80% (see the source for neddisablethreadcache() for how to enable debug 
+printing in release mode) then you should disable the thread cache for that thread. 
+You can compile out the threadcache code by setting THREADCACHEMAX to zero.</p>
+<h3><a name="largepages">B4: Large Page support</a></h3>
+<p>For some applications defining ENABLE_LARGE_PAGES can give a 10-15% performance 
+increase by having nedalloc allocate using large pages only (which are 2Mb on x86/x64). 
+Large pages take much less space in the TLB cache and can greatly benefit programs 
+with a large working set, particularly on 64 bit systems.</p>
+<p>Support for large pages is limited to Linux and Windows. On Linux one must employ 
+the libhugetlbfs library anyway as this is the &quot;official&quot; form of large page support, 
+and setting it up and configuring it involves mounting a special hugetlbfs filing 
+system. dlmalloc does not require a dependency on the libhugetlbfs headers, rather 
+it searches for the library in the current process and if not found it silently 
+disables support.</p>
+<p>On Windows, large page support is only implemented on Windows Server 2003/Vista 
+or later and they are only permitted to be allocated by users holding the &quot;Lock 
+pages in memory&quot; local security setting which is DISABLED by default. Furthermore, 
+the process using nedalloc must hold the SeLockMemoryPrivilege privilege. If you 
+are using the DLL then the DLL attempts to enable the SeLockMemoryPrivilege during 
+initialisation - therefore if you are not using the DLL you will have to do this 
+manually yourself. As with Linux support, if at any stage large pages cannot be 
+allocated, then dlmalloc silently disables support - this allows one binary to function 
+correctly in any environment.</p>
+<h3><a name="windowsonly">B5: Windows-only features</a></h3>
+<p>If you are running on Windows, there are quite a few extra options available 
+thanks to work generously sponsored by
+<a href="http://www.ara.com/" target="_blank">Applied Research Associates (USA)</a>:</p>
+<dl>
+	<dt>Automatic threadcache cleanup</dt>
+	<dd>If you build nedalloc as a DLL and link that into your application, then 
+	the DLL can trap thread exits in your application and call neddisablethreadcache() 
+	on all currently existing nedpool&#39;s for you. </dd>
+	<dt>Replacing the system allocator in the whole process</dt>
+	<dd>
+	<p>If you define REPLACE_SYSTEM_ALLOCATOR when building the DLL then the DLL 
+	will replace most usage of the MSVCRT allocator within any process it is loaded 
+	into with nedalloc&#39;s routines instead, whilst remaining able to handle the odd 
+	free() of a MSVCRT allocated block allocated during CRT init - this very conveniently 
+	allows you to simply link with the nedalloc DLL and your application magically 
+	now uses it with no code changes required. The following code is suggested:</p>
+	<code>#pragma comment(lib, &quot;nedmalloc.lib&quot;)</code>
+	<p>This auto-patching feature can also be combined with
+	<a href="http://research.microsoft.com/en-us/projects/detours/" target="_blank">
+	Microsoft&#39;s Detours</a> to run any arbitrary application using nedalloc instead 
+	of the system allocator:</p>
+	<code>withdll /d:nedmalloc.dll program.exe</code>
+	<p>For those not able to use Microsoft Detours, there is an enclosed nedmalloc_loader 
+	program which does one variant of the same thing. It may or may not be useful 
+	to you - it is not intended to be maintained.</p>
+	</dd>
+</dl>
+<h2><a name="speedcomparisons">C. Speed comparisons:</a></h2>
+<p>See Benchmarks.xls for details.</p>
+<p>The enclosed test.c can do one of two things: it can be a torture test which 
+mostly hammers realloc() or it can be a pure speed test which sticks to simple malloc() 
+and free(). If you enable C++ mode, half of the allocation sizes will be a two power 
+multiple less than 512 bytes (to mimic C++ stack instantiated objects) which are 
+extremely common in C++ code.</p>
+<p>The torture test is designed to mercilessly work realloc() which is the most 
+complex and complete code path in any memory allocator. Most allocators have
+<strong>very</strong> poor realloc() performance - not so nedalloc which makes use 
+of mremap() support on Linux and Windows. Even without mremap() support nedalloc&#39;s 
+realloc() tends to be significantly faster than any standard allocator.</p>
+<p>The speed test is designed to be a representative synthetic memory allocator 
+test where most allocations follow a stack pattern. It works by randomly mixing 
+allocations with frees with sizes being a random value less than 16Kb. </p>
+<p>The real world code results are from Tn&#39;s TestIO benchmark. This is a heavily 
+multithreaded and memory intensive benchmark with a lot of branching and other stuff 
+modern processors don&#39;t like so much. As you&#39;ll note, the test doesn&#39;t show the 
+benefits of the threadcache mostly due to the saturation of the memory bus being 
+the limiting factor.</p>
+<h2><a name="troubleshooting">D. Troubleshooting:</a></h2>
+<p>I get a quite a few bug reports about code not working properly under nedalloc. 
+I do not wish to sound presumptuous, however in an overwhelming majority of cases 
+the problem is in your application code and not nedalloc (see below for all the 
+bugs reported and fixed since 2006). Some of the largest corporations and IT deployments 
+in the world use nedalloc, and it has been very heavily stress tested on everything 
+from 32 processor SMP clusters right through to root DNS servers, ATM machine networks 
+and embedded operating systems requiring a very high uptime.</p>
+<p>In particular, just because it just happens to appear to work under the system 
+allocator does not mean that your application is not riddled with memory corruption 
+and non-ANSI usage of the API! And usually<strong> this is not your code&#39;s fault, 
+but rather it is usually the third party libraries being used which sadly often 
+include system libraries</strong>.</p>
+<p>Even though debugging an application for memory errors is a true black art made 
+possible only with a great deal of patience, intuition and skill, here is a checklist 
+for things to do before reporting a bug in nedalloc:</p>
+<ol>
+	<li>Make SURE you try nedalloc from GIT HEAD. For around six months of 2007 
+	I kept getting the same report of a bug long fixed in GIT HEAD.</li>
+	<li>Make use of nedalloc&#39;s internal debug routines. Try turning on full sanity 
+	checks by #define FULLSANITYCHECKS 1. Also make use of all the assertion checking 
+	performed when DEBUG is defined as 1. A lot of bug reports are made before running 
+	under a debug build where an assertion trip clearly showed the problem. Lastly, 
+	try changing the thread cache by #defining THREADCACHEMAX - this fundamentally 
+	changes how the memory allocator behaves: if everything is fine with the thread 
+	cache fully on or fully off, then this strongly suggests the source of your 
+	problem.</li>
+	<li>Make SURE you are matching allocations and frees belonging to nedalloc if 
+	you are not defining REPLACE_SYSTEM_ALLOCATOR. Attempting to free a block not 
+	allocated by nedalloc will end badly, similarly passing one of nedalloc&#39;s blocks 
+	to another allocator will likely also end badly. I have inserted as many assertion 
+	and debug checks for this possibility as I can think of (further suggestions 
+	are welcome), but no system can ever be watertight. If you&#39;re using C++, I would 
+	use its strong template type system to have the compiler guarantee membership 
+	of a memory pointer - see <a href="http://www.boost.org/" target="_blank">the 
+	Boost libraries</a>, or indeed
+	<a href="http://www.nedprod.com/TnFOX/" target="_blank">my own TnFOX portability 
+	toolkit</a>.</li>
+	<li>If you&#39;re still having problems, or more likely your code runs absolutely 
+	fine under debug builds but trips up under release which suggests a timing bug, 
+	it is time to deploy heavyweight tools. Under Linux, you should use
+	<a href="http://valgrind.org/" target="_blank">valgrind</a>. Under Windows, 
+	there is an excellent commercial tool called
+	<a href="http://www.glowcode.com/" target="_blank">Glowcode</a>. Any programming 
+	team serious on quality should ALWAYS run their projects through these tools 
+	before each and every release anyway - you would be amazed at what you miss 
+	during all other testing.</li>
+	<li>Lastly, in the worst case scenario, consider hiring in a memory debugging 
+	expert. There are quite a few on the market and they often are authors of memory 
+	allocators. <a href="http://www.malloc.de/en/" target="_blank">Wolfram Gloger 
+	(the author of ptmalloc) provides consulting services</a>.
+	<a href="http://www.nedproductions.biz/" target="_blank">My own consulting company 
+	ned Productions Limited</a> may be able to provide such a service depending 
+	on our current workload.</li>
+</ol>
+<p>I hope that these tips help. And I urge anyone considering simply dropping back 
+to the system allocator as a quick fix to reconsider: squashing memory bugs often 
+brings with it <strong>significant</strong> extra benefits in performance and reliability. 
+It may cost what appears to be a lot extra now, but it usually will save itself 
+many times its cost over the next few years. I know of one large multinational corporation 
+who <strong>saved hundreds of millions of dollars</strong> due to the debugging 
+of their system software performed when trying to get it working with nedalloc - 
+they found one bug in nedalloc but over a hundred in their own code, and in the 
+process improved performance <strong>threefold</strong> which saved an expensive 
+hardware upgrade and deployment. The conclusion can only be that fixing memory bugs 
+now tends to be worth it in the long run.</p>
+<h2><a name="changelog">E. ChangeLog:</a></h2>
+<h3>v1.10 beta 1 ?:</h3>
+<ul>
+	<li><span class="gitcommit">[master 89f1806]</span> Moved from SVN to GIT. Bumped 
+	version to v1.10 as new ARA contract will involve significant further improvements 
+	mainly centering around realloc() performance.</li>
+	<li><span class="gitcommit">[master 254fe7c]</span> Added nedmemsize() for API 
+	compatibility with other allocators. Added DEFAULTMAXTHREADSINPOOL and set it 
+	to FOUR which is a BREAKING CHANGE from previous versions of nedalloc (which 
+	set it to 16).</li>
+	<li><span class="gitcommit">[nedmalloc_fast_realloc 97d1420]</span> Added win32mremap() 
+	implementation.</li>
+	<li><span class="gitcommit">[nedmalloc_fast_realloc 8a1001e]</span> Significantly 
+	improved test.c with new test options TESTCPLUSPLUS, BLOCKSIZE, TESTTYPE and 
+	MAXMEMORY.</li>
+	<li><span class="gitcommit">[nedmalloc_fast_realloc 7ea606d]</span> Implemented 
+	two variants of direct mremap() on Windows, one using file mappings and the 
+	other using over-reservation. The former is used on 32 bit and the latter on 
+	64 bit.</li>
+	<li><span class="gitcommit">[nedmalloc_fast_realloc 26ff9a7]</span> Added the 
+	malloc2() interface to nedalloc.</li>
+	<li><span class="gitcommit">[nedmalloc_fast_realloc xxxxxxx]</span> Rewrote 
+	Readme.txt to become Readme.html which makes it much clearer to read.</li>
+</ul>
+<h3>v1.06 beta 2 21st March 2010:</h3>
+<ul>
+	<li>{ 1153 } Added detection of whether host process is using MSVCRT or MSVCRTD 
+	and the fixing up of which runtime tolerant nedalloc should use if nedalloc 
+	was linked differently. This ought to save a great deal of hassle later on by 
+	preventing failed-to-RTM user bug reports :)</li>
+	<li>{ 1154 } Fixed nedalloc trying to use MLOCK_T even when USE_LOCKS=0. Thanks 
+	to Ariel Manzur for reporting this.</li>
+	<li>{ 1155 } Fixed USE_SPIN_LOCKS=0 not compiling on Windows.</li>
+	<li>{ 1157 } Fixed bug where foreign blocks entering the threadcache weren&#39;t 
+	being marked as such, thus typically causing a segfault on process exit.</li>
+	<li>{ 1158 } Fixed compilation problems on mingw. Thanks to Amanieu d&#39;Antras 
+	for reporting these.</li>
+	<li>{ 1159 } Released as beta2.</li>
+</ul>
+<h3>v1.06 beta 1 13th January 2010:</h3>
+<ul>
+	<li>{ 1079 } Fixed misdeclaration of struct mallinfo as C++ type. Thanks to 
+	James Mansion for reporting this.</li>
+	<li>{ 1082 } Fixed dlmalloc bug which caused header corruption to mmap() allocations 
+	when running under multiple threads.</li>
+	<li>{ 1088 } Fixed assertion failure for nedblksize() with latest dlmalloc. 
+	Thanks to Anteru for reporting this.</li>
+	<li>{ 1088 } Added neddestroysyspool(). Thanks to Lars Wehmeyer for suggesting 
+	this.</li>
+	<li>{ 1088 } Fixed thread id high bit set bug causing SIGABRT on Mac OS X. Thanks 
+	to Chris Dillman for reporting this.</li>
+	<li>{ 1094 } Integrated dlmalloc v2.8.4 final.</li>
+	<li>{ 1095 } Added nedtrimthreadcache(). Thanks to Hayim Hendeles for suggesting 
+	this.</li>
+	<li>{ 1095 } Fixed silly assertion of null pointer dereference. Thanks to Ullrich 
+	Heinemann for reporting this.</li>
+	<li>{ 1096 } Fixed lots of level 4 warnings on MSVC. Thanks to Anteru for suggesting 
+	this.</li>
+	<li>{ 1098 } Improved non-nedalloc block detection to 6.25% probability of being 
+	wrong. Thanks to Applied Research Associates for sponsoring this.</li>
+	<li>{ 1099 } Added USE_MAGIC_HEADERS which allows nedalloc to handle freeing 
+	a system allocated block. Added USE_ALLOCATOR which allows the changing of which 
+	backend allocator to use (with choices between the system allocator and dlmalloc 
+	- choosing the system allocator is intended for debug situations only e.g. valgrind). 
+	Thanks to Applied Research Associates for sponsoring this.</li>
+	<li>{ 1105 } Added ability to build nedalloc as a DLL. Added support for a run 
+	time PE binary patcher which can patch all usage of the system allocator replacing 
+	it with nedalloc. Thanks to Applied Research Associates for sponsoring this.</li>
+	<li>{ 1108 } Added patcher loader which can load any arbitrary program injecting 
+	the nedalloc DLL which then patches in its replacement for the system allocator. 
+	Doesn&#39;t work on all programs, but does on most e.g. Microsoft Word. Thanks to 
+	Applied Research Associates for sponsoring this.</li>
+	<li>{ 1116 } Finished debugging and optimising the latest additions to the codebase. 
+	The patcher now works well on x64 as well as x86. Added support for large pages 
+	on Windows. Thanks to Applied Research Associates for sponsoring this.</li>
+	<li>{ 1125 } Added nedpoollist() which returns a snapshot of the nedpool&#39;s currently 
+	existing. The Windows DLL thread exit code now disables the thread cache for 
+	all currently existing nedpool&#39;s. Thanks to Applied Research Associates for 
+	sponsoring this.</li>
+	<li>{ 1126 } Added ENABLE_TOLERANT_NEDMALLOC which allows nedalloc to recognise 
+	system allocator blocks and to do the right thing with them.</li>
+	<li>{ 1139 } Added link time code generation support for Windows builds. This 
+	currently has zero performance improvement on x64 (on MSVC9) but can add 15% 
+	to x86 performance (on MSVC9). Also added scons SConstruct and SConscript files.</li>
+</ul>
+<h3>v1.05 15th June 2008:</h3>
+<ul>
+	<li>{ 1042 } Added error check for TLSSET() and TLSFREE() macros. Thanks to 
+	Markus Elfring for reporting this.</li>
+	<li>{ 1043 } Fixed a segfault when freeing memory allocated using nedindependent_comalloc(). 
+	Thanks to Pavel Vozenilek for reporting this.</li>
+</ul>
+<h3>v1.04 14th July 2007:</h3>
+<ul>
+	<li>Fixed a bug with the new optimised implementation that failed to lock on 
+	a realloc under certain conditions.</li>
+	<li>Fixed lack of thread synchronisation in InitPool() causing pool corruption.</li>
+	<li>Fixed a memory leak of thread cache contents on disabling. Thanks to Earl 
+	Chew for reporting this.</li>
+	<li>Added a sanity check for freed blocks being valid.</li>
+	<li>Reworked test.c into being a torture test.</li>
+	<li>Fixed GCC assembler optimisation misspecification.</li>
+</ul>
+<h3>v1.04alpha_svn915 7th October 2006:</h3>
+<ul>
+	<li>Fixed failure to unlock thread cache list if allocating a new list failed. 
+	Thanks to Dmitry Chichkov for reporting this. Futher thanks to Aleksey Sanin.</li>
+	<li>Fixed realloc(0, &lt;size&gt;) segfaulting. Thanks to Dmitry Chichkov for reporting 
+	this.</li>
+	<li>Made config defines #ifndef so they can be overriden by the build system. 
+	Thanks to Aleksey Sanin for suggesting this.</li>
+	<li>Fixed deadlock in nedprealloc() due to unnecessary locking of preferred 
+	thread mspace when mspace_realloc() always uses the original block&#39;s mspace 
+	anyway. Thanks to Aleksey Sanin for reporting this.</li>
+	<li>Made some speed improvements by hacking mspace_malloc() to no longer lock 
+	its mspace, thus allowing the recursive mutex implementation to be removed with 
+	an associated speed increase. Thanks to Aleksey Sanin for suggesting this.</li>
+	<li>Fixed a bug where allocating mspaces overran its max limit. Thanks to Aleksey 
+	Sanin for reporting this.</li>
+</ul>
+<h3>v1.03 10th July 2006:</h3>
+<ul>
+	<li>Fixed memory corruption bug in threadcache code which only appeared with 
+	&gt;4 threads and in heavy use of the threadcache.</li>
+</ul>
+<h3>v1.02 15th May 2006:</h3>
+<ul>
+	<li>Integrated dlmalloc v2.8.4, fixing the win32 memory release problem and 
+	improving performance still further. Speed is now up to twice the speed of v1.01 
+	(average is 67% faster).</li>
+	<li>Fixed win32 critical section implementation. Thanks to Pavel Kuznetsov for 
+	reporting this.</li>
+	<li>Wasn&#39;t locking mspace if all mspaces were locked. Thanks to Pavel Kuznetsov 
+	for reporting this.</li>
+	<li>Added Apple Mac OS X support.</li>
+</ul>
+<h3>v1.01 24th February 2006:</h3>
+<ul>
+	<li>Fixed multiprocessor scaling problems by removing sources of cache sloshing.</li>
+	<li>Earl Chew &lt;earl_chew &lt;at&gt; agilent &lt;dot&gt; com&gt; sent patches for the following:
+	<ol>
+		<li>size2binidx() wasn&#39;t working for default code path (non x86).</li>
+		<li>Fixed failure to release mspace lock under certain circumstances which 
+		caused a deadlock.</li>
+	</ol>
+	</li>
+</ul>
+<h3>v1.00 1st January 2006:</h3>
+<ul>
+	<li>First release</li>
+</ul>
+
+</body>
+
+</html>
