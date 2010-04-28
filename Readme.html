@@ -159,6 +159,8 @@ hoops to maintain alignment :(.</p>
 	<dd>Reserve (1&lt;&lt;n) bytes of address space such that mmapped realloc2(size &lt;= 
 	(1&lt;&lt;n)) avoids memory copying and hence is much faster.</dd>
 </dl>
+<p>Note that using any of these flags other than M2_ZERO_MEMORY or any alignment 
+other than zero inhibits the threadcache.</p>
 <p>Currently MREMAP support is limited to Linux and Windows. Patches implementing 
 support for other platforms are welcome.</p>
 <p>On Linux the non portable mremap() kernel function is currently used, so in fact 

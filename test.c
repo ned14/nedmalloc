@@ -1,6 +1,6 @@
 /* test.c
-An example of how to use nedalloc
-(C) 2005-2007 Niall Douglas
+An example of how to use nedalloc in C
+(C) 2005-2010 Niall Douglas
 */
 
 #include <stdio.h>

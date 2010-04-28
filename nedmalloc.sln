@@ -3,15 +3,14 @@ Microsoft Visual Studio Solution File, Format Version 10.00
 # Visual Studio 2008
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_dll", "nedmalloc_dll.vcproj", "{47044B33-6C5A-40B6-901F-D80CA003CD8C}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_tester", "nedmalloc_tester.vcproj", "{B89384F5-360B-4AB2-8F43-2F5F98A947FE}"
-	ProjectSection(ProjectDependencies) = postProject
-		{47044B33-6C5A-40B6-901F-D80CA003CD8C} = {47044B33-6C5A-40B6-901F-D80CA003CD8C}
-	EndProjectSection
-EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_loader", "nedmalloc_loader.vcproj", "{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}"
 	ProjectSection(ProjectDependencies) = postProject
 		{B89384F5-360B-4AB2-8F43-2F5F98A947FE} = {B89384F5-360B-4AB2-8F43-2F5F98A947FE}
 	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_test_c", "nedmalloc_test_c.vcproj", "{B89384F5-360B-4AB2-8F43-2F5F98A947FE}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_test_cpp", "nedmalloc_test_cpp.vcproj", "{889F56B1-6231-458A-84BB-F2AAF302FF7D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -29,14 +28,6 @@ Global
 		{47044B33-6C5A-40B6-901F-D80CA003CD8C}.Release|Win32.Build.0 = Release|Win32
 		{47044B33-6C5A-40B6-901F-D80CA003CD8C}.Release|x64.ActiveCfg = Release|x64
 		{47044B33-6C5A-40B6-901F-D80CA003CD8C}.Release|x64.Build.0 = Release|x64
-		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Debug|Win32.ActiveCfg = Debug|Win32
-		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Debug|Win32.Build.0 = Debug|Win32
-		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Debug|x64.ActiveCfg = Debug|x64
-		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Debug|x64.Build.0 = Debug|x64
-		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Release|Win32.ActiveCfg = Release|Win32
-		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Release|Win32.Build.0 = Release|Win32
-		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Release|x64.ActiveCfg = Release|x64
-		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Release|x64.Build.0 = Release|x64
 		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Debug|Win32.ActiveCfg = Debug|Win32
 		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Debug|Win32.Build.0 = Debug|Win32
 		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Debug|x64.ActiveCfg = Debug|x64
@@ -45,6 +36,22 @@ Global
 		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Release|Win32.Build.0 = Release|Win32
 		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Release|x64.ActiveCfg = Release|x64
 		{EFEDF67D-6823-4DE4-AE9B-DEF6A58FAC1D}.Release|x64.Build.0 = Release|x64
+		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Debug|Win32.ActiveCfg = Debug|Win32
+		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Debug|Win32.Build.0 = Debug|Win32
+		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Debug|x64.ActiveCfg = Debug|x64
+		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Debug|x64.Build.0 = Debug|x64
+		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Release|Win32.ActiveCfg = Release|Win32
+		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Release|Win32.Build.0 = Release|Win32
+		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Release|x64.ActiveCfg = Release|x64
+		{B89384F5-360B-4AB2-8F43-2F5F98A947FE}.Release|x64.Build.0 = Release|x64
+		{889F56B1-6231-458A-84BB-F2AAF302FF7D}.Debug|Win32.ActiveCfg = Debug|Win32
+		{889F56B1-6231-458A-84BB-F2AAF302FF7D}.Debug|Win32.Build.0 = Debug|Win32
+		{889F56B1-6231-458A-84BB-F2AAF302FF7D}.Debug|x64.ActiveCfg = Debug|x64
+		{889F56B1-6231-458A-84BB-F2AAF302FF7D}.Debug|x64.Build.0 = Debug|x64
+		{889F56B1-6231-458A-84BB-F2AAF302FF7D}.Release|Win32.ActiveCfg = Release|Win32
+		{889F56B1-6231-458A-84BB-F2AAF302FF7D}.Release|Win32.Build.0 = Release|Win32
+		{889F56B1-6231-458A-84BB-F2AAF302FF7D}.Release|x64.ActiveCfg = Release|x64
+		{889F56B1-6231-458A-84BB-F2AAF302FF7D}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
