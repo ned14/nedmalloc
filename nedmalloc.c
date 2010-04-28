@@ -54,7 +54,12 @@ DEALINGS IN THE SOFTWARE.
 #endif
 #ifdef __linux__
 /* Sadly we can't include <malloc.h> as it causes a redefinition error */
-extern size_t malloc_usable_size(void *);
+#if defined(__cplusplus)
+extern "C"
+#else
+extern
+#endif
+size_t malloc_usable_size(void *);
 #endif
 #if USE_ALLOCATOR==1
  #define MSPACES 1

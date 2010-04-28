@@ -37,7 +37,7 @@ An example of how to use nedalloc in C
 #if !defined(USE_NEDMALLOC_DLL)
 #include "nedmalloc.c"
 #elif defined(WIN32)
-#define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN 1
 #include <windows.h>
 #else
 #include <pthread.h>

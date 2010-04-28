@@ -6,10 +6,19 @@ An example of how to use nedalloc in C++
 #include <stdio.h>
 #include <stdlib.h>
 #include "nedmalloc.h"
-#ifdef WIN32
+
+#ifdef _MSC_VER
+/*#pragma optimize("g", off)*/	/* Useful for debugging */
+#endif
+
+#if !defined(USE_NEDMALLOC_DLL)
+#include "nedmalloc.c"
+#elif defined(WIN32)
 #define WIN32_LEAN_AND_MEAN 1
 #include <windows.h>
 #endif
+
+using namespace nedalloc;
 
 int PatchInNedmallocDLL(void);
 int main(void)

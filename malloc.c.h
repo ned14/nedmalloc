@@ -1620,7 +1620,6 @@ static int largepagesize = 0;
 #define MMAP_PROT            (PROT_READ|PROT_WRITE)
 #ifdef MAP_ANONYMOUS
 #define MMAP_FLAGS           (MAP_PRIVATE|MAP_ANONYMOUS)
-#define MMAP_DEFAULT(s)       MMAP_IMPL(0, (s), MMAP_PROT, MMAP_FLAGS, -1, 0)
 #else /* MAP_ANONYMOUS */
 #define MMAP_FLAGS           (MAP_PRIVATE)
 static int dev_zero_fd = -1; /* Cached file descriptor for /dev/zero. */
@@ -1641,12 +1640,12 @@ static FORCEINLINE void* posix_mmap(size_t size) {
 #ifdef ENABLE_LARGE_PAGES
 #ifdef MAP_LARGEPAGE
 #define MMAP_FLAGS_LARGEPAGE MAP_LARGEPAGE
-#elif defined(MAP_HUGE_TLB)
-#define MMAP_FLAGS_LARGEPAGE MAP_LARGEPAGE
+#elif defined(MAP_HUGETLB)
+#define MMAP_FLAGS_LARGEPAGE MAP_HUGETLB
 #else
 #error Cannot figure out how to enable large page support for this system!
 #endif
-  if(largepagesize && size >= largepagesize && !(size & (largepagesize-1))
+  if(largepagesize && size >= largepagesize && !(size & (largepagesize-1)))
     ptr = mmap(baseaddress, size, MMAP_PROT, flags|MMAP_FLAGS_LARGEPAGE, fd, 0);
 #endif
   if (!ptr) {
