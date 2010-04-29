@@ -215,7 +215,7 @@ NO_NED_NAMESPACE prevents the functions from being defined in the nedalloc
 namespace when in C++ (uses the global C namespace instead).
 */
 /*! \def THROWSPEC
-Defined to throw() (as in, throws nothing) under C++, otherwise nothing.
+Defined to throw() or noexcept(true) (as in, throws nothing) under C++, otherwise nothing.
 */
 #if defined(__cplusplus)
  #if !defined(NO_NED_NAMESPACE)
@@ -223,7 +223,11 @@ namespace nedalloc {
  #else
 extern "C" {
  #endif
- #define THROWSPEC throw()
+ #if __cplusplus > 199711L
+  #define THROWSPEC noexcept(true)
+ #else
+  #define THROWSPEC throw()
+ #endif
 #else
  #define THROWSPEC
 #endif
@@ -484,10 +488,77 @@ namespace nedalloc {
 
 namespace nedallocatorI
 {
-	template<typename T> class basepolicy
+	/* Roll on variadic templates is all I can say! */
+#if __cplusplus > 199711L
+	template<class... policies> class policycompositor
+		: public policies...
 	{
+	};
+#else
+	template<int n> struct nullpolicy
+	{
+		template<typename T> class policy {};
+	};
+	template<int n> class NullType {};
+	template<class A=NullType<1>, class B=NullType<2>, class C=NullType<3>, class D=NullType<4>, class E=NullType<5>,
+		class F=NullType<6>, class G=NullType<7>, class H=NullType<8>, class I=NullType<9>, class J=NullType<10>,
+		class K=NullType<11>, class L=NullType<12>, class M=NullType<13>, class N=NullType<14>, class O=NullType<15> > class policycompositor
+		: public A, public B, public C, public D, public E,
+		public F, public G, public H, public I, public J,
+		public K, public L, public M, public N, public O
+	{
+	};
+#endif
+}
+
+template<typename T,
+#if __cplusplus > 199711L
+	class... policies
+#else
+	class policy1=nedallocatorI::nullpolicy<1>,
+	class policy2=nedallocatorI::nullpolicy<2>,
+	class policy3=nedallocatorI::nullpolicy<3>,
+	class policy4=nedallocatorI::nullpolicy<4>,
+	class policy5=nedallocatorI::nullpolicy<5>
+#endif
+> class nedallocator;
+
+namespace nedallocatorI
+{
+	template<class implementation> class baseimplementation;
+	template<typename T,
+#if __cplusplus > 199711L
+			class... policies
+#else
+			class policy1,
+			class policy2,
+			class policy3,
+			class policy4,
+			class policy5
+#endif
+	> class baseimplementation<nedallocator<T,
+#if __cplusplus > 199711L
+	policies...
+#else
+	policy1, policy2, policy3, policy4, policy5
+#endif
+	> >
+	{
+	protected:
+		//! The most derived nedallocator implementation type
+		typedef nedallocator<T,
+#if __cplusplus > 199711L
+			policies...
+#else
+			policy1, policy2, policy3, policy4, policy5
+#endif
+		> implementationType;
+		//! Returns a this for the most derived nedallocator implementation type
+		implementationType *_this() { return static_cast<implementationType *>(this); }
+		//! Returns a this for the most derived nedallocator implementation type
+		const implementationType *_this() const { return static_cast<const implementationType *>(this); }
 		//! Specifies the nedpool to use. Defaults to zero (the system pool).
-		nedpool *policy_getnedpool(size_t bytes) const
+		nedpool *policy_nedpool(size_t bytes) const
 		{
 			return 0;
 		}
@@ -511,21 +582,79 @@ namespace nedallocatorI
 		{
 			throw std::bad_alloc("Out of memory");
 		}
-	};
-	template<typename T> class nullpolicy
-	{
+	public:
+		typedef T *pointer;
+		typedef const T *const_pointer;
+		typedef T &reference;
+		typedef const T &const_reference;
+		typedef T value_type;
+		typedef size_t size_type;
+		typedef ptrdiff_t difference_type;
+		T *address(T &r) const { return &r; }
+		const T *address(const T &s) const { return &s; }
+		size_t max_size() const { return (static_cast<size_t>(0) - static_cast<size_t>(1)) / sizeof(T); }
+		bool operator!=(const baseimplementation &other) const { return !(*this == other); }
+		bool operator==(const baseimplementation &other) const { return true; }
+
+		void construct(T *const p, const T &t) const {
+			void *const _p = static_cast<void *>(p);
+			new (_p) T(t);
+		}
+		void destroy(T *const p) const {
+			p->~T();
+		}
+		baseimplementation() { }
+		baseimplementation(const baseimplementation &) { }
+		template<typename U> struct rebind {
+			typedef nedallocator<U,
+#if __cplusplus > 199711L
+				policies...
+#else
+				policy1, policy2, policy3, policy4, policy5
+#endif
+			> other;
+		};
+		template<typename U> baseimplementation(const nedallocator<U,
+#if __cplusplus > 199711L
+			policies...
+#else
+			policy1, policy2, policy3, policy4, policy5
+#endif
+		> &) { }
+#if __cplusplus > 199711L
+		baseimplementation(baseimplementation &&) { }
+#endif
+
+		T *allocate(const size_t n) const {
+			size_t size = _this()->policy_granularity(n*sizeof(T));
+			void *ptr = nedpmalloc2(_this()->policy_nedpool(size), size, _this()->policy_alignment(size), _this()->policy_flags(size));
+			if(!ptr) _this()->policy_throwbadalloc(size);
+			return static_cast<T *>(ptr);
+		}
+		void deallocate(T *p, const size_t n) const {
+			nedpfree(0/*not needed*/, p);
+		}
+		template<typename U> T *allocate(const size_t n, const U * /* hint */) const {
+			return allocate(n);
+		}
+	private:
+		baseimplementation &operator=(const baseimplementation &);
 	};
 }
 /*! \class nedalignment
 \ingroup C++
 \brief An alignment policy setting the alignment of the allocated memory.
 */
-template<typename T, size_t alignment> class nedalignment
+template<size_t alignment> struct nedalignment
 {
-	size_t policy_alignment(size_t bytes) const
+	template<class implementation> class policy
 	{
-		return alignment;
-	}
+	protected:
+		size_t policy_alignment(size_t bytes) const
+		{
+			return alignment;
+		}
+	};
 };
 
 /*! \class nedallocator
@@ -538,62 +667,43 @@ have std::vector<Foo, nedalloc::nedallocator< std::vector<Foo> > such that
 std::vector<> will now use nedalloc as the policy specifies.
 */
 template<typename T,
-	template<typename> class policy1=nedallocatorI::nullpolicy,
-	template<typename> class policy2=nedallocatorI::nullpolicy,
-	template<typename> class policy3=nedallocatorI::nullpolicy,
-	template<typename> class policy4=nedallocatorI::nullpolicy,
-	template<typename> class policy5=nedallocatorI::nullpolicy
-> class nedallocator : nedallocatorI::basepolicy<T>, policy1<T>, policy2<T>, policy3<T>, policy4<T>, policy5<T>
+#if __cplusplus > 199711L
+	class... policies
+#else
+	class policy1,
+	class policy2,
+	class policy3,
+	class policy4,
+	class policy5
+#endif
+> class nedallocator : public nedallocatorI::policycompositor<
+#if __cplusplus > 199711L
+	nedallocatorI::baseimplementation<nedallocator<T, policies...> >,
+	typename policies::policy<nedallocator<T, policies...> >...
+#else
+	nedallocatorI::baseimplementation<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
+	typename policy1::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
+	typename policy2::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
+	typename policy3::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
+	typename policy4::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
+	typename policy5::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >
+#endif
+>
 {
+	typedef nedallocatorI::policycompositor<
+#if __cplusplus > 199711L
+		nedallocatorI::baseimplementation<nedallocator<T, policies...> >,
+		typename policies::policy<nedallocator<T, policies...> >...
+#else
+		nedallocatorI::baseimplementation<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
+		typename policy1::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
+		typename policy2::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
+		typename policy3::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
+		typename policy4::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
+		typename policy5::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >
+#endif
+	> Base;
 public:
-	typedef nedallocator<T, policy1, policy2, policy3, policy4, policy5> nedallocatorType;
-	nedpool *na_nedpool  (size_t bytes, const T *t=(const T *) 0) const	{ return policy_getnedpool(bytes, t); }
-	size_t na_granularity(size_t bytes, const T *t=(const T *) 0) const	{ return policy_granularity(bytes, t); }
-	size_t na_alignment  (size_t bytes, const T *t=(const T *) 0) const	{ return policy_alignment(bytes, t); }
-	unsigned na_flags    (size_t bytes, const T *t=(const T *) 0) const	{ return policy_flags(bytes, t); }
-	void na_throwbadalloc(size_t bytes, const T *t=(const T *) 0) const	{ policy_throwbadalloc(bytes, t); }
-public:
-	typedef T *pointer;
-	typedef const T *const_pointer;
-	typedef T &reference;
-	typedef const T &const_reference;
-	typedef T value_type;
-	typedef size_t size_type;
-	typedef ptrdiff_t difference_type;
-	T *address(T &r) const { return &r; }
-	const T *address(const T &s) const { return &s; }
-	size_t max_size() const { return (static_cast<size_t>(0) - static_cast<size_t>(1)) / sizeof(T); }
-	template<typename U> struct rebind {
-		typedef nedallocator<U, policy1, policy2, policy3, policy4, policy5> other;
-	};
-	bool operator!=(const nedallocator &other) const { return !(*this == other); }
-	bool operator==(const nedallocator &other) const { return true; }
-
-	void construct(T *const p, const T &t) const {
-		void *const _p = static_cast<void *>(p);
-		new (_p) T(t);
-	}
-	void destroy(T *const p) const {
-		p->~T();
-	}
-	nedallocator() { }
-	nedallocator(const nedallocator &) { }
-	template<typename U> nedallocator(const nedallocator<U, policy1, policy2, policy3, policy4, policy5> &) { }
-
-	T *allocate(const size_t n) const {
-		size_t size = na_granularity(n*sizeof(T));
-		void *ptr = nedpmalloc2(na_nedpool(size), size, na_alignment(size), na_flags(size));
-		if(!ptr) na_throwbadalloc(size);
-		return static_cast<T *>(ptr);
-	}
-	void deallocate(T *p, const size_t n) const {
-		nedpfree(0/*not needed*/, p);
-	}
-	template<typename U> T *allocate(const size_t n, const U * /* hint */) const {
-		return allocate(n);
-	}
-private:
-	nedallocator &operator=(const nedallocator &);
 };
 
 
