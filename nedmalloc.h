@@ -30,8 +30,7 @@ DEALINGS IN THE SOFTWARE.
 #define NEDMALLOC_H
 
 /*! \file nedmalloc.h
-
-Defines the functionality provided by nedalloc.
+\brief Defines the functionality provided by nedalloc.
 */
 
 /*! \mainpage
@@ -40,32 +39,77 @@ Defines the functionality provided by nedalloc.
 */
 
 /*! \def USE_LOCKS
+\brief Defines the threadsafety of nedalloc
+
 USE_LOCKS can be 2 if you want to define your own MLOCK_T, INITIAL_LOCK,
 ACQUIRE_LOCK, RELEASE_LOCK, TRY_LOCK, IS_LOCKED and NULL_LOCK_INITIALIZER.
 */
 
 /*! \def NEDMALLOC_DEBUG
+\brief Defines the assertion checking performed by nedalloc
+
 NEDMALLOC_DEBUG can be defined to cause DEBUG to be set differently for nedmalloc
 than for the rest of the build. Remember to set NDEBUG to disable all assertion
 checking too.
 */
 
 /*! \def ENABLE_LARGE_PAGES
+\brief Defines whether nedalloc uses large pages (>=2Mb)
+
 ENABLE_LARGE_PAGES enables support for requesting memory from the system in large
 (typically >=2Mb) pages if the host OS supports this. These occupy just a single
 TLB entry and can significantly improve performance in large working set applications.
 */
 
-/* \def ENABLE_FAST_HEAP_DETECTION
+/*! \def ENABLE_FAST_HEAP_DETECTION
+\brief Defines whether nedalloc takes platform specific shortcuts when detecting foreign blocks.
+
 ENABLE_FAST_HEAP_DETECTION enables special logic to detect blocks allocated
 by the system heap. This avoids 1.5%-2% overhead when checking for non-nedmalloc
 blocks, but it assumes that the NT and glibc heaps function in a very specific
 fashion which may not hold true across OS upgrades.
 */
 
+/*! \def HAVE_CPP0XRVALUEREFS
+\ingroup C++
+\brief Enables rvalue references
+
+Define to enable the usage of rvalue references which enables move semantics and
+other things. Automatically defined if __cplusplus indicates a C++0x compiler,
+otherwise you'll need to set it yourself.
+*/
+
+/*! \def HAVE_CPP0XVARIADICTEMPLATES
+\ingroup C++
+\brief Enables variadic templates
+
+Define to enable the usage of variadic templates which enables the use of arbitrary
+numbers of policies and other useful things. Automatically defined if __cplusplus
+indicates a C++0x compiler, otherwise you'll need to set it yourself.
+*/
+
+/*! \def HAVE_CPP0XSTATICASSERT
+\ingroup C++
+\brief Enabled static assertions
+
+Define to enable the usage of static assertions. Automatically defined if __cplusplus
+indicates a C++0x compiler, otherwise you'll need to set it yourself.
+*/
+
+#if __cplusplus > 199711L || defined(HAVE_CPP0X) /* Do we have C++0x? */
+#undef HAVE_CPP0XRVALUEREFS
+#define HAVE_CPP0XRVALUEREFS 1
+#undef HAVE_CPP0XVARIADICTEMPLATES
+#define HAVE_CPP0XVARIADICTEMPLATES 1
+#undef HAVE_CPP0XSTATICASSERT
+#define HAVE_CPP0XSTATICASSERT 1
+#endif
+
 #include <stddef.h>   /* for size_t */
 
 /*! \def NEDMALLOCEXTSPEC
+\brief Defines how nedalloc's API is to be made visible.
+
 NEDMALLOCEXTSPEC can be defined to be __declspec(dllexport) or
 __attribute__ ((visibility("default"))) or whatever you like. It defaults
 to extern unless NEDMALLOC_DLL_EXPORTS is set as it would be when building
@@ -87,7 +131,7 @@ nedmalloc.dll.
 #endif
 
 /*! \def RESTRICT
-Defined to the restrict keyword or equivalent if available */
+\brief Defined to the restrict keyword or equivalent if available */
 #ifndef RESTRICT
 #if __STDC_VERSION__ >= 199901L		/* C99 or better */
  #define RESTRICT restrict
@@ -112,17 +156,19 @@ Defined to the restrict keyword or equivalent if available */
  #define NEDMALLOCPTRATTR __attribute__ ((malloc))
 #endif
 /*! \def NEDMALLOCPTRATTR
-Defined to the specifier for a pointer which points to a memory block. Like NEDMALLOCNOALIASATTR, but sadly not identical. */
+\brief Defined to the specifier for a pointer which points to a memory block. Like NEDMALLOCNOALIASATTR, but sadly not identical. */
 #ifndef NEDMALLOCPTRATTR
  #define NEDMALLOCPTRATTR
 #endif
 /*! \def NEDMALLOCNOALIASATTR
-Defined to the specifier for a pointer which does not alias any other variable. */
+\brief Defined to the specifier for a pointer which does not alias any other variable. */
 #ifndef NEDMALLOCNOALIASATTR
  #define NEDMALLOCNOALIASATTR
 #endif
 
 /*! \def USE_MAGIC_HEADERS
+\brief Defines whether nedalloc should use magic headers in foreign heap block detection
+
 USE_MAGIC_HEADERS causes nedalloc to allocate an extra three sizeof(size_t)
 to each block. nedpfree() and nedprealloc() can then automagically know when
 to free a system allocated block. Enabling this typically adds 20-50% to
@@ -133,6 +179,8 @@ application memory usage, and is mandatory if USE_ALLOCATOR is not 1.
 #endif
 
 /*! \def USE_ALLOCATOR
+\brief Defines the underlying allocator to use
+
 USE_ALLOCATOR can be one of these settings (it defaults to 1):
   0: System allocator (nedmalloc now simply acts as a threadcache) which is
      very useful for testing with valgrind and Glowcode.
@@ -148,6 +196,8 @@ USE_ALLOCATOR can be one of these settings (it defaults to 1):
 #endif
 
 /*! \def REPLACE_SYSTEM_ALLOCATOR
+\brief Defines whether to replace the system allocator (malloc(), free() et al) with nedalloc's implementation.
+
 REPLACE_SYSTEM_ALLOCATOR on POSIX causes nedalloc's functions to be called
 malloc, free etc. instead of nedmalloc, nedfree etc. You may or may not want
 this. On Windows it causes nedmalloc to patch all loaded DLLs and binaries
@@ -164,8 +214,10 @@ Always turns on ENABLE_TOLERANT_NEDMALLOC.
  #endif
  #ifndef WIN32	/* We have a dedicated patcher for Windows */
   #define nedmalloc               malloc
+  #define nedmalloc2              malloc2
   #define nedcalloc               calloc
   #define nedrealloc              realloc
+  #define nedrealloc2             realloc2
   #define nedfree                 free
   #define nedmemalign             memalign
   #define nedmallinfo             mallinfo
@@ -175,13 +227,15 @@ Always turns on ENABLE_TOLERANT_NEDMALLOC.
   #define nedmalloc_footprint     malloc_footprint
   #define nedindependent_calloc   independent_calloc
   #define nedindependent_comalloc independent_comalloc
-  #ifdef _MSC_VER
-   #define nedblksize              _msize
+  #ifdef __GNUC__
+   #define nedmemsize             malloc_usable_size
   #endif
  #endif
 #endif
 
 /*! \def ENABLE_TOLERANT_NEDMALLOC
+\brief Defines whether nedalloc should check for blocks from the system allocator.
+
 ENABLE_TOLERANT_NEDMALLOC is automatically turned on if REPLACE_SYSTEM_ALLOCATOR
 is set or the Windows DLL is being built. This causes nedmalloc to detect when a
 system allocator block is passed to it and to handle it appropriately. Note that
@@ -193,7 +247,7 @@ is no comparable system on POSIX).
 #if defined(__cplusplus)
 extern "C" {
 #endif
-/*! Returns information about a memory pool */
+/*! \brief Returns information about a memory pool */
 struct nedmallinfo {
   size_t arena;    /*!< non-mmapped space allocated from system */
   size_t ordblks;  /*!< number of free chunks */
@@ -211,11 +265,13 @@ struct nedmallinfo {
 #endif
 
 /*! \def NO_NED_NAMESPACE
+\brief Defines the use of the nedalloc namespace for the C functions.
+
 NO_NED_NAMESPACE prevents the functions from being defined in the nedalloc
 namespace when in C++ (uses the global C namespace instead).
 */
 /*! \def THROWSPEC
-Defined to throw() or noexcept(true) (as in, throws nothing) under C++, otherwise nothing.
+\brief Defined to throw() or noexcept(true) (as in, throws nothing) under C++, otherwise nothing.
 */
 #if defined(__cplusplus)
  #if !defined(NO_NED_NAMESPACE)
@@ -234,69 +290,73 @@ extern "C" {
 
 /* These are the global functions */
 
-/*! Gets the usable size of an allocated block. Note this will always be bigger than what was
+/*! \brief Gets the usable size of an allocated block.
+
+Note this will always be bigger than what was
 asked for due to rounding etc. Optionally returns 1 in isforeign if the block came from the
 system allocator - note that there is a small (>0.01%) but real chance of segfault on non-Windows
 systems when passing non-nedmalloc blocks if you don't use USE_MAGIC_HEADERS.
 */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT mem) THROWSPEC;
-/*! Identical to nedblksize() except without the isforeign */
+/*! \brief Identical to nedblksize() except without the isforeign */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR size_t nedmemsize(void *RESTRICT mem) THROWSPEC;
 
-/*! Equivalent to nedpsetvalue((nedpool *) 0, v) */
+/*! \brief Equivalent to nedpsetvalue((nedpool *) 0, v) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void nedsetvalue(void *v) THROWSPEC;
 
-/*! Equivalent to nedpmalloc2((nedpool *) 0, size, 0, 0) */
+/*! \brief Equivalent to nedpmalloc2((nedpool *) 0, size, 0, 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc(size_t size) THROWSPEC;
-/*! Equivalent to nedpmalloc2((nedpool *) 0, no*size, 0, M2_ZERO_MEMORY) */
+/*! \brief Equivalent to nedpmalloc2((nedpool *) 0, no*size, 0, M2_ZERO_MEMORY) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedcalloc(size_t no, size_t size) THROWSPEC;
-/*! Equivalent to nedprealloc2((nedpool *) 0, size, mem, size, 0, 0) */
+/*! \brief Equivalent to nedprealloc2((nedpool *) 0, size, mem, size, 0, 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc(void *mem, size_t size) THROWSPEC;
-/*! Equivalent to nedpfree((nedpool *) 0, mem) */
+/*! \brief Equivalent to nedpfree((nedpool *) 0, mem) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedfree(void *mem) THROWSPEC;
-/*! Equivalent to nedpmalloc2((nedpool *) 0, size, alignment, 0) */
+/*! \brief Equivalent to nedpmalloc2((nedpool *) 0, size, alignment, 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC;
 
 #if defined(__cplusplus)
-/*! Equivalent to nedpmalloc2((nedpool *) 0, size, alignment, flags) */
+/*! \brief Equivalent to nedpmalloc2((nedpool *) 0, size, alignment, flags) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
-/*! Equivalent to nedprealloc2((nedpool *) 0, mem, size, alignment, flags) */
+/*! \brief Equivalent to nedprealloc2((nedpool *) 0, mem, size, alignment, flags) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
 #else
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment, unsigned flags) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC;
 #endif
 
-/*! Equivalent to nedpmallinfo((nedpool *) 0) */
+/*! \brief Equivalent to nedpmallinfo((nedpool *) 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR struct nedmallinfo nedmallinfo(void) THROWSPEC;
-/*! Equivalent to nedpmallopt((nedpool *) 0, parno, value) */
+/*! \brief Equivalent to nedpmallopt((nedpool *) 0, parno, value) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR int    nedmallopt(int parno, int value) THROWSPEC;
-/*! Returns the internal allocation granularity and the magic header XOR used for internal consistency checks. */
+/*! \brief Returns the internal allocation granularity and the magic header XOR used for internal consistency checks. */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void*  nedmalloc_internals(size_t *granularity, size_t *magic) THROWSPEC;
-/*! Equivalent to nedpmalloc_trim((nedpool *) 0, pad) */
+/*! \brief Equivalent to nedpmalloc_trim((nedpool *) 0, pad) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR int    nedmalloc_trim(size_t pad) THROWSPEC;
-/*! Equivalent to nedpmalloc_stats((nedpool *) 0) */
+/*! \brief Equivalent to nedpmalloc_stats((nedpool *) 0) */
 NEDMALLOCEXTSPEC void   nedmalloc_stats(void) THROWSPEC;
-/*! Equivalent to nedpmalloc_footprint((nedpool *) 0) */
+/*! \brief Equivalent to nedpmalloc_footprint((nedpool *) 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR size_t nedmalloc_footprint(void) THROWSPEC;
-/*! Equivalent to nedpindependent_calloc((nedpool *) 0, elemsno, elemsize, chunks) */
+/*! \brief Equivalent to nedpindependent_calloc((nedpool *) 0, elemsno, elemsize, chunks) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedindependent_calloc(size_t elemsno, size_t elemsize, void **chunks) THROWSPEC;
-/*! Equivalent to nedpindependent_comalloc((nedpool *) 0, elems, sizes, chunks) */
+/*! \brief Equivalent to nedpindependent_comalloc((nedpool *) 0, elems, sizes, chunks) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedindependent_comalloc(size_t elems, size_t *sizes, void **chunks) THROWSPEC;
 
-/*! Destroys the system memory pool used by the functions above.
+/*! \brief Destroys the system memory pool used by the functions above.
+
 Useful for when you have nedmalloc in a DLL you're about to unload.
 If you call ANY nedmalloc functions after calling this you will
 get a fatal exception!
 */
 NEDMALLOCEXTSPEC void neddestroysyspool() THROWSPEC;
 
-/*! A nedpool type */
+/*! \brief A nedpool type */
 struct nedpool_t;
-/*! A nedpool type */
+/*! \brief A nedpool type */
 typedef struct nedpool_t nedpool;
 
-/*! Creates a memory pool for use with the nedp* functions below.
+/*! \brief Creates a memory pool for use with the nedp* functions below.
+
 Capacity is how much to allocate immediately (if you know you'll be allocating a lot
 of memory very soon) which you can leave at zero. Threads specifies how many threads
 will *normally* be accessing the pool concurrently. Setting this to zero means it
@@ -305,73 +365,81 @@ where bursts of concurrent threads use a pool at once.
 */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR nedpool *nedcreatepool(size_t capacity, int threads) THROWSPEC;
 
-/*! Destroys a memory pool previously created by nedcreatepool().
+/*! \brief Destroys a memory pool previously created by nedcreatepool().
 */
 NEDMALLOCEXTSPEC void neddestroypool(nedpool *p) THROWSPEC;
 
-/*! Returns a zero terminated snapshot of threadpools existing at the time of call. Call
-nedfree() on the returned list when you are done. Returns zero if there is only the
+/*! \brief Returns a zero terminated snapshot of threadpools existing at the time of call.
+
+Call nedfree() on the returned list when you are done. Returns zero if there is only the
 system pool in existence.
 */
 NEDMALLOCEXTSPEC nedpool **nedpoollist() THROWSPEC;
 
-/*! Sets a value to be associated with a pool. You can retrieve this value by passing
-any memory block allocated from that pool.
+/*! \brief Sets a value to be associated with a pool.
+
+You can retrieve this value by passing any memory block allocated from that pool.
 */
 NEDMALLOCEXTSPEC void nedpsetvalue(nedpool *p, void *v) THROWSPEC;
 
-/*! Gets a previously set value using nedpsetvalue() or zero if memory is unknown.
+/*! \brief Gets a previously set value using nedpsetvalue() or zero if memory is unknown.
+
 Optionally can also retrieve pool. You can detect an unknown block by the return
 being zero and *p being unmodifed.
 */
 NEDMALLOCEXTSPEC void *nedgetvalue(nedpool **p, void *mem) THROWSPEC;
 
-/*! Trims the thread cache for the calling thread, returning any existing cache
-data to the central pool. Remember to ALWAYS call with zero if you used the
-system pool. Setting disable to non-zero replicates neddisablethreadcache().
+/*! \brief Trims the thread cache for the calling thread, returning any existing cache
+data to the central pool.
+
+Remember to ALWAYS call with zero if you used the system pool. Setting disable to
+non-zero replicates neddisablethreadcache().
 */
 NEDMALLOCEXTSPEC void nedtrimthreadcache(nedpool *p, int disable) THROWSPEC;
 
-/*! Disables the thread cache for the calling thread, returning any existing cache
-data to the central pool. Remember to ALWAYS call with zero if you used the
-system pool.
+/*! \brief Disables the thread cache for the calling thread, returning any existing cache
+data to the central pool.
+
+Remember to ALWAYS call with zero if you used the system pool.
 */
 NEDMALLOCEXTSPEC void neddisablethreadcache(nedpool *p) THROWSPEC;
 
-/*! Equivalent to nedpmalloc2(p, size, 0, 0) */
+/*! \brief Equivalent to nedpmalloc2(p, size, 0, 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size) THROWSPEC;
-/*! Equivalent to nedpmalloc2(p, no*size, 0, M2_ZERO_MEMORY) */
+/*! \brief Equivalent to nedpmalloc2(p, no*size, 0, M2_ZERO_MEMORY) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC;
-/*! Equivalent to nedprealloc2(p, mem, size, 0, 0) */
+/*! \brief Equivalent to nedprealloc2(p, mem, size, 0, 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC;
-/*! Frees the block mem from the pool p. */
+/*! \brief Frees the block mem from the pool p. */
 NEDMALLOCEXTSPEC void   nedpfree(nedpool *p, void *mem) THROWSPEC;
-/*! Equivalent to nedpmalloc2(p, bytes, alignment, 0) */
+/*! \brief Equivalent to nedpmalloc2(p, bytes, alignment, 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes) THROWSPEC;
 #if defined(__cplusplus)
 /*! \ingroup v2malloc
-Allocates a block of memory sized \em size from pool \em p, aligned to \em alignment and according to the flags \em flags.
+\brief Allocates a block of memory sized \em size from pool \em p, aligned to \em alignment and according to the flags \em flags.
 */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpool *p, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
 /*! \ingroup v2malloc
-Resizes the block of memory at \em mem in pool \em p to size \em size, aligned to \em alignment and according to the flags \em flags.
+\brief Resizes the block of memory at \em mem in pool \em p to size \em size, aligned to \em alignment and according to the flags \em flags.
 */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
 #else
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpool *p, size_t size, size_t alignment, unsigned flags) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC;
 #endif
-/*! Returns information about the memory pool */
+/*! \brief Returns information about the memory pool */
 NEDMALLOCEXTSPEC struct nedmallinfo nedpmallinfo(nedpool *p) THROWSPEC;
-/*! Changes the operational parameters of the memory pool */
+/*! \brief Changes the operational parameters of the memory pool */
 NEDMALLOCEXTSPEC int    nedpmallopt(nedpool *p, int parno, int value) THROWSPEC;
-/*! Tries to release as much free memory back to the system as possible, leaving \em pad remaining per threadpool. */
+/*! \brief Tries to release as much free memory back to the system as possible, leaving \em pad remaining per threadpool. */
 NEDMALLOCEXTSPEC int    nedpmalloc_trim(nedpool *p, size_t pad) THROWSPEC;
-/*! Prints some operational statistics to stdout. */
+/*! \brief Prints some operational statistics to stdout. */
 NEDMALLOCEXTSPEC void   nedpmalloc_stats(nedpool *p) THROWSPEC;
-/*! Returns how much memory is currently in use by the memory pool */
+/*! \brief Returns how much memory is currently in use by the memory pool */
 NEDMALLOCEXTSPEC size_t nedpmalloc_footprint(nedpool *p) THROWSPEC;
-/*! independent_calloc is similar to calloc, but instead of returning a
+/*! \brief Returns a series of guaranteed consecutive cleared memory allocations.
+
+  independent_calloc is similar to calloc, but instead of returning a
   single cleared space, it returns an array of pointers to n_elements
   independent elements that can hold contents of size elem_size, each
   of which starts out cleared, and can be independently freed,
@@ -421,7 +489,9 @@ NEDMALLOCEXTSPEC size_t nedpmalloc_footprint(nedpool *p) THROWSPEC;
   }
 */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_calloc(nedpool *p, size_t elemsno, size_t elemsize, void **chunks) THROWSPEC;
-/*!   independent_comalloc allocates, all at once, a set of n_elements
+/*! \brief Returns a series of guaranteed consecutive allocations.
+
+  independent_comalloc allocates, all at once, a set of n_elements
   chunks with sizes indicated in the "sizes" array.    It returns
   an array of pointers to these elements, each of which can be
   independently freed, realloc'ed etc. The elements are guaranteed to
@@ -483,104 +553,165 @@ NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_co
 } /* namespace or extern "C" */
 #include <new>
 #include <memory>
-/*! The nedalloc namespace */
+
+// Touch into existence for future platforms
+namespace std { namespace tr1 { } }
+
+/*! \defgroup C++ C++ language support
+
+Thanks to the generous support of Applied Research Associates (USA), nedalloc has extensive
+C++ language support which uses C++ metaprogramming techniques to provide a policy driven
+STL allocator class. The metaprogramming silently overrides or replaces the STL implementation
+on your system (MSVC and GCC are the two currently supported) to \b substantially improve
+the performance of STL containers by making use of nedalloc's additional features.
+
+The metaprogramming requires a new C++ compiler (> year 2008), and it will readily make use
+of a C++0x compiler where it will use rvalue referencing, variadic templates and more.
+Visual Studio 2008 or later is sufficent, as is GCC v4.4 or later.
+
+nedalloc's metaprogramming is designed to be extensible, so this page is intended for those
+wishing to customise the metaprogramming. If you simply wish to know how to use the
+nedalloc::nedallocator STL allocator, please refer to test.cpp which gives several
+examples of usage.
+*/
+
+/*! \brief The nedalloc namespace */
 namespace nedalloc {
 
+/*! \def NEDSTATIC_ASSERT(expr, msg)
+\brief Generates a static assertion if (expr)==0 at compile time.
+
+Make SURE your message contains no spaces or anything else which would make it an invalid
+variable name.
+*/
+#ifndef HAVE_CPP0XSTATICASSERT
+template<bool> struct StaticAssert;
+template<> struct StaticAssert<true>
+{
+	StaticAssert() { }
+};
+#define NEDSTATIC_ASSERT(expr, msg) \
+	nedalloc::StaticAssert<(expr)!=0> ERROR_##msg
+#else
+#define NEDSTATIC_ASSERT(expr, msg) static_assert((expr)!=0, #msg )
+#endif
+
+/*! \brief The policy namespace in which all nedallocator policies live. */
+namespace nedpolicy {
+	/*! \class empty
+	\ingroup C++
+	\brief An empty policy which does nothing.
+	*/
+	template<class Base> class empty : public Base
+	{
+	};
+}
+
+/*! \brief The implementation namespace where the internals live. */
 namespace nedallocatorI
 {
+	using namespace std;
+	using namespace tr1;
+
 	/* Roll on variadic templates is all I can say! */
-#if __cplusplus > 199711L
-	template<class... policies> class policycompositor
-		: public policies...
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+	template<class Base, template<class> class... policies> class policycompositor
 	{
+	public:
+		typedef policies<policies...> value;
 	};
 #else
-	template<int n> struct nullpolicy
+	template<class Impl,
+			template<class> class A=nedpolicy::empty, template<class> class B=nedpolicy::empty, template<class> class C=nedpolicy::empty, template<class> class D=nedpolicy::empty, template<class> class E=nedpolicy::empty,
+			template<class> class F=nedpolicy::empty, template<class> class G=nedpolicy::empty, template<class> class H=nedpolicy::empty, template<class> class I=nedpolicy::empty, template<class> class J=nedpolicy::empty
+		> class policycompositor
 	{
-		template<typename T> class policy {};
-	};
-	template<int n> class NullType {};
-	template<class A=NullType<1>, class B=NullType<2>, class C=NullType<3>, class D=NullType<4>, class E=NullType<5>,
-		class F=NullType<6>, class G=NullType<7>, class H=NullType<8>, class I=NullType<9>, class J=NullType<10>,
-		class K=NullType<11>, class L=NullType<12>, class M=NullType<13>, class N=NullType<14>, class O=NullType<15> > class policycompositor
-		: public A, public B, public C, public D, public E,
-		public F, public G, public H, public I, public J,
-		public K, public L, public M, public N, public O
-	{
+		typedef policycompositor<Impl, B, C, D, E, F, G, H, I, J> temp;
+	public:
+		typedef A<typename temp::value> value;
 	};
 #endif
+	template<class Impl> class policycompositor<Impl>
+	{
+	public:
+		typedef Impl value;
+	};
 }
 
 template<typename T,
-#if __cplusplus > 199711L
-	class... policies
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+	template<class> class... policies
 #else
-	class policy1=nedallocatorI::nullpolicy<1>,
-	class policy2=nedallocatorI::nullpolicy<2>,
-	class policy3=nedallocatorI::nullpolicy<3>,
-	class policy4=nedallocatorI::nullpolicy<4>,
-	class policy5=nedallocatorI::nullpolicy<5>
+	template<class> class policy1=nedpolicy::empty,
+	template<class> class policy2=nedpolicy::empty,
+	template<class> class policy3=nedpolicy::empty,
+	template<class> class policy4=nedpolicy::empty,
+	template<class> class policy5=nedpolicy::empty
 #endif
 > class nedallocator;
 
 namespace nedallocatorI
 {
-	template<class implementation> class baseimplementation;
+	/*! \brief The base implementation class */
+	template<class implementation> class baseimplementation
+	{
+		//NEDSTATIC_ASSERT(false, Bad_policies_specified);
+	};
 	template<typename T,
-#if __cplusplus > 199711L
-			class... policies
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+		template<class> class... policies
 #else
-			class policy1,
-			class policy2,
-			class policy3,
-			class policy4,
-			class policy5
+		template<class> class policy1,
+		template<class> class policy2,
+		template<class> class policy3,
+		template<class> class policy4,
+		template<class> class policy5
 #endif
 	> class baseimplementation<nedallocator<T,
-#if __cplusplus > 199711L
-	policies...
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+policies...
 #else
 	policy1, policy2, policy3, policy4, policy5
 #endif
 	> >
 	{
 	protected:
-		//! The most derived nedallocator implementation type
+		//! \brief The most derived nedallocator implementation type
 		typedef nedallocator<T,
-#if __cplusplus > 199711L
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
 			policies...
 #else
 			policy1, policy2, policy3, policy4, policy5
 #endif
 		> implementationType;
-		//! Returns a this for the most derived nedallocator implementation type
+		//! \brief Returns a this for the most derived nedallocator implementation type
 		implementationType *_this() { return static_cast<implementationType *>(this); }
-		//! Returns a this for the most derived nedallocator implementation type
+		//! \brief Returns a this for the most derived nedallocator implementation type
 		const implementationType *_this() const { return static_cast<const implementationType *>(this); }
-		//! Specifies the nedpool to use. Defaults to zero (the system pool).
+		//! \brief Specifies the nedpool to use. Defaults to zero (the system pool).
 		nedpool *policy_nedpool(size_t bytes) const
 		{
 			return 0;
 		}
-		//! Specifies the granularity to use. Defaults to \em bytes (no granularity).
+		//! \brief Specifies the granularity to use. Defaults to \em bytes (no granularity).
 		size_t policy_granularity(size_t bytes) const
 		{
 			return bytes;
 		}
-		//! Specifies the alignment to use. Defaults to zero (no alignment).
+		//! \brief Specifies the alignment to use. Defaults to zero (no alignment).
 		size_t policy_alignment(size_t bytes) const
 		{
 			return 0;
 		}
-		//! Specifies the flags to use. Defaults to zero (no flags).
+		//! \brief Specifies the flags to use. Defaults to zero (no flags).
 		unsigned policy_flags(size_t bytes) const
 		{
 			return 0;
 		}
-		//! Specifies what to do when the allocation fails. Defaults to throwing std::bad_alloc.
+		//! \brief Specifies what to do when the allocation fails. Defaults to throwing std::bad_alloc.
 		void policy_throwbadalloc(size_t bytes) const
 		{
-			throw std::bad_alloc("Out of memory");
+			throw std::bad_alloc();
 		}
 	public:
 		typedef T *pointer;
@@ -607,7 +738,7 @@ namespace nedallocatorI
 		baseimplementation(const baseimplementation &) { }
 		template<typename U> struct rebind {
 			typedef nedallocator<U,
-#if __cplusplus > 199711L
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
 				policies...
 #else
 				policy1, policy2, policy3, policy4, policy5
@@ -615,20 +746,26 @@ namespace nedallocatorI
 			> other;
 		};
 		template<typename U> baseimplementation(const nedallocator<U,
-#if __cplusplus > 199711L
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
 			policies...
 #else
 			policy1, policy2, policy3, policy4, policy5
 #endif
 		> &) { }
-#if __cplusplus > 199711L
+#ifdef HAVE_CPP0XRVALUEREFS
 		baseimplementation(baseimplementation &&) { }
 #endif
 
 		T *allocate(const size_t n) const {
-			size_t size = _this()->policy_granularity(n*sizeof(T));
-			void *ptr = nedpmalloc2(_this()->policy_nedpool(size), size, _this()->policy_alignment(size), _this()->policy_flags(size));
-			if(!ptr) _this()->policy_throwbadalloc(size);
+			// Leave these spelled out to aid debugging
+			const size_t t_size = sizeof(T);
+			size_t size = _this()->policy_granularity(n*t_size);
+			nedpool *pool = _this()->policy_nedpool(size);
+			size_t alignment = _this()->policy_alignment(size);
+			unsigned flags = _this()->policy_flags(size);
+			void *ptr = nedpmalloc2(pool, size, alignment, flags);
+			if(!ptr)
+				_this()->policy_throwbadalloc(size);
 			return static_cast<T *>(ptr);
 		}
 		void deallocate(T *p, const size_t n) const {
@@ -640,22 +777,28 @@ namespace nedallocatorI
 	private:
 		baseimplementation &operator=(const baseimplementation &);
 	};
+
 }
-/*! \class nedalignment
-\ingroup C++
-\brief An alignment policy setting the alignment of the allocated memory.
-*/
-template<size_t alignment> struct nedalignment
+
+namespace nedpolicy
 {
-	template<class implementation> class policy
+	/*! \class align
+	\ingroup C++
+	\brief An alignment policy setting the alignment of the allocated memory.
+	*/
+	template<size_t alignment> struct align
 	{
-	protected:
-		size_t policy_alignment(size_t bytes) const
+		template<class Base> class policy : public Base
 		{
-			return alignment;
-		}
+			template<class implementation> friend class nedallocatorI::baseimplementation;
+		protected:
+			size_t policy_alignment(size_t bytes) const
+			{
+				return alignment;
+			}
+		};
 	};
-};
+}
 
 /*! \class nedallocator
 \ingroup C++
@@ -667,47 +810,50 @@ have std::vector<Foo, nedalloc::nedallocator< std::vector<Foo> > such that
 std::vector<> will now use nedalloc as the policy specifies.
 */
 template<typename T,
-#if __cplusplus > 199711L
-	class... policies
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+	template<class> class... policies
 #else
-	class policy1,
-	class policy2,
-	class policy3,
-	class policy4,
-	class policy5
+	template<class> class policy1,
+	template<class> class policy2,
+	template<class> class policy3,
+	template<class> class policy4,
+	template<class> class policy5
 #endif
 > class nedallocator : public nedallocatorI::policycompositor<
-#if __cplusplus > 199711L
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
 	nedallocatorI::baseimplementation<nedallocator<T, policies...> >,
-	typename policies::policy<nedallocator<T, policies...> >...
+	policies...
 #else
 	nedallocatorI::baseimplementation<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-	typename policy1::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-	typename policy2::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-	typename policy3::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-	typename policy4::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-	typename policy5::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >
+	policy1, policy2, policy3, policy4, policy5
 #endif
->
+>::value
 {
-	typedef nedallocatorI::policycompositor<
-#if __cplusplus > 199711L
+	typedef typename nedallocatorI::policycompositor<
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
 		nedallocatorI::baseimplementation<nedallocator<T, policies...> >,
-		typename policies::policy<nedallocator<T, policies...> >...
+		policies...
 #else
 		nedallocatorI::baseimplementation<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-		typename policy1::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-		typename policy2::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-		typename policy3::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-		typename policy4::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-		typename policy5::policy<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >
+		policy1, policy2, policy3, policy4, policy5
 #endif
-	> Base;
+	>::value Base;
 public:
 };
 
 
 } /* namespace */
+#endif
+
+#ifdef DOXYGEN_IS_PARSING_ME
+/* Just some false defines to keep doxygen happy */
+#define USE_LOCKS 1
+#define NEDMALLOC_DEBUG DEBUG
+#define ENABLE_LARGE_PAGES undef
+#define ENABLE_FAST_HEAP_DETECTION undef
+#define REPLACE_SYSTEM_ALLOCATOR undef
+#define ENABLE_TOLERANT_NEDMALLOC undef
+#define NO_NED_NAMESPACE undef
 #endif
 
 #endif

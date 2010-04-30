@@ -92,7 +92,7 @@ ABBREVIATE_BRIEF       =
 # Doxygen will generate a detailed section even if there is only a brief
 # description.
 
-ALWAYS_DETAILED_SEC    = NO
+ALWAYS_DETAILED_SEC    = YES
 
 # If the INLINE_INHERITED_MEMB tag is set to YES, doxygen will show all
 # inherited members of a class in the documentation of that class as if those
@@ -297,7 +297,7 @@ SYMBOL_CACHE_SIZE      = 0
 # Private class members and static file members will be hidden unless
 # the EXTRACT_PRIVATE and EXTRACT_STATIC tags are set to YES
 
-EXTRACT_ALL            = NO
+EXTRACT_ALL            = YES
 
 # If the EXTRACT_PRIVATE tag is set to YES all private members of a class
 # will be included in the documentation.
@@ -855,13 +855,13 @@ CHM_FILE               = ../../nedalloc.chm
 # the HTML help compiler (hhc.exe). If non-empty doxygen will try to run
 # the HTML help compiler on the generated index.hhp.
 
-HHC_LOCATION           =
+HHC_LOCATION           = 
 
 # If the GENERATE_HTMLHELP tag is set to YES, the GENERATE_CHI flag
 # controls if a separate .chi index file is generated (YES) or that
 # it should be included in the master .chm file (NO).
 
-GENERATE_CHI           = NO
+GENERATE_CHI           = YES
 
 # If the GENERATE_HTMLHELP tag is set to YES, the CHM_INDEX_ENCODING
 # is used to encode HtmlHelp index (hhk), content (hhc) and project file
@@ -873,7 +873,7 @@ CHM_INDEX_ENCODING     =
 # controls whether a binary table of contents is generated (YES) or a
 # normal table of contents (NO) in the .chm file.
 
-BINARY_TOC             = NO
+BINARY_TOC             = YES
 
 # The TOC_EXPAND flag can be set to YES to add extra items for group members
 # to the contents of the HTML help documentation and to the tree view.
@@ -1257,7 +1257,8 @@ INCLUDE_FILE_PATTERNS  =
 # undefined via #undef or recursively expanded use the := operator
 # instead of the = operator.
 
-PREDEFINED             = __cplusplus=201100L DOXYGEN_IS_PARSING_ME
+#PREDEFINED             = __cplusplus=199711L DOXYGEN_IS_PARSING_ME
+PREDEFINED             = __cplusplus=201106L DOXYGEN_IS_PARSING_ME
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then
 # this tag can be used to specify a list of macro names that should be expanded.

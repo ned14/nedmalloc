@@ -1942,7 +1942,7 @@ static FORCEINLINE int win32munmap(void *handle, void* ptr, size_t size) {
 #define MREMAP_DEFAULT(addr, osz, nsz, mv)  MFAIL
 #endif /* MREMAP_DEFAULT */
 #ifndef DIRECT_MREMAP_DEFAULT
-#define DIRECT_MREMAP_DEFAULT(h, addr, osz, nsz, mv) MFAIL
+#define DIRECT_MREMAP_DEFAULT(h, addr, osz, nsz, mv, f2) MFAIL
 #endif /* DIRECT_MREMAP_DEFAULT */
 
 #endif /* HAVE_MMAP */
