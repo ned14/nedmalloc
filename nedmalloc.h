@@ -38,13 +38,6 @@ DEALINGS IN THE SOFTWARE.
 <a href="../../Readme.html">Please see the Readme.html</a>
 */
 
-/*! \def USE_LOCKS
-\brief Defines the threadsafety of nedalloc
-
-USE_LOCKS can be 2 if you want to define your own MLOCK_T, INITIAL_LOCK,
-ACQUIRE_LOCK, RELEASE_LOCK, TRY_LOCK, IS_LOCKED and NULL_LOCK_INITIALIZER.
-*/
-
 /*! \def NEDMALLOC_DEBUG
 \brief Defines the assertion checking performed by nedalloc
 
@@ -90,9 +83,17 @@ indicates a C++0x compiler, otherwise you'll need to set it yourself.
 
 /*! \def HAVE_CPP0XSTATICASSERT
 \ingroup C++
-\brief Enabled static assertions
+\brief Enables static assertions
 
 Define to enable the usage of static assertions. Automatically defined if __cplusplus
+indicates a C++0x compiler, otherwise you'll need to set it yourself.
+*/
+
+/*! \def HAVE_CPP0XTYPETRAITS
+\ingroup C++
+\brief Enables type traits
+
+Define to enable the usage of &lt;type_traits&gt;. Automatically defined if __cplusplus
 indicates a C++0x compiler, otherwise you'll need to set it yourself.
 */
 
@@ -103,6 +104,8 @@ indicates a C++0x compiler, otherwise you'll need to set it yourself.
 #define HAVE_CPP0XVARIADICTEMPLATES 1
 #undef HAVE_CPP0XSTATICASSERT
 #define HAVE_CPP0XSTATICASSERT 1
+#undef HAVE_CPP0XTYPETRAITS
+#define HAVE_CPP0XTYPETRAITS 1
 #endif
 
 #include <stddef.h>   /* for size_t */
@@ -290,6 +293,133 @@ extern "C" {
 
 /* These are the global functions */
 
+/*! \defgroup v2malloc The v2 malloc API
+
+For the v1.10 release which was generously sponsored by
+<a href="http://www.ara.com/" target="_blank">Applied Research Associates (USA)</a>, 
+a new general purpose allocator API was designed which is intended to remedy many 
+of the long standing problems and inefficiencies introduced by the ISO C allocator 
+API. Internally nedalloc's implementations of nedmalloc(), nedcalloc(), nedmemalign() 
+and nedrealloc() call into this API:
+
+<ul>
+	<li><code>void* malloc2(size_t bytes, size_t alignment, unsigned flags)</code></li>
+	<li><code>void* realloc2(void* mem, size_t bytes, size_t alignment, unsigned 
+	flags)</code></li>
+</ul>
+
+If nedmalloc.h is being included by C++ code, the alignment and flags parameters 
+default to zero which makes the new API identical to the old API (roll on the introduction 
+of default parameters to C!). The ability for realloc2() to take an alignment is
+<em>particularly</em> useful for extending aligned vector arrays such as SSE/AVX 
+vector arrays. Hitherto SSE/AVX vector code had to jump through all sorts of unpleasant 
+hoops to maintain alignment :(.
+
+Note that using any of these flags other than M2_ZERO_MEMORY or any alignment 
+other than zero inhibits the threadcache.
+
+Currently MREMAP support is limited to Linux and Windows. Patches implementing 
+support for other platforms are welcome.
+
+On Linux the non portable mremap() kernel function is currently used, so in fact 
+the M2_RESERVE_* options are currently ignored.
+
+On Windows, there are two different MREMAP implementations which are chosen according 
+to whether a 32 bit or a 64 bit build is being performed. The 32 bit implementation 
+is based on Win32 file mappings where it reserves the address space within the Windows 
+VM system, so you can safely specify silly reservation quantities like 2Gb per block 
+and not exhaust local process address space. Note however that on x86 this costs 
+2Kb (1Kb if PAE is off) of kernel memory per Mb reserved, and as kernel memory has 
+a hard limit of 447Mb on x86 you will find the total address space reservable in 
+the system is limited. On x64, or if you define WIN32_DIRECT_USE_FILE_MAPPINGS=0 
+on x86, a much faster implementation of using VirtualAlloc(MEM_RESERVE) to directly 
+reserve the address space is used.
+
+When using M2_RESERVE_* with realloc2(), the setting only takes effect when the 
+mmapped chunk has exceeded its reservation space and a new reservation space needs 
+to be created.
+*/
+
+#ifndef M2_FLAGS_DEFINED
+#define M2_FLAGS_DEFINED
+
+/*! \def M2_ZERO_MEMORY
+\ingroup v2malloc
+\brief Sets the contents of the allocated block (or any increase in the allocated 
+block) to zero.
+
+Note that this zeroes only the increase from what dlmalloc thinks 
+the chunk's size is, so if you realloc2() a block which wasn't allocated using 
+malloc2() using this flag then you may have garbage just before the newly extended 
+space.
+
+\li <strong>Rationale:</strong> Memory returned by the system is guaranteed to 
+be zero on most platforms, and hence dlmalloc knows when it can skip zeroing 
+memory. This improves performance.
+*/
+#define M2_ZERO_MEMORY          (1<<0)
+
+/*! \def M2_PREVENT_MOVE
+\ingroup v2malloc
+\brief Cause realloc2() to attempt to extend a block in place, but to never move 
+it.
+
+\li <strong>Rationale:</strong> C++ makes almost no use of realloc(), even for 
+contiguous arrays such as std::vector<> because most C++ objects cannot be relocated 
+in memory without a copy or rvalue construction (though some clever STL implementations 
+specialise for Plain Old Data (POD) types, and use realloc() then and only then). 
+This flag allows C++ containers to speculatively try to extend in place, thus 
+improving performance <em>especially</em> for large allocations which will use 
+mmap().
+*/
+#define M2_PREVENT_MOVE         (1<<1)
+
+/*! \def M2_ALWAYS_MMAP
+\ingroup v2malloc
+\brief Always allocate as though mmap_threshold were being exceeded.
+
+In the case of realloc2(), note that setting this bit will not necessarily mmap a chunk 
+which isn't already mmapped, but it will force a mmapped chunk if new memory 
+needs allocating.
+
+\li <strong>Rationale:</strong> If you know that an array you are allocating 
+is going to be repeatedly extended up into the hundred of kilobytes range, then 
+you can avoid the constant memory copying into larger blocks by specifying this 
+flag at the beginning along with one of the M2_RESERVE_* flags below. This can
+<strong>greatly</strong> improve performance for large arrays.
+*/
+#define M2_ALWAYS_MMAP          (1<<2)
+#define M2_RESERVED1            (1<<3)
+#define M2_RESERVED2            (1<<4)
+#define M2_RESERVED3            (1<<5)
+#define M2_RESERVED4            (1<<6)
+#define M2_RESERVED5            (1<<7)
+#define M2_RESERVE_ISMULTIPLIER (1<<15)
+/* 7 bits is given to the address reservation specifier.
+This lets you set a multiplier (bit 15 set) or a 1<< shift value.
+*/
+#define M2_RESERVE_MASK         0x00007f00
+
+/*! \def M2_RESERVE_MULT(n)
+\ingroup v2malloc
+\brief Reserve n times as much address space such that mmapped realloc2(size <= 
+n * original size) avoids memory copying and hence is much faster.
+*/
+#define M2_RESERVE_MULT(n)      (M2_RESERVE_ISMULTIPLIER|(((n)<<8)&M2_RESERVE_MASK))
+
+/*! \def M2_RESERVE_SHIFT(n)
+\ingroup v2malloc
+\brief Reserve (1<<n) bytes of address space such that mmapped realloc2(size <= 
+(1<<n)) avoids memory copying and hence is much faster.
+*/
+#define M2_RESERVE_SHIFT(n)     (((n)<<8)&M2_RESERVE_MASK)
+#define M2_FLAGS_MASK           0x0000ffff
+#define M2_CUSTOM_FLAGS_BEGIN   (1<<16)
+#define M2_CUSTOM_FLAGS_MASK    0xffff0000
+
+#endif /* M2_FLAGS_DEFINED */
+
+
 /*! \brief Gets the usable size of an allocated block.
 
 Note this will always be bigger than what was
@@ -316,9 +446,11 @@ NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedfree(void *mem) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC;
 
 #if defined(__cplusplus)
-/*! \brief Equivalent to nedpmalloc2((nedpool *) 0, size, alignment, flags) */
+/*! \ingroup v2malloc
+\brief Equivalent to nedpmalloc2((nedpool *) 0, size, alignment, flags) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
-/*! \brief Equivalent to nedprealloc2((nedpool *) 0, mem, size, alignment, flags) */
+/*! \ingroup v2malloc
+\brief Equivalent to nedprealloc2((nedpool *) 0, mem, size, alignment, flags) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
 #else
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment, unsigned flags) THROWSPEC;
@@ -553,6 +685,9 @@ NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_co
 } /* namespace or extern "C" */
 #include <new>
 #include <memory>
+#ifdef HAVE_CPP0XTYPETRAITS
+#include <type_traits>
+#endif
 
 // Touch into existence for future platforms
 namespace std { namespace tr1 { } }
@@ -561,18 +696,68 @@ namespace std { namespace tr1 { } }
 
 Thanks to the generous support of Applied Research Associates (USA), nedalloc has extensive
 C++ language support which uses C++ metaprogramming techniques to provide a policy driven
-STL allocator class. The metaprogramming silently overrides or replaces the STL implementation
+STL container reimplementor. The metaprogramming silently overrides or replaces the STL implementation
 on your system (MSVC and GCC are the two currently supported) to \b substantially improve
 the performance of STL containers by making use of nedalloc's additional features.
 
+Sounds difficult to use? Not really. Simply do this:
+\code
+using namespace nedalloc;
+typedef nedallocatorise<std::vector, unsigned int, 
+	nedpolicy::typeIsPOD<true>::policy,
+	nedpolicy::mmap<>::policy,
+	nedpolicy::reserveN<26>::policy			// 1<<26 = 64Mb. 10,000,000 * sizeof(unsigned int) = 38Mb.
+>::value myvectortype;
+myvectortype a;
+for(int n=0; n<10000000; n++)
+    a.push_back(n);
+\endcode
+
 The metaprogramming requires a new C++ compiler (> year 2008), and it will readily make use
-of a C++0x compiler where it will use rvalue referencing, variadic templates and more.
+of a C++0x compiler where it will use rvalue referencing, variadic templates, type traits and more.
 Visual Studio 2008 or later is sufficent, as is GCC v4.4 or later.
 
-nedalloc's metaprogramming is designed to be extensible, so this page is intended for those
+nedalloc's metaprogramming is designed to be extensible, so the rest of this page is intended for those
 wishing to customise the metaprogramming. If you simply wish to know how to use the
-nedalloc::nedallocator STL allocator, please refer to test.cpp which gives several
-examples of usage.
+nedalloc::nedallocator STL allocator or the nedalloc::nedallocatorise STL reimplementor, please refer
+to test.cpp which gives several examples of usage.
+
+<h2>Extending the metaprogramming:</h2>
+A nedallocator policy looks as follows:
+\code
+namespace nedpolicy {
+	template<size_t size, size_t alignment> struct sizedalign
+	{
+		template<class Base> class policy : public Base
+		{
+			template<class implementation> friend class nedallocatorI::baseimplementation;
+		protected:
+			size_t policy_alignment(size_t bytes) const
+			{
+				return (bytes < size) ? alignment : 0;
+			}
+		};
+	};
+}
+\endcode
+The policy above implements a size based alignment, so if the block being allocated is
+less than \em size then it causes \em alignment to be used, otherwise it does not align.
+The sizedalign struct is merely a template parameter encapsulator used to capture
+additional parameters, so the real policy is in fact the class policy held within in.
+If you did not need to specify any additional parameters e.g. if you were defining
+policy_nedpool(), then you would directly define a policy returning your nedpool and pass
+it directly to nedallocator<>.
+
+The primary policy functions which are intended to be overridden are listed in
+nedalloc::nedallocatorI::baseimplementation in nedmalloc.h and are prefixed by "policy_".
+However, there is absolutely no reason why the meatier functions such as
+nedalloc::nedallocatorI::baseimplementation::allocate() cannot be overriden, and indeed
+some of the policies defined in nedmalloc.h do just that.
+
+Policy composition is handled by a dedicated recursive variadic template called
+nedalloc::nedallocatorI::policycompositor. If you have \em really specialised needs, you
+can partially specialise this class to make it do all sorts of interesting things - hence
+its separation into its own class.
 */
 
 /*! \brief The nedalloc namespace */
@@ -622,11 +807,24 @@ namespace nedallocatorI
 	};
 #else
 	template<class Impl,
-			template<class> class A=nedpolicy::empty, template<class> class B=nedpolicy::empty, template<class> class C=nedpolicy::empty, template<class> class D=nedpolicy::empty, template<class> class E=nedpolicy::empty,
-			template<class> class F=nedpolicy::empty, template<class> class G=nedpolicy::empty, template<class> class H=nedpolicy::empty, template<class> class I=nedpolicy::empty, template<class> class J=nedpolicy::empty
+			template<class> class A=nedpolicy::empty,
+			template<class> class B=nedpolicy::empty,
+			template<class> class C=nedpolicy::empty,
+			template<class> class D=nedpolicy::empty,
+			template<class> class E=nedpolicy::empty,
+			template<class> class F=nedpolicy::empty,
+			template<class> class G=nedpolicy::empty,
+			template<class> class H=nedpolicy::empty,
+			template<class> class I=nedpolicy::empty,
+			template<class> class J=nedpolicy::empty,
+			template<class> class K=nedpolicy::empty,
+			template<class> class L=nedpolicy::empty,
+			template<class> class M=nedpolicy::empty,
+			template<class> class N=nedpolicy::empty,
+			template<class> class O=nedpolicy::empty
 		> class policycompositor
 	{
-		typedef policycompositor<Impl, B, C, D, E, F, G, H, I, J> temp;
+		typedef policycompositor<Impl, B, C, D, E, F, G, H, I, J, K, L, M, N, O> temp;
 	public:
 		typedef A<typename temp::value> value;
 	};
@@ -646,7 +844,17 @@ template<typename T,
 	template<class> class policy2=nedpolicy::empty,
 	template<class> class policy3=nedpolicy::empty,
 	template<class> class policy4=nedpolicy::empty,
-	template<class> class policy5=nedpolicy::empty
+	template<class> class policy5=nedpolicy::empty,
+	template<class> class policy6=nedpolicy::empty,
+	template<class> class policy7=nedpolicy::empty,
+	template<class> class policy8=nedpolicy::empty,
+	template<class> class policy9=nedpolicy::empty,
+	template<class> class policy10=nedpolicy::empty,
+	template<class> class policy11=nedpolicy::empty,
+	template<class> class policy12=nedpolicy::empty,
+	template<class> class policy13=nedpolicy::empty,
+	template<class> class policy14=nedpolicy::empty,
+	template<class> class policy15=nedpolicy::empty
 #endif
 > class nedallocator;
 
@@ -657,6 +865,7 @@ namespace nedallocatorI
 	{
 		//NEDSTATIC_ASSERT(false, Bad_policies_specified);
 	};
+	/*! \brief The base implementation class */
 	template<typename T,
 #ifdef HAVE_CPP0XVARIADICTEMPLATES
 		template<class> class... policies
@@ -665,13 +874,25 @@ namespace nedallocatorI
 		template<class> class policy2,
 		template<class> class policy3,
 		template<class> class policy4,
-		template<class> class policy5
+		template<class> class policy5,
+		template<class> class policy6,
+		template<class> class policy7,
+		template<class> class policy8,
+		template<class> class policy9,
+		template<class> class policy10,
+		template<class> class policy11,
+		template<class> class policy12,
+		template<class> class policy13,
+		template<class> class policy14,
+		template<class> class policy15
 #endif
 	> class baseimplementation<nedallocator<T,
 #ifdef HAVE_CPP0XVARIADICTEMPLATES
 policies...
 #else
-	policy1, policy2, policy3, policy4, policy5
+	policy1, policy2, policy3, policy4, policy5,
+	policy6, policy7, policy8, policy9, policy10,
+	policy11, policy12, policy13, policy14, policy15
 #endif
 	> >
 	{
@@ -681,7 +902,9 @@ policies...
 #ifdef HAVE_CPP0XVARIADICTEMPLATES
 			policies...
 #else
-			policy1, policy2, policy3, policy4, policy5
+			policy1, policy2, policy3, policy4, policy5,
+			policy6, policy7, policy8, policy9, policy10,
+			policy11, policy12, policy13, policy14, policy15
 #endif
 		> implementationType;
 		//! \brief Returns a this for the most derived nedallocator implementation type
@@ -713,6 +936,13 @@ policies...
 		{
 			throw std::bad_alloc();
 		}
+		//! \brief Specifies if the type is POD. Is std::is_pod<T>::value on C++0x compilers, otherwise false.
+		static const bool policy_typeIsPOD=
+#ifdef HAVE_CPP0XTYPETRAITS
+			is_pod<T>::value;
+#else
+			false;
+#endif
 	public:
 		typedef T *pointer;
 		typedef const T *const_pointer;
@@ -736,12 +966,17 @@ policies...
 		}
 		baseimplementation() { }
 		baseimplementation(const baseimplementation &) { }
+#ifdef HAVE_CPP0XRVALUEREFS
+		baseimplementation(baseimplementation &&) { }
+#endif
 		template<typename U> struct rebind {
 			typedef nedallocator<U,
 #ifdef HAVE_CPP0XVARIADICTEMPLATES
 				policies...
 #else
-				policy1, policy2, policy3, policy4, policy5
+				policy1, policy2, policy3, policy4, policy5,
+				policy6, policy7, policy8, policy9, policy10,
+				policy11, policy12, policy13, policy14, policy15
 #endif
 			> other;
 		};
@@ -749,12 +984,11 @@ policies...
 #ifdef HAVE_CPP0XVARIADICTEMPLATES
 			policies...
 #else
-			policy1, policy2, policy3, policy4, policy5
+			policy1, policy2, policy3, policy4, policy5,
+			policy6, policy7, policy8, policy9, policy10,
+			policy11, policy12, policy13, policy14, policy15
 #endif
 		> &) { }
-#ifdef HAVE_CPP0XRVALUEREFS
-		baseimplementation(baseimplementation &&) { }
-#endif
 
 		T *allocate(const size_t n) const {
 			// Leave these spelled out to aid debugging
@@ -782,9 +1016,28 @@ policies...
 
 namespace nedpolicy
 {
+	/*! \class granulate
+	\ingroup C++
+	\brief A policy setting the granularity of the allocated memory.
+
+	Memory is sized according to (size+granularity-1) & ~(granularity-1).
+	In other words, granularity \b must be a power of two.
+	*/
+	template<size_t granularity> struct granulate
+	{
+		template<class Base> class policy : public Base
+		{
+			template<class implementation> friend class nedallocatorI::baseimplementation;
+		protected:
+			size_t policy_granularity(size_t bytes) const
+			{
+				return (bytes+granularity-1) & ~(granularity-1);
+			}
+		};
+	};
 	/*! \class align
 	\ingroup C++
-	\brief An alignment policy setting the alignment of the allocated memory.
+	\brief A policy setting the alignment of the allocated memory.
 	*/
 	template<size_t alignment> struct align
 	{
@@ -798,6 +1051,107 @@ namespace nedpolicy
 			}
 		};
 	};
+	/*! \class zero
+	\ingroup C++
+	\brief A policy causing the zeroing of the allocated memory.
+	*/
+	template<bool dozero=true> struct zero
+	{
+		template<class Base> class policy : public Base
+		{
+			template<class implementation> friend class nedallocatorI::baseimplementation;
+		protected:
+			unsigned policy_flags(size_t bytes) const
+			{
+				return dozero ? Base::policy_flags(bytes)|M2_ZERO_MEMORY : Base::policy_flags(bytes);
+			}
+		};
+	};
+	/*! \class preventmove
+	\ingroup C++
+	\brief A policy preventing the moving of the allocated memory.
+	*/
+	template<bool doprevent=true> struct preventmove
+	{
+		template<class Base> class policy : public Base
+		{
+			template<class implementation> friend class nedallocatorI::baseimplementation;
+		protected:
+			unsigned policy_flags(size_t bytes) const
+			{
+				return doprevent ? Base::policy_flags(bytes)|M2_PREVENT_MOVE : Base::policy_flags(bytes);
+			}
+		};
+	};
+	/*! \class mmap
+	\ingroup C++
+	\brief A policy causing the mmapping of the allocated memory.
+	*/
+	template<bool dommap=true> struct mmap
+	{
+		template<class Base> class policy : public Base
+		{
+			template<class implementation> friend class nedallocatorI::baseimplementation;
+		protected:
+			unsigned policy_flags(size_t bytes) const
+			{
+				return dommap ? Base::policy_flags(bytes)|M2_ALWAYS_MMAP : Base::policy_flags(bytes);
+			}
+		};
+	};
+	/*! \class reserveX
+	\ingroup C++
+	\brief A policy causing the address reservation of X times the allocated memory.
+	*/
+	template<size_t X> struct reserveX
+	{
+		template<class Base> class policy : public Base
+		{
+			template<class implementation> friend class nedallocatorI::baseimplementation;
+		protected:
+			unsigned policy_flags(size_t bytes) const
+			{
+				return Base::policy_flags(bytes)|M2_RESERVE_MULT(X);
+			}
+		};
+	};
+	/*! \class reserveN
+	\ingroup C++
+	\brief A policy causing the address reservation of (1<<N) bytes of memory.
+	*/
+	template<size_t N> struct reserveN
+	{
+		template<class Base> class policy : public Base
+		{
+			template<class implementation> friend class nedallocatorI::baseimplementation;
+		protected:
+			unsigned policy_flags(size_t bytes) const
+			{
+				return Base::policy_flags(bytes)|M2_RESERVE_SHIFT(N);
+			}
+		};
+	};
+	/*! \class typeIsPOD
+	\ingroup C++
+	\brief A policy forcing the treatment of the type as Plain Old Data (POD)
+
+	On C++0x compilers, the &lt;type_traits&gt; is_pod<type>::value is used by default.
+	However, for earlier compilers and for types where is_pod<>::value returns false
+	even though the type actually is POD (for example, if you declare a
+	constructor you lose PODness even if the data contents are still POD), you can
+	force PODness one way or another. When treated as POD, memcpy() is used instead
+	of copy construction and realloc() is permitted to move the memory contents when
+	resizing.
+	*/
+	template<bool ispod> struct typeIsPOD
+	{
+		template<class Base> class policy : public Base
+		{
+			template<class implementation> friend class nedallocatorI::baseimplementation;
+		protected:
+			static const bool policy_typeIsPOD=ispod;
+		};
+	};
 }
 
 /*! \class nedallocator
@@ -808,6 +1162,9 @@ One of the lesser known features of STL container classes is their ability to ta
 an allocator implementation class, so where you had std::vector<Foo> you can now
 have std::vector<Foo, nedalloc::nedallocator< std::vector<Foo> > such that
 std::vector<> will now use nedalloc as the policy specifies.
+
+You <b>almost certainly</b> don't want to use this directly except in the naive
+case. See nedalloc::nedallocatorise to see what I mean.
 */
 template<typename T,
 #ifdef HAVE_CPP0XVARIADICTEMPLATES
@@ -817,15 +1174,31 @@ template<typename T,
 	template<class> class policy2,
 	template<class> class policy3,
 	template<class> class policy4,
-	template<class> class policy5
+	template<class> class policy5,
+	template<class> class policy6,
+	template<class> class policy7,
+	template<class> class policy8,
+	template<class> class policy9,
+	template<class> class policy10,
+	template<class> class policy11,
+	template<class> class policy12,
+	template<class> class policy13,
+	template<class> class policy14,
+	template<class> class policy15
 #endif
 > class nedallocator : public nedallocatorI::policycompositor<
 #ifdef HAVE_CPP0XVARIADICTEMPLATES
 	nedallocatorI::baseimplementation<nedallocator<T, policies...> >,
 	policies...
 #else
-	nedallocatorI::baseimplementation<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-	policy1, policy2, policy3, policy4, policy5
+	nedallocatorI::baseimplementation<nedallocator<T,
+	policy1, policy2, policy3, policy4, policy5,
+	policy6, policy7, policy8, policy9, policy10,
+	policy11, policy12, policy13, policy14, policy15
+	> >,
+	policy1, policy2, policy3, policy4, policy5,
+	policy6, policy7, policy8, policy9, policy10,
+	policy11, policy12, policy13, policy14, policy15
 #endif
 >::value
 {
@@ -834,26 +1207,179 @@ template<typename T,
 		nedallocatorI::baseimplementation<nedallocator<T, policies...> >,
 		policies...
 #else
-		nedallocatorI::baseimplementation<nedallocator<T, policy1, policy2, policy3, policy4, policy5> >,
-		policy1, policy2, policy3, policy4, policy5
+		nedallocatorI::baseimplementation<nedallocator<T,
+		policy1, policy2, policy3, policy4, policy5,
+		policy6, policy7, policy8, policy9, policy10,
+		policy11, policy12, policy13, policy14, policy15
+		> >,
+		policy1, policy2, policy3, policy4, policy5,
+		policy6, policy7, policy8, policy9, policy10,
+		policy11, policy12, policy13, policy14, policy15
 #endif
 	>::value Base;
 public:
+	nedallocator() { }
+	nedallocator(const nedallocator &o) : Base(o) { }
+#ifdef HAVE_CPP0XRVALUEREFS
+	nedallocator(nedallocator &&o) : Base(std::move(o)) { }
+#endif
+	/* This templated constructor and rebind() are used by MSVC's secure iterator checker.
+	I think it's best to not copy state even though it may break policies which store data. */
+	template<typename U> nedallocator(const nedallocator<U,
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+		policies...
+#else
+		policy1, policy2, policy3, policy4, policy5,
+		policy6, policy7, policy8, policy9, policy10,
+		policy11, policy12, policy13, policy14, policy15
+#endif
+	> &o) { }
+#ifdef HAVE_CPP0XRVALUEREFS
+	template<typename U> nedallocator(nedallocator<U,
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+		policies...
+#else
+		policy1, policy2, policy3, policy4, policy5,
+		policy6, policy7, policy8, policy9, policy10,
+		policy11, policy12, policy13, policy14, policy15
+#endif
+	> &&o) { }
+#endif
+
+	template<typename U> struct rebind {
+		typedef nedallocator<U,
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+			policies...
+#else
+			policy1, policy2, policy3, policy4, policy5,
+			policy6, policy7, policy8, policy9, policy10,
+			policy11, policy12, policy13, policy14, policy15
+#endif
+		> other;
+	};
 };
 
+/*! \class nedallocatorise
+\ingroup C++
+\brief Reimplements a given STL container to make full and efficient usage of nedalloc
+\param stlcontainer The STL container you wish to reimplement
+\param T The type to be contained
+\param policies... Any policies you want applied to the allocator
+
+
+This is a clever bit of C++ metaprogramming if I do say so myself! What it does
+is to specialise a STL container implementation to make full use of nedalloc's
+advanced facilities, so for example if you do:
+\code
+using namespace nedalloc;
+typedef nedallocatorise<std::vector, unsigned int, 
+	nedpolicy::typeIsPOD<true>::policy,
+	nedpolicy::mmap<>::policy,
+	nedpolicy::reserveN<26>::policy			// 1<<26 = 64Mb. 10,000,000 * sizeof(unsigned int) = 38Mb.
+>::value myvectortype;
+myvectortype a;
+for(int n=0; n<10000000; n++)
+    a.push_back(n);
+\endcode
+What happens here is that nedallocatorise reimplements the parts of
+std::vector which extend and shrink the actual memory allocation.
+Because the typeIsPOD policy is specified, it means that realloc()
+rather than realloc(M2_PREVENT_MOVE) can be used. Also, because the
+mmap and the reserveN policies are specified, std::vector immediately
+reserves 64Mb of address space and forces the immediate use of mmap().
+This allows you to push_back() a lot of data very, very quickly indeed.
+You will also find that pop_back() actually reduces the allocation now
+(most implementations don't bother ever releasing memory except when
+reaching empty or when resize() is called). When mmapped, reserve()
+is automatically held at a minimum of &lt;page size&gt;/sizeof(type) though
+larger values are respected.
+
+test.cpp has a benchmark of the speed differences you may realise, plus
+an example of usage.
+*/
+template<template<typename, class> class stlcontainer,
+	typename T,
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+	template<class> class... policies
+#else
+	template<class> class policy1=nedpolicy::empty,
+	template<class> class policy2=nedpolicy::empty,
+	template<class> class policy3=nedpolicy::empty,
+	template<class> class policy4=nedpolicy::empty,
+	template<class> class policy5=nedpolicy::empty,
+	template<class> class policy6=nedpolicy::empty,
+	template<class> class policy7=nedpolicy::empty,
+	template<class> class policy8=nedpolicy::empty,
+	template<class> class policy9=nedpolicy::empty,
+	template<class> class policy10=nedpolicy::empty,
+	template<class> class policy11=nedpolicy::empty,
+	template<class> class policy12=nedpolicy::empty,
+	template<class> class policy13=nedpolicy::empty,
+	template<class> class policy14=nedpolicy::empty,
+	template<class> class policy15=nedpolicy::empty
+#endif
+> class nedallocatorise
+{
+public:
+	//! The reimplemented STL container type
+	typedef stlcontainer<T, nedallocator<T,
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+		policies...
+#else
+		policy1, policy2, policy3, policy4, policy5,
+		policy6, policy7, policy8, policy9, policy10,
+		policy11, policy12, policy13, policy14, policy15
+#endif
+		> > value;
+};
 
 } /* namespace */
 #endif
 
+/* Some miscellaneous dlmalloc option documentation */
+
 #ifdef DOXYGEN_IS_PARSING_ME
 /* Just some false defines to keep doxygen happy */
-#define USE_LOCKS 1
+
 #define NEDMALLOC_DEBUG DEBUG
 #define ENABLE_LARGE_PAGES undef
 #define ENABLE_FAST_HEAP_DETECTION undef
 #define REPLACE_SYSTEM_ALLOCATOR undef
 #define ENABLE_TOLERANT_NEDMALLOC undef
 #define NO_NED_NAMESPACE undef
+
+/*! \def MALLOC_ALIGNMENT
+\brief Defines what alignment normally returned blocks should use. Is 16 bytes on Mac OS X, otherwise 8 bytes. */
+#define MALLOC_ALIGNMENT 8
+
+/*! \def USE_LOCKS
+\brief Defines the threadsafety of nedalloc
+
+USE_LOCKS can be 2 if you want to define your own MLOCK_T, INITIAL_LOCK,
+ACQUIRE_LOCK, RELEASE_LOCK, TRY_LOCK, IS_LOCKED and NULL_LOCK_INITIALIZER.
+*/
+#define USE_LOCKS 1
+
+/*! \def DEFAULT_GRANULARITY
+\brief Defines the granularity in which to request or free system memory.
+*/
+#define DEFAULT_GRANULARITY (2*1024*1024)
+
+/*! \def DEFAULT_TRIM_THRESHOLD
+\brief Defines how much memory must be free before returning it to the system.
+*/
+#define DEFAULT_TRIM_THRESHOLD (2*1024*1024)
+
+/*! \def DEFAULT_MMAP_THRESHOLD
+\brief Defines the threshold above which mmap() is used to perform direct allocation.
+*/
+#define DEFAULT_MMAP_THRESHOLD (256*1024)
+
+/*! \def MAX_RELEASE_CHECK_RATE
+\brief Defines how many free() ops should occur before checking how much free memory there is.
+*/
+#define MAX_RELEASE_CHECK_RATE 4095
+
 #endif
 
 #endif

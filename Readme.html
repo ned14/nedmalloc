@@ -71,7 +71,8 @@ you can see real world improvements of up to three times in normal code!</p>
 <p style="text-decoration: underline"><strong>Table of Contents: </strong></p>
 <ol style="list-style-type: upper-alpha; position: relative; margin-top: -0.5em;">
 	<li><a href="#touse">How to use</a><ul style="list-style-type: none; margin-left: 0; padding-left: 0">
-		<li>A1. <a href="#v2mallocAPI">The v2 malloc API</a></li>
+		<li>A1. <a href="#CPPAPI">The C++ API</a></li>
+		<li>A2. <a href="#v2mallocAPI">The v2 malloc C API</a></li>
 	</ul>
 	</li>
 	<li><a href="#notes">Notes</a><ul style="list-style-type: none; margin-left: 0; padding-left: 0">
@@ -93,20 +94,43 @@ normal allocator, or nedpmalloc(), nedpcalloc(), nedprealloc() and nedpfree() if
 you want to segment your memory usage into pools. Make sure that you call neddisablethreadcache() 
 for every pool you use on thread exit, and don&#39;t forget neddisablethreadcache(0) 
 for the system pool if necessary. Run and enjoy!</p>
-<p>To test, compile test.c. It will run a comparison between your system allocator 
-and nedalloc and tell you how much faster nedalloc is. It also serves as an example 
+<p>To test, compile <a href="test.c">test.c</a> (C) and <a href="test.cpp">test.cpp</a> 
+(C++). Both will run a comparison between your system allocator 
+and nedalloc and tell you how much faster nedalloc is. They also serve as examples 
 of usage.</p>
 <p>If you&#39;d like nedalloc as a Windows DLL or POSIX ELF shared object, the easiest 
 thing to do is to use <a href="http://www.scons.org/" target="_blank">scons</a> 
 which comes with a myriad of build options listed using scons -h. MSVC project files 
 are enclosed, but you&#39;ll need to manually change the defines as necessary.</p>
-<h3><a name="v2mallocAPI">A1: The v2 malloc API:</a></h3>
+<p>nedalloc comes with two new memory allocator APIs: one is for C++, and the 
+other is for C. <strong>Full documentation</strong> for all nedalloc&#39;s APIs and 
+features is provided in the enclosed <a href="nedalloc.chm">nedalloc.chm</a> 
+which is in Microsoft HTML Help format (Linux and Apple Mac OS X will happily 
+read this format too). If you don&#39;t want to use the CHM documentation,
+<a href="nedmalloc.h">nedmalloc.h</a> is extensively commented with
+<a href="http://www.doxygen.org/" target="_blank">doxygen markup</a>.</p>
+<h3><a name="CPPAPI">A1: The C++ API:</a></h3>
+<p>For the v1.10 release which was generously sponsored by
+<a href="http://www.ara.com/" target="_blank">Applied Research Associates (USA)</a>, 
+a C++ metaprogrammed STL reimplementor was designed which makes use of advanced 
+nedalloc features to remedy many of the long standing problems and 
+inefficiencies caused by C++&#39;s traditional over-fondness for copying things. 
+While its implementation is complex, usage is extremely easy - simply wrap your 
+STL container declarations with nedalloc::nedallocatorise&lt;&gt;.</p>
+<p>For those who are not using STL containers, nedalloc also provides a 
+non-moving realloc variant of operator new which permits the flags provided by 
+the v2 malloc C API below. This allows you to extend arrays in place whilst 
+avoiding costly copy constructions.</p>
+<p>Even without nedalloc&#39;s major speed improvements as a simple C style 
+allocator, the improvements to the C++ memory infrastructure alone can generate 
+huge performance gains.</p>
+<h3><a name="v2mallocAPI">A2: The v2 malloc C API:</a></h3>
 <p>For the v1.10 release which was generously sponsored by
 <a href="http://www.ara.com/" target="_blank">Applied Research Associates (USA)</a>, 
 a new general purpose allocator API was designed which is intended to remedy many 
 of the long standing problems and inefficiencies introduced by the ISO C allocator 
 API. Internally nedalloc&#39;s implementations of nedmalloc(), nedcalloc(), nedmemalign() 
-and nedrealloc() call into this API:</p>
+and nedrealloc() all call into this API:</p>
 <ul>
 	<li><code>void* malloc2(size_t bytes, size_t alignment, unsigned flags)</code></li>
 	<li><code>void* realloc2(void* mem, size_t bytes, size_t alignment, unsigned 
@@ -117,67 +141,14 @@ default to zero which makes the new API identical to the old API (roll on the in
 of default parameters to C!). The ability for realloc2() to take an alignment is
 <em>particularly</em> useful for extending aligned vector arrays such as SSE/AVX 
 vector arrays. Hitherto SSE/AVX vector code had to jump through all sorts of unpleasant 
-hoops to maintain alignment :(.</p>
-<p>Flags can be any combination of the following:</p>
-<dl>
-	<dt>M2_ZERO_MEMORY:</dt>
-	<dd>Sets the contents of the allocated block (or any increase in the allocated 
-	block) to zero. Note that this zeroes only the increase from what dlmalloc thinks 
-	the chunk&#39;s size is, so if you realloc2() a block which wasn&#39;t allocated using 
-	malloc2() using this flag then you may have garbage just before the newly extended 
-	space.
-	<p><strong>Rationale:</strong> Memory returned by the system is guaranteed to 
-	be zero on most platforms, and hence dlmalloc knows when it can skip zeroing 
-	memory. This improves performance.</p>
-	</dd>
-	<dt>M2_PREVENT_MOVE</dt>
-	<dd>Cause realloc2() to attempt to extend a block in place, but to never move 
-	it.
-	<p><strong>Rationale:</strong> C++ makes almost no use of realloc(), even for 
-	contiguous arrays such as std::vector&lt;&gt; because most C++ objects cannot be relocated 
-	in memory without a copy or rvalue construction (though some clever STL implementations 
-	specialise for Plain Old Data (POD) types, and use realloc() then and only then). 
-	This flag allows C++ containers to speculatively try to extend in place, thus 
-	improving performance <em>especially</em> for large allocations which will use 
-	mmap().</p>
-	</dd>
-	<dt>M2_ALWAYS_MMAP</dt>
-	<dd>Always allocate as though mmap_threshold were being exceeded. In the case 
-	of realloc2(), note that setting this bit will not necessarily mmap a chunk 
-	which isn&#39;t already mmapped, but it will force a mmapped chunk if new memory 
-	needs allocating.
-	<p><strong>Rationale:</strong> If you know that an array you are allocating 
-	is going to be repeatedly extended up into the hundred of kilobytes range, then 
-	you can avoid the constant memory copying into larger blocks by specifying this 
-	flag at the beginning along with one of the M2_MREMAP_* flags below. This can
-	<strong>greatly</strong> improve performance for large arrays.</p>
-	</dd>
-	<dt>M2_MREMAP_MULT(n)</dt>
-	<dd>Reserve n times as much address space such that mmapped realloc2(size &lt;= 
-	n * original size) avoids memory copying and hence is much faster.</dd>
-	<dt>M2_MREMAP_SHIFT(n)</dt>
-	<dd>Reserve (1&lt;&lt;n) bytes of address space such that mmapped realloc2(size &lt;= 
-	(1&lt;&lt;n)) avoids memory copying and hence is much faster.</dd>
-</dl>
-<p>Note that using any of these flags other than M2_ZERO_MEMORY or any alignment 
-other than zero inhibits the threadcache.</p>
-<p>Currently MREMAP support is limited to Linux and Windows. Patches implementing 
-support for other platforms are welcome.</p>
-<p>On Linux the non portable mremap() kernel function is currently used, so in fact 
-the M2_MREMAP_* options are currently ignored.</p>
-<p>On Windows, there are two different MREMAP implementations which are chosen according 
-to whether a 32 bit or a 64 bit build is being performed. The 32 bit implementation 
-is based on Win32 file mappings where it reserves the address space within the Windows 
-VM system, so you can safely specify silly reservation quantities like 2Gb per block 
-and not exhaust local process address space. Note however that on x86 this costs 
-2Kb (1Kb if PAE is off) of kernel memory per Mb reserved, and as kernel memory has 
-a hard limit of 447Mb on x86 you will find the total address space reservable in 
-the system is limited. On x64, or if you define WIN32_DIRECT_USE_FILE_MAPPINGS=0 
-on x86, a much faster implementation of using VirtualAlloc(MEM_RESERVE) to directly 
-reserve the address space is used.</p>
-<p>When using M2_MREMAP_* with realloc2(), the setting only takes effect when the 
-mmapped chunk has exceeded its reservation space and a new reservation space needs 
-to be created. </p>
+hoops to maintain alignment during array extension :(.</p>
+<p>The flags supported include the ability to zero memory, to prevent realloc2() 
+from moving a memory block, to force mmap() to be used from the beginning 
+(useful when you know an array will be repeatedly extended) and to cause 
+malloc2() to reserve additional address space after the allocation such that a 
+realloc2() up to that reserved space will be very quick. On 32 bit Windows and 
+Linux this reservation costs no address space in your process, so using it will 
+NOT cause premature address space exhaustion.</p>
 <h2><a name="notes">B. Notes:</a></h2>
 <p>If you want the very latest version of this allocator, get it from the TnFOX 
 GIT repository at either of (both are identical mirrors):</p>
@@ -296,6 +267,12 @@ realloc() tends to be significantly faster than any standard allocator.</p>
 <p>The speed test is designed to be a representative synthetic memory allocator 
 test where most allocations follow a stack pattern. It works by randomly mixing 
 allocations with frees with sizes being a random value less than 16Kb. </p>
+<p>The C++ test.cpp simply benchmarks how much difference nedalloc::nedallocatorise&lt;&gt; 
+makes to std::vector&lt;&gt; performance, particularly the performance of push_back(), 
+pop_back() and vector assignment all of which are very common in real world 
+code. As you will see, the STL - even with C++0x move constructor support - does 
+not perform anywhere close to nedalloc&#39;s version which achieves its gains by 
+simply avoiding copy and move construction completely.</p>
 <p>The real world code results are from Tn&#39;s TestIO benchmark. This is a heavily 
 multithreaded and memory intensive benchmark with a lot of branching and other stuff 
 modern processors don&#39;t like so much. As you&#39;ll note, the test doesn&#39;t show the 
@@ -306,9 +283,11 @@ the limiting factor.</p>
 I do not wish to sound presumptuous, however in an overwhelming majority of cases 
 the problem is in your application code and not nedalloc (see below for all the 
 bugs reported and fixed since 2006). Some of the largest corporations and IT deployments 
-in the world use nedalloc, and it has been very heavily stress tested on everything 
+in the world use nedalloc pre-v1.10, and pre-v1.10 has been very heavily stress tested on everything 
 from 32 processor SMP clusters right through to root DNS servers, ATM machine networks 
-and embedded operating systems requiring a very high uptime.</p>
+and embedded operating systems requiring a very high uptime. The v1.10 release 
+adds a LOT of new code and features, and hence there are quite likely a lot of 
+new bugs in the new code.</p>
 <p>In particular, just because it just happens to appear to work under the system 
 allocator does not mean that your application is not riddled with memory corruption 
 and non-ANSI usage of the API! And usually<strong> this is not your code&#39;s fault, 
@@ -320,6 +299,9 @@ for things to do before reporting a bug in nedalloc:</p>
 <ol>
 	<li>Make SURE you try nedalloc from GIT HEAD. For around six months of 2007 
 	I kept getting the same report of a bug long fixed in GIT HEAD.</li>
+	<li>Make SURE you try nedalloc v1.06. If it works in v1.06 but isn&#39;t working 
+	in nedalloc &gt;= v1.10, then it&#39;s probably a bug in the new code (please 
+	report it to me!)</li>
 	<li>Make use of nedalloc&#39;s internal debug routines. Try turning on full sanity 
 	checks by #define FULLSANITYCHECKS 1. Also make use of all the assertion checking 
 	performed when DEBUG is defined as 1. A lot of bug reports are made before running 
@@ -333,8 +315,9 @@ for things to do before reporting a bug in nedalloc:</p>
 	allocated by nedalloc will end badly, similarly passing one of nedalloc&#39;s blocks 
 	to another allocator will likely also end badly. I have inserted as many assertion 
 	and debug checks for this possibility as I can think of (further suggestions 
-	are welcome), but no system can ever be watertight. If you&#39;re using C++, I would 
-	use its strong template type system to have the compiler guarantee membership 
+	are welcome), but no system can ever be watertight. If you&#39;re using C++, 
+	make use of the C++ nedallocatorise API provided or else 
+	use some form of strong template type system to have the compiler guarantee membership 
 	of a memory pointer - see <a href="http://www.boost.org/" target="_blank">the 
 	Boost libraries</a>, or indeed
 	<a href="http://www.nedprod.com/TnFOX/" target="_blank">my own TnFOX portability 
@@ -388,8 +371,13 @@ now tends to be worth it in the long run.</p>
 	64 bit.</li>
 	<li><span class="gitcommit">[nedmalloc_fast_realloc 26ff9a7]</span> Added the 
 	malloc2() interface to nedalloc.</li>
-	<li><span class="gitcommit">[nedmalloc_fast_realloc xxxxxxx]</span> Rewrote 
+	<li><span class="gitcommit">[nedmalloc_fast_realloc 5bc5d97]</span> Rewrote 
 	Readme.txt to become Readme.html which makes it much clearer to read.</li>
+	<li><span class="gitcommit">[nedmalloc_fast_realloc 2efa595]</span> Added 
+	doxygen markup to nedmalloc.h and a first go at a policy driven STL 
+	allocator class.</li>
+	<li><span class="gitcommit">[nedmalloc_fast_realloc d851bde]</span> Added a 
+	CHM documenting the nedalloc API.</li>
 </ul>
 <h3>v1.06 beta 2 21st March 2010:</h3>
 <ul>
