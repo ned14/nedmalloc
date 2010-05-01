@@ -689,6 +689,9 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
   specified by M2_CUSTOM_FLAGS_MASK.
 */
 
+#ifndef M2_FLAGS_DEFINED
+#define M2_FLAGS_DEFINED
+
 #define M2_ZERO_MEMORY          (1<<0)
 #define M2_PREVENT_MOVE         (1<<1)
 #define M2_ALWAYS_MMAP          (1<<2)
@@ -696,16 +699,19 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #define M2_RESERVED2            (1<<4)
 #define M2_RESERVED3            (1<<5)
 #define M2_RESERVED4            (1<<6)
-#define M2_MREMAP_ISMULTIPLIER  (1<<7)
-/* 8 bits is given to the mremap address reservation specifier.
-This lets you set a multiplier (bit 7 set) or a 1<< shift value.
+#define M2_RESERVED5            (1<<7)
+#define M2_RESERVE_ISMULTIPLIER (1<<15)
+/* 7 bits is given to the address reservation specifier.
+This lets you set a multiplier (bit 15 set) or a 1<< shift value.
 */
-#define M2_MREMAP_MASK          0x0000ff00
-#define M2_MREMAP_MULT(n)       (M2_MREMAP_ISMULTIPLIER|(((n)<<8)&M2_MREMAP_MASK))
-#define M2_MREMAP_SHIFT(n)      (((n)<<8)&M2_MREMAP_MASK)
+#define M2_RESERVE_MASK         0x00007f00
+#define M2_RESERVE_MULT(n)      (M2_RESERVE_ISMULTIPLIER|(((n)<<8)&M2_RESERVE_MASK))
+#define M2_RESERVE_SHIFT(n)     (((n)<<8)&M2_RESERVE_MASK)
 #define M2_FLAGS_MASK           0x0000ffff
 #define M2_CUSTOM_FLAGS_BEGIN   (1<<16)
 #define M2_CUSTOM_FLAGS_MASK    0xffff0000
+
+#endif /* M2_FLAGS_DEFINED */
 
 /*
   mallopt tuning options.  SVID/XPG defines four standard parameter
@@ -1272,17 +1278,17 @@ void** mspace_independent_comalloc(mspace msp, size_t n_elements,
   functionality. Setting alignment to a non-zero value is
   identical to using mspace_memalign(). Flags may be set to:
 
-  * M2_ZERO_MEMORY:     Sets the contents of the allocated chunk to
-                        zero.
-  * M2_ALWAYS_MMAP:     Always allocate as though mmap_threshold
-                        were being exceeded. This is useful for large
-                        arrays which frequently extend.
-  * M2_MREMAP_MULT(n):  Reserve n times as much address space such
-                        that mmapped realloc() is much faster.
-  * M2_MREMAP_SHIFT(n): Reserve (1<<n) bytes of address space such
-                        that mmapped realloc() is much faster.
+  * M2_ZERO_MEMORY:      Sets the contents of the allocated chunk to
+                         zero.
+  * M2_ALWAYS_MMAP:      Always allocate as though mmap_threshold
+                         were being exceeded. This is useful for large
+                         arrays which frequently extend.
+  * M2_RESERVE_MULT(n):  Reserve n times as much address space such
+                         that mmapped realloc() is much faster.
+  * M2_RESERVE_SHIFT(n): Reserve (1<<n) bytes of address space such
+                         that mmapped realloc() is much faster.
 
-  Note when setting MREMAP sizes that on some platforms (e.g. Windows)
+  Note when setting RESERVE sizes that on some platforms (e.g. Windows)
   page tables are constructed for the reservation size. On x86/x64
   Windows this costs 2Kb of kernel memory per Mb reserved, and as on
   x86 kernel memory is not abundant you should not be excessive.
@@ -1294,30 +1300,30 @@ void* mspace_malloc2(mspace msp, size_t bytes, size_t alignment, unsigned flags)
   functionality. Setting alignment to a non-zero value is
   identical to using mspace_memalign(). Flags may be set to:
 
-  * M2_ZERO_MEMORY:     Sets any increase in the allocated chunk to
-                        zero. Note that this zeroes only the increase
-                        from what dlmalloc thinks the chunk's size is,
-                        so if you didn't use this flag when allocating
-                        with malloc2 (which zeroes up to chunk size)
-                        then you may have garbage just before the new
-                        space.
-  * M2_PREVENT_MOVE:    Prevent moves in realloc2() which is very
-                        useful for C++ container objects.
-  * M2_ALWAYS_MMAP:     Always allocate as though mmap_threshold
-                        were being exceeded. Note that setting this
-                        bit will not necessarily mmap a chunk which
-                        isn't already mmapped, but it will force a
-                        mmapped chunk if new memory needs allocating.
-  * M2_MREMAP_MULT(n):  Reserve n times as much address space such
-                        that mmapped realloc() is much faster.
-  * M2_MREMAP_SHIFT(n): Reserve (1<<n) bytes of address space such
-                        that mmapped realloc() is much faster.
+  * M2_ZERO_MEMORY:      Sets any increase in the allocated chunk to
+                         zero. Note that this zeroes only the increase
+                         from what dlmalloc thinks the chunk's size is,
+                         so if you didn't use this flag when allocating
+                         with malloc2 (which zeroes up to chunk size)
+                         then you may have garbage just before the new
+                         space.
+  * M2_PREVENT_MOVE:     Prevent moves in realloc2() which is very
+                         useful for C++ container objects.
+  * M2_ALWAYS_MMAP:      Always allocate as though mmap_threshold
+                         were being exceeded. Note that setting this
+                         bit will not necessarily mmap a chunk which
+                         isn't already mmapped, but it will force a
+                         mmapped chunk if new memory needs allocating.
+  * M2_RESERVE_MULT(n):  Reserve n times as much address space such
+                         that mmapped realloc() is much faster.
+  * M2_RESERVE_SHIFT(n): Reserve (1<<n) bytes of address space such
+                         that mmapped realloc() is much faster.
 
-  Note when setting MREMAP sizes that on some platforms (e.g. Windows)
+  Note when setting RESERVE sizes that on some platforms (e.g. Windows)
   page tables are constructed for the reservation size. On x86/x64
   Windows this costs 2Kb of kernel memory per Mb reserved, and as on
   x86 kernel memory is not abundant you should not be excessive.
-  With regard to M2_MREMAP_*, these only take effect when the
+  With regard to M2_RESERVE_*, these only take effect when the
   mmapped chunk has exceeded its reservation space and a new
   reservation space needs to be created.
 */
@@ -1770,11 +1776,11 @@ unresizeable and the other which is resizeable. The resizeable
 method is slower to allocate and free, but is much quicker to
 reallocate. Benchmarking shows that the crossover is at around
 512Kb-1Mb, so if you are reallocating blocks 1Mb or above then you
-ought to specify one of the M2_MREMAP_* flags which can specify
+ought to specify one of the M2_RESERVE_* flags which can specify
 a multiple of the allocation size or a fixed two power size.
 
 The mremap() Linux call is then effectively emulated by
-reserving the address space specified by M2_MREMAP_* and committing
+reserving the address space specified by M2_RESERVE_* and committing
 or decommitting memory as the block is resized. If the block
 exceeds its reservation size, the mremap() emulation fails and
 dlmalloc will allocate a new block, copy its contents and delete
@@ -1802,10 +1808,10 @@ we turn it on on 32 bit and disable it on 64 bit.
 
 static FORCEINLINE void* win32direct_mmap(void **handle, size_t size, unsigned flags) {
   void* ptr = 0;
-  unsigned mremapvalue = (flags & M2_MREMAP_MASK)>>8;
+  unsigned mremapvalue = (flags & M2_RESERVE_MASK)>>8;
 #if 0
   mremapvalue=4;
-  flags|=M2_MREMAP_ISMULTIPLIER;
+  flags|=M2_RESERVE_ISMULTIPLIER;
 #endif
 #if 0
   mremapvalue=22;/*4Mb*/
@@ -1814,7 +1820,7 @@ static FORCEINLINE void* win32direct_mmap(void **handle, size_t size, unsigned f
     ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_TOP_DOWN|MEM_COMMIT, PAGE_READWRITE);
   }
   else {
-    size_t reservesize = (flags & M2_MREMAP_ISMULTIPLIER) ? size*mremapvalue : SIZE_T_ONE<<mremapvalue;
+    size_t reservesize = (flags & M2_RESERVE_ISMULTIPLIER) ? size*mremapvalue : SIZE_T_ONE<<mremapvalue;
 #if WIN32_DIRECT_USE_FILE_MAPPINGS
     HANDLE fmh;
     if (reservesize < size)
@@ -1857,7 +1863,7 @@ static FORCEINLINE void* win32direct_mmap(void **handle, size_t size, unsigned f
 static FORCEINLINE void* win32direct_mremap(void **handle, void *ptr, size_t oldsize, size_t newsize, int flags, unsigned flags2) {
   void* newptr = 0;
   if (!*handle)
-    return MFAIL; /* We only resize file mappings reserved with M2_MREMAP_* */
+    return MFAIL; /* We only resize file mappings reserved with M2_RESERVE_* */
   if (newsize == oldsize)
     return ptr;
   {
@@ -4133,7 +4139,7 @@ static mchunkptr mmap_resize(mstate m, mchunkptr oldp, size_t nb, unsigned flags
     size_t newmmsize = mmap_align(nb + SEVEN_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
     char* mm = (char*)oldp - offset;
     void* mmaph = *(void**)mm;
-    char* cp = (char*)CALL_DIRECT_MREMAP(&mmaph, mm, oldmmsize, newmmsize, MREMAP_MAYMOVE, flags);
+	char* cp = (char*)CALL_DIRECT_MREMAP(&mmaph, mm, oldmmsize, newmmsize, (flags & M2_PREVENT_MOVE) ? 0 : MREMAP_MAYMOVE, flags);
     if (cp != CMFAIL) {
       mchunkptr newp = (mchunkptr)(cp + offset);
       size_t psize = newmmsize - offset - MMAP_FOOT_PAD;
