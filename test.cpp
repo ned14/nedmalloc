@@ -80,6 +80,7 @@ SSEVectorType
 		} ints;
 	} data;
 	SSEVectorType() { }
+	SSEVectorType(int a, int b, int c, int d) { data.ints.i[0]=a; data.ints.i[1]=b; data.ints.i[2]=c; data.ints.i[3]=d; }
 	SSEVectorType(const SSEVectorType &) { /* do nothing */}
 #ifdef HAVE_CPP0XRVALUEREFS
 private:
@@ -180,6 +181,7 @@ int main(void)
 	STL collection class a nedallocator of the same type */
 	vector<int, nedallocator<int> > anyvector1;
 
+
 	/* What if we are allocating SSE/AVX vectors and we
 	need the array always allocated on a 16 byte boundary? */
 	printf("\nUninitialised (may contain random garbage):\n");
@@ -205,6 +207,23 @@ int main(void)
 	SSEvector2Type SSEvector2(5);
 	for(SSEvector2Type::const_iterator it=SSEvector2.begin(); it!=SSEvector2.end(); ++it)
 		it->checkaddr();
+
+
+	/* What if you just want to allocate one of or a fixed sized
+	array of some type? Sadly we can't use operator new because
+	the C++ spec only allows one global operator delete, so
+	instead we have New<type>(args...).
+
+	<rant mode>THIS IS HOW operator new SHOULD HAVE BEEN
+	IMPLEMENTED IN THE FIRST GOD DAMN PLACE!!!</rant mode>
+	*/
+	SSEVectorType *foo1=New<SSEVectorType>(4, 5, 6, 7);
+	Delete(foo1);
+
+	/* You needn't use nedallocator<> if you don't want, you
+	can use ANY STL allocator implementation */
+	SSEVectorType *foo2=New<SSEVectorType, std::allocator<SSEVectorType> >(4, 5, 6, 7);
+	Delete<std::allocator<SSEVectorType> >(foo2);
 
 
 

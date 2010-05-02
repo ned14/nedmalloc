@@ -1131,6 +1131,36 @@ namespace nedpolicy
 			}
 		};
 	};
+	/*! \class badalloc
+	\ingroup C++
+	\brief A policy specifying what to throw when an allocation failure occurs.
+
+	A type specialisation exists for badalloc<void> which is equivalent to new(nothrow)
+	i.e. return zero and don't throw anything.
+	*/
+	template<typename T> struct badalloc
+	{
+		template<class Base> class policy : public Base
+		{
+			template<class implementation> friend class nedallocatorI::baseimplementation;
+		protected:
+			void policy_throwbadalloc(size_t bytes) const
+			{
+				throw T();
+			}
+		};
+	};
+	template<> struct badalloc<void>
+	{
+		template<class Base> class policy : public Base
+		{
+			template<class implementation> friend class nedallocatorI::baseimplementation;
+		protected:
+			void policy_throwbadalloc(size_t bytes) const
+			{
+			}
+		};
+	};
 	/*! \class typeIsPOD
 	\ingroup C++
 	\brief A policy forcing the treatment of the type as Plain Old Data (POD)
@@ -1258,6 +1288,183 @@ public:
 		> other;
 	};
 };
+
+namespace nedallocatorI {
+	// Holds a static allocator instance shared by anything allocating from allocator
+	template<class allocator> struct StaticAllocator
+	{
+		static allocator &get()
+		{
+			static allocator a;
+			return a;
+		}
+	};
+	// RAII holder for a Newed object
+	template<typename T, class allocator> struct PtrHolder
+	{
+		T *mem;
+		PtrHolder(T *_mem) : mem(_mem) { }
+		~PtrHolder()
+		{
+			if(mem)
+			{
+				allocator &a=nedallocatorI::StaticAllocator<allocator>::get();
+				a.deallocate(mem, sizeof(T));
+				mem=0;
+			}
+		}
+		T *release() { T *ret=mem; mem=0; return ret; }
+		T *operator *() { return mem; }
+		const T *operator *() const { return mem; }
+	};
+	// Lazy arrayed new implementation
+	template<typename T, class allocator> class NewedObjectArray
+	{
+	};
+}
+/*! \brief Allocates the memory for an instance of object \em T and constructs it.
+
+If an exception is thrown during construction, the memory is freed before
+rethrowing the exception.
+
+Usage is very simple:
+\code
+	SSEVectorType *foo1=New<SSEVectorType>(4, 5, 6, 7);
+\endcode
+*/
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+template<typename T, class allocator=nedallocator<T>, typename... Parameters> inline T *New(const Parameters&... parameters)
+#else
+template<typename T, class allocator> inline T *New()
+#endif
+{
+	allocator &a=nedallocatorI::StaticAllocator<allocator>::get();
+	nedallocatorI::PtrHolder<T, allocator> ret(a.allocate(sizeof(T)));
+	if(*ret)
+	{
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+		new((void *) *ret) T(parameters...);
+#else
+		new((void *) *ret) T;
+#endif
+	}
+	return ret.release();
+}
+#ifndef HAVE_CPP0XVARIADICTEMPLATES
+// Extremely annoying not to have default template arguments for functions pre-C++0x
+template<typename T> inline T *New()
+{
+	return New<T, nedallocator<T> >();
+}
+// Also, it's painful to replicate function overloads :(
+#define NEDMALLOC_NEWIMPL \
+template<typename T, class allocator, NEDMALLOC_NEWIMPLTYPES> inline T *New(NEDMALLOC_NEWIMPLPARSDEFS) \
+{ \
+	allocator &a=nedallocatorI::StaticAllocator<allocator>::get(); \
+	nedallocatorI::PtrHolder<T, allocator> ret(a.allocate(sizeof(T))); \
+	if(*ret) \
+	{ \
+		new((void *) *ret) T(NEDMALLOC_NEWIMPLPARS); \
+	} \
+	return ret.release(); \
+} \
+template<typename T, NEDMALLOC_NEWIMPLTYPES> inline T *New(NEDMALLOC_NEWIMPLPARSDEFS)\
+{ \
+	return New<T, nedallocator<T> >(NEDMALLOC_NEWIMPLPARS); \
+}
+#define NEDMALLOC_NEWIMPLTYPES typename P1
+#define NEDMALLOC_NEWIMPLPARSDEFS const P1 &p1
+#define NEDMALLOC_NEWIMPLPARS p1
+NEDMALLOC_NEWIMPL
+#undef NEDMALLOC_NEWIMPLTYPES
+#undef NEDMALLOC_NEWIMPLPARSDEFS
+#undef NEDMALLOC_NEWIMPLPARS
+
+#define NEDMALLOC_NEWIMPLTYPES typename P1, typename P2
+#define NEDMALLOC_NEWIMPLPARSDEFS const P1 &p1, const P2 &p2
+#define NEDMALLOC_NEWIMPLPARS p1, p2
+NEDMALLOC_NEWIMPL
+#undef NEDMALLOC_NEWIMPLTYPES
+#undef NEDMALLOC_NEWIMPLPARSDEFS
+#undef NEDMALLOC_NEWIMPLPARS
+
+#define NEDMALLOC_NEWIMPLTYPES typename P1, typename P2, typename P3
+#define NEDMALLOC_NEWIMPLPARSDEFS const P1 &p1, const P2 &p2, const P3 &p3
+#define NEDMALLOC_NEWIMPLPARS p1, p2, p3
+NEDMALLOC_NEWIMPL
+#undef NEDMALLOC_NEWIMPLTYPES
+#undef NEDMALLOC_NEWIMPLPARSDEFS
+#undef NEDMALLOC_NEWIMPLPARS
+
+#define NEDMALLOC_NEWIMPLTYPES typename P1, typename P2, typename P3, typename P4
+#define NEDMALLOC_NEWIMPLPARSDEFS const P1 &p1, const P2 &p2, const P3 &p3, const P4 &p4
+#define NEDMALLOC_NEWIMPLPARS p1, p2, p3, p4
+NEDMALLOC_NEWIMPL
+#undef NEDMALLOC_NEWIMPLTYPES
+#undef NEDMALLOC_NEWIMPLPARSDEFS
+#undef NEDMALLOC_NEWIMPLPARS
+
+#define NEDMALLOC_NEWIMPLTYPES typename P1, typename P2, typename P3, typename P4, typename P5
+#define NEDMALLOC_NEWIMPLPARSDEFS const P1 &p1, const P2 &p2, const P3 &p3, const P4 &p4, const P5 &p5
+#define NEDMALLOC_NEWIMPLPARS p1, p2, p3, p4, p5
+NEDMALLOC_NEWIMPL
+#undef NEDMALLOC_NEWIMPLTYPES
+#undef NEDMALLOC_NEWIMPLPARSDEFS
+#undef NEDMALLOC_NEWIMPLPARS
+
+#undef NEDMALLOC_NEWIMPL
+#endif
+
+/*! \brief Destructs an instance of object T, and releases the memory used to store it.
+*/
+template<class allocator, typename T> inline void Delete(const T *_obj)
+{
+	T *obj=const_cast<T *>(_obj);
+	allocator &a=nedallocatorI::StaticAllocator<allocator>::get();
+	operator delete(obj);
+	a.deallocate(obj, sizeof(T));
+}
+template<typename T> inline void Delete(const T *obj) { Delete<nedallocator<T> >(obj); }
+
+/*! \brief Allocates the memory for \em no instances of object \em T and constructs an
+array of them.
+
+If an exception is thrown during construction, the already constructed
+objects are destructed and the memory is freed before rethrowing the exception.
+*/
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+template<typename T, class allocator=nedallocator<T>, typename... Parameters> inline nedallocatorI::NewedObjectArray<T, allocator> NewA(const Parameters&... parameters)
+#else
+template<typename T, class allocator> inline nedallocatorI::NewedObjectArray<T, allocator> NewA()
+#endif
+{
+	allocator &a=nedallocatorI::StaticAllocator<allocator>::get();
+	//size_t toallocate=no*sizeof(T);
+	// To be finished later
+}
+
+/*! \brief Resizes the previously constructed array of objects \em T.
+
+If \em newsize is larger than its existing size, the memory allocation is extended
+and new object instances are constructed. If an exception is thrown during one of
+the constructions, the newly constructed objects are destructed and the memory
+allocation is returned to its previous value.
+
+If on the other hand \em newsize is smaller than its existing size, the surplus
+object instances are destructed and the memory allocation is reduced. If an exception
+is thrown during one of the destructions, the memory allocation is reduced only as
+far as the object whose destructor threw an exception.
+*/
+#ifdef HAVE_CPP0XVARIADICTEMPLATES
+template<typename T, class allocator=nedallocator<T>, typename... Parameters> inline nedallocatorI::NewedObjectArray<T, allocator> ResizeA(T *array, size_t newsize, const Parameters&... parameters)
+#else
+template<typename T, class allocator> inline nedallocatorI::NewedObjectArray<T, allocator> ResizeA(T *array, size_t newsize)
+#endif
+{
+	allocator &a=nedallocatorI::StaticAllocator<allocator>::get();
+	//size_t toallocate=no*sizeof(T);
+	// To be finished later
+}
 
 /*! \class nedallocatorise
 \ingroup C++
