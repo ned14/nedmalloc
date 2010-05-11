@@ -177,75 +177,78 @@ int main(void)
 	}
 #endif
 
-	/* This is the classic usage scenario: simply give the
-	STL collection class a nedallocator of the same type */
-	vector<int, nedallocator<int> > anyvector1;
+	{
+		/* This is the classic usage scenario: simply give the
+		STL collection class a nedallocator of the same type */
+		vector<int, nedallocator<int> > anyvector1;
 
 
-	/* What if we are allocating SSE/AVX vectors and we
-	need the array always allocated on a 16 byte boundary? */
-	printf("\nUninitialised (may contain random garbage):\n");
-	vector<SSEVectorType, nedallocator<SSEVectorType, nedpolicy::align<16>::policy > > SSEvector1(5);
-	for(vector<SSEVectorType, nedallocator<SSEVectorType, nedpolicy::align<16>::policy > >::const_iterator it=SSEvector1.begin(); it!=SSEvector1.end(); ++it)
-		it->checkaddr();
+		/* What if we are allocating SSE/AVX vectors and we
+		need the array always allocated on a 16 byte boundary? */
+		printf("\nUninitialised (may contain random garbage):\n");
+		vector<SSEVectorType, nedallocator<SSEVectorType, nedpolicy::align<16>::policy > > SSEvector1(5);
+		for(vector<SSEVectorType, nedallocator<SSEVectorType, nedpolicy::align<16>::policy > >::const_iterator it=SSEvector1.begin(); it!=SSEvector1.end(); ++it)
+			it->checkaddr();
 
-	/* You can combine an arbitrary number of policies, so
-	the following works as expected. Remember that policies
-	are weakest to the right and strongest to the left, so
-	leftmost policies always override rightmost policies.
-	
-	SSEVectorType doesn't initialise nor copy construct its
-	contents in order to make it fast to copy and move around,
-	but this means that on first instantiation it contains
-	random data. Setting the nedpolicy::zero::policy fixes this. */
-	printf("\nInitialised to zero:\n");
-	typedef vector<SSEVectorType, nedallocator<SSEVectorType,
-		nedpolicy::align<16>::policy,
-		nedpolicy::zero<>::policy,
-		nedpolicy::typeIsPOD<true>::policy
-	> > SSEvector2Type;
-	SSEvector2Type SSEvector2(5);
-	for(SSEvector2Type::const_iterator it=SSEvector2.begin(); it!=SSEvector2.end(); ++it)
-		it->checkaddr();
-
-
-	/* What if you just want to allocate one of or a fixed sized
-	array of some type? Sadly we can't use operator new because
-	the C++ spec only allows one global operator delete, so
-	instead we have New<type>(args...).
-
-	<rant mode>THIS IS HOW operator new SHOULD HAVE BEEN
-	IMPLEMENTED IN THE FIRST GOD DAMN PLACE!!!</rant mode>
-	*/
-	SSEVectorType *foo1=New<SSEVectorType>(4, 5, 6, 7);
-	Delete(foo1);
-
-	/* You needn't use nedallocator<> if you don't want, you
-	can use ANY STL allocator implementation */
-	SSEVectorType *foo2=New<SSEVectorType, std::allocator<SSEVectorType> >(4, 5, 6, 7);
-	Delete<std::allocator<SSEVectorType> >(foo2);
+		/* You can combine an arbitrary number of policies, so
+		the following works as expected. Remember that policies
+		are weakest to the right and strongest to the left, so
+		leftmost policies always override rightmost policies.
+		
+		SSEVectorType doesn't initialise nor copy construct its
+		contents in order to make it fast to copy and move around,
+		but this means that on first instantiation it contains
+		random data. Setting the nedpolicy::zero::policy fixes this. */
+		printf("\nInitialised to zero:\n");
+		typedef vector<SSEVectorType, nedallocator<SSEVectorType,
+			nedpolicy::align<16>::policy,
+			nedpolicy::zero<>::policy,
+			nedpolicy::typeIsPOD<true>::policy
+		> > SSEvector2Type;
+		SSEvector2Type SSEvector2(5);
+		for(SSEvector2Type::const_iterator it=SSEvector2.begin(); it!=SSEvector2.end(); ++it)
+			it->checkaddr();
 
 
+		/* What if you just want to allocate one of or a fixed sized
+		array of some type? Sadly we can't use operator new because
+		the C++ spec only allows one global operator delete, so
+		instead we have New<type>(args...).
 
-	/* Here comes the real magic! Let us try comparing the
-	speeds of various std::vector<> implementations using
-	the UIntish type, an unsigned integer which pretends
-	not to be POD */
-	printf("\nSpeed test:\n");
-	test<vector<unsigned int> >("vector<unsigned int>");
-	test<vector<UIntish> >("vector<UIntish>");
-	test<nedallocatorise<vector, UIntish,
-		nedpolicy::typeIsPOD<true>::policy,
-		nedpolicy::mmap<>::policy,
-		nedpolicy::reserveN<26>::policy			// 1<<26 = 64Mb. 10,000,000 * sizeof(unsigned int) = 38Mb.
-	>::value>("nedallocatorise<vector, UIntish, nedpolicy::typeIsPOD<true>>");
+		<rant mode>THIS IS HOW operator new SHOULD HAVE BEEN
+		IMPLEMENTED IN THE FIRST GOD DAMN PLACE!!!</rant mode>
+		*/
+		SSEVectorType *foo1=New<SSEVectorType>(4, 5, 6, 7);
+		Delete(foo1);
 
-	printf("\nPress a key to trim\n");
-	getchar();
-	nedmalloc_trim(0);
+		/* You needn't use nedallocator<> if you don't want, you
+		can use ANY STL allocator implementation */
+		SSEVectorType *foo2=New<SSEVectorType, std::allocator<SSEVectorType> >(4, 5, 6, 7);
+		Delete<std::allocator<SSEVectorType> >(foo2);
+
+
+
+		/* Here comes the real magic! Let us try comparing the
+		speeds of various std::vector<> implementations using
+		the UIntish type, an unsigned integer which pretends
+		not to be POD */
+		printf("\nSpeed test:\n");
+		test<vector<unsigned int> >("vector<unsigned int>");
+		test<vector<UIntish> >("vector<UIntish>");
+		test<nedallocatorise<vector, UIntish,
+			nedpolicy::typeIsPOD<true>::policy,
+			nedpolicy::mmap<>::policy,
+			nedpolicy::reserveN<26>::policy			// 1<<26 = 64Mb. 10,000,000 * sizeof(unsigned int) = 38Mb.
+		>::value>("nedallocatorise<vector, UIntish, nedpolicy::typeIsPOD<true>>");
+
+		printf("\nPress a key to trim\n");
+		getchar();
+		nedmalloc_trim(0);
 #ifdef _MSC_VER
-	printf("\nPress a key to end\n");
-	getchar();
+		printf("\nPress a key to end\n");
+		getchar();
 #endif
+	}
+	neddestroysyspool();
 	return 0;
 }

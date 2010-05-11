@@ -1421,7 +1421,7 @@ template<class allocator, typename T> inline void Delete(const T *_obj)
 {
 	T *obj=const_cast<T *>(_obj);
 	allocator &a=nedallocatorI::StaticAllocator<allocator>::get();
-	operator delete(obj);
+	obj->~T();
 	a.deallocate(obj, sizeof(T));
 }
 template<typename T> inline void Delete(const T *obj) { Delete<nedallocator<T> >(obj); }

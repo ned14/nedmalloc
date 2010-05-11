@@ -2077,11 +2077,12 @@ struct pthread_mlock_t {
 static MLOCK_T malloc_global_mutex = { 0, "", 0, 0};
 
 static FORCEINLINE int pthread_acquire_lock (MLOCK_T *sl) {
+  pthread_t mythreadid = CURRENT_THREAD;
   int spins = 0;
   volatile unsigned int* lp = &sl->l;
   for (;;) {
     if (*lp != 0) {
-      if (sl->threadid == CURRENT_THREAD) {
+      if (sl->threadid == mythreadid) {
         ++sl->c;
         return 0;
       }
@@ -2097,7 +2098,7 @@ static FORCEINLINE int pthread_acquire_lock (MLOCK_T *sl) {
                              : "memory", "cc");
       if (!ret) {
         assert(!sl->threadid);
-        sl->threadid = CURRENT_THREAD;
+        sl->threadid = mythreadid;
         sl->c = 1;
         return 0;
       }
@@ -2132,9 +2133,10 @@ static FORCEINLINE void pthread_release_lock (MLOCK_T *sl) {
 }
 
 static FORCEINLINE int pthread_try_lock (MLOCK_T *sl) {
+  pthread_t mythreadid = CURRENT_THREAD;
   volatile unsigned int* lp = &sl->l;
   if (*lp != 0) {
-    if (sl->threadid == CURRENT_THREAD) {
+    if (sl->threadid == mythreadid) {
       ++sl->c;
       return 1;
     }
@@ -2149,7 +2151,7 @@ static FORCEINLINE int pthread_try_lock (MLOCK_T *sl) {
                            : "memory", "cc");
     if (!ret) {
       assert(!sl->threadid);
-      sl->threadid = CURRENT_THREAD;
+      sl->threadid = mythreadid;
       sl->c = 1;
       return 1;
     }
@@ -2178,10 +2180,11 @@ struct win32_mlock_t {
 static MLOCK_T malloc_global_mutex = {0, "", 0, 0};
 
 static FORCEINLINE int win32_acquire_lock (MLOCK_T *sl) {
+  long mythreadid = CURRENT_THREAD;
   int spins = 0;
   for (;;) {
     if (sl->l != 0) {
-      if (sl->threadid == CURRENT_THREAD) {
+      if (sl->threadid == mythreadid) {
         ++sl->c;
         return 0;
       }
@@ -2189,7 +2192,7 @@ static FORCEINLINE int win32_acquire_lock (MLOCK_T *sl) {
     else {
       if (!interlockedexchange(&sl->l, 1)) {
         assert(!sl->threadid);
-        sl->threadid = CURRENT_THREAD;
+        sl->threadid = mythreadid;
         sl->c = 1;
         return 0;
       }
@@ -2209,8 +2212,9 @@ static FORCEINLINE void win32_release_lock (MLOCK_T *sl) {
 }
 
 static FORCEINLINE int win32_try_lock (MLOCK_T *sl) {
+  long mythreadid = CURRENT_THREAD;
   if (sl->l != 0) {
-    if (sl->threadid == CURRENT_THREAD) {
+    if (sl->threadid == mythreadid) {
       ++sl->c;
       return 1;
     }
@@ -2218,7 +2222,7 @@ static FORCEINLINE int win32_try_lock (MLOCK_T *sl) {
   else {
     if (!interlockedexchange(&sl->l, 1)){
       assert(!sl->threadid);
-      sl->threadid = CURRENT_THREAD;
+      sl->threadid = mythreadid;
       sl->c = 1;
       return 1;
     }

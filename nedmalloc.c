@@ -34,11 +34,15 @@ DEALINGS IN THE SOFTWARE.
 #pragma warning(disable:4127)	/* conditional expression is constant */
 #pragma warning(disable:4232)	/* address of dllimport is not static, identity not guaranteed */
 #pragma warning(disable:4706)	/* assignment within conditional expression */
+
+#define _CRT_SECURE_NO_WARNINGS 1	/* Don't care about MSVC warnings on POSIX functions */
+#define fopen(f, m) _fsopen(f, m, 0x40/*_SH_DENYNO*/)	/* Have Windows let other programs view the log file as it is written */
 #endif
 
 /*#define ENABLE_TOLERANT_NEDMALLOC 1*/
 /*#define ENABLE_FAST_HEAP_DETECTION 1*/
 /*#define NEDMALLOC_DEBUG 1*/
+#define ENABLE_LOGGING 0xffffffff
 
 /*#define FULLSANITYCHECKS*/
 /* If link time code generation is on, don't force or prevent inlining */
@@ -49,6 +53,7 @@ DEALINGS IN THE SOFTWARE.
 
 
 #include "nedmalloc.h"
+#include <errno.h>
 #if defined(WIN32)
  #include <malloc.h>
 #endif
@@ -144,7 +149,13 @@ size_t malloc_usable_size(void *);
 #endif
 /* Point at which the free space in a thread cache is garbage collected */
 #ifndef THREADCACHEMAXFREESPACE
-#define THREADCACHEMAXFREESPACE (512*1024)
+#define THREADCACHEMAXFREESPACE (1024*1024)
+#endif
+/* ENABLE_LOGGING is a bitmask of what events to log */
+#if ENABLE_LOGGING
+#ifndef NEDMALLOC_LOGFILE
+#define NEDMALLOC_LOGFILE "nedmalloc.csv"
+#endif
 #endif
 #define NM_FLAGS_MASK (M2_FLAGS_MASK&~M2_ZERO_MEMORY)
 
@@ -545,6 +556,87 @@ NEDMALLOCNOALIASATTR size_t nedmalloc_footprint() THROWSPEC																		{ r
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedindependent_calloc(size_t elemsno, size_t elemsize, void **chunks) THROWSPEC	{ return nedpindependent_calloc((nedpool *) 0, elemsno, elemsize, chunks); }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedindependent_comalloc(size_t elems, size_t *sizes, void **chunks) THROWSPEC		{ return nedpindependent_comalloc((nedpool *) 0, elems, sizes, chunks); }
 
+#ifdef WIN32
+typedef unsigned __int64 timeCount;
+static timeCount GetTimestamp()
+{
+	static LARGE_INTEGER ticksPerSec;
+	static double scalefactor;
+	static timeCount baseCount;
+	LARGE_INTEGER val;
+	timeCount ret;
+	if(!scalefactor)
+	{
+		if(QueryPerformanceFrequency(&ticksPerSec))
+			scalefactor=ticksPerSec.QuadPart/1000000000000.0;
+		else
+			scalefactor=1;
+	}
+	if(!QueryPerformanceCounter(&val))
+		return (timeCount) GetTickCount() * 1000000000;
+	ret=(timeCount) (val.QuadPart/scalefactor);
+	if(!baseCount) baseCount=ret;
+	return ret-baseCount;
+}
+#else
+#include <sys/time.h>
+
+typedef unsigned long long timeCount;
+static usCount GetTimestamp()
+{
+	static timeCount baseCount;
+	struct timeval tv;
+	timeCount ret;
+	gettimeofday(&tv, 0);
+	ret=((timeCount) tv.tv_sec*1000000000000LL)+tv.tv_usec*1000000LL;
+	if(!baseCount) baseCount=ret;
+	return ret-baseCount;
+}
+#endif
+
+/* Set ENABLE_LOGGING to an AND mask of which of these you want to
+log, so set it to 0xffffffff for everything */
+typedef enum LogEntryType_t
+{
+	LOGENTRY_MALLOC					=(1<<0),
+	LOGENTRY_REALLOC				=(1<<1),
+	LOGENTRY_FREE					=(1<<2),
+
+	LOGENTRY_THREADCACHE_MALLOC		=(1<<3),
+	LOGENTRY_THREADCACHE_FREE		=(1<<4),
+	LOGENTRY_THREADCACHE_CLEAN		=(1<<5),
+
+	LOGENTRY_POOL_MALLOC			=(1<<6),
+	LOGENTRY_POOL_REALLOC			=(1<<7),
+	LOGENTRY_POOL_FREE				=(1<<8)
+} LogEntryType;
+typedef struct logentry_t
+{
+	timeCount timestamp;
+	nedpool *np;
+	LogEntryType type;
+	int mspace;
+	size_t size;
+	void *mem;
+	size_t alignment;
+	unsigned flags;
+	void *returned;
+} logentry;
+static const char *LogEntryTypeStrings[]={
+	"LOGENTRY_MALLOC",
+	"LOGENTRY_REALLOC",
+	"LOGENTRY_FREE",
+
+	"LOGENTRY_THREADCACHE_MALLOC",
+	"LOGENTRY_THREADCACHE_FREE",
+	"LOGENTRY_THREADCACHE_CLEAN",
+
+	"LOGENTRY_POOL_MALLOC",
+	"LOGENTRY_POOL_REALLOC",
+	"LOGENTRY_POOL_FREE",
+	"******************"
+};
+
 struct threadcacheblk_t;
 typedef struct threadcacheblk_t threadcacheblk;
 struct threadcacheblk_t
@@ -565,6 +657,9 @@ typedef struct threadcache_t
 	int mymspace;						/* Last mspace entry this thread used */
 	long threadid;
 	unsigned int mallocs, frees, successes;
+#if ENABLE_LOGGING
+	logentry *logentries, *logentriesptr, *logentriesend;
+#endif
 	size_t freeInCache;					/* How much free space is stored in this cache */
 	threadcacheblk *bins[(THREADCACHEMAXBINS+1)*2];
 #ifdef FULLSANITYCHECKS
@@ -583,6 +678,37 @@ struct nedpool_t
 	mstate m[MAXTHREADSINPOOL+1];		/* mspace entries for this pool */
 };
 static nedpool syspool;
+
+static FORCEINLINE logentry *LogOperation(threadcache *tc, nedpool *np, LogEntryType type, int mspace, size_t size, void *mem, size_t alignment, unsigned flags, void *returned)
+{
+	if(type&ENABLE_LOGGING)
+	{
+		logentry *le;
+		if(tc->logentriesptr==tc->logentriesend)
+		{
+			size_t logentrieslen=chunksize(mem2chunk(tc->logentries));
+			le=(logentry *) CallRealloc(0, tc->logentries, 0, logentrieslen, (logentrieslen*3)/2, 0, M2_ZERO_MEMORY|M2_ALWAYS_MMAP|M2_RESERVE_MULT(8));
+			if(!le) return 0;
+			tc->logentriesptr=le+(tc->logentriesptr-tc->logentries);
+			tc->logentries=le;
+			logentrieslen=chunksize(mem2chunk(tc->logentries))/sizeof(logentry);
+			tc->logentriesend=tc->logentries+logentrieslen;
+		}
+		le=tc->logentriesptr++;
+		assert(le<tc->logentriesend);
+		le->timestamp=GetTimestamp();
+		le->np=np;
+		le->type=type;
+		le->mspace=mspace;
+		le->size=size;
+		le->mem=mem;
+		le->alignment=alignment;
+		le->flags=flags;
+		le->returned=returned;
+		return le;
+	}
+	return 0;
+}
 
 static FORCEINLINE NEDMALLOCNOALIASATTR unsigned int size2binidx(size_t _size) THROWSPEC
 {	/* 8=1000	16=10000	20=10100	24=11000	32=100000	48=110000	4096=1000000000000 */
@@ -703,6 +829,7 @@ static NOINLINE void RemoveCacheEntries(nedpool *RESTRICT p, threadcache *RESTRI
 				assert((long) tc->freeInCache>=0);
 				CallFree(0, f, f->isforeign);
 				/*tcsanitycheck(tcbptr);*/
+				LogOperation(tc, p, LOGENTRY_THREADCACHE_CLEAN, age, blksize, f, 0, 0, 0);
 			}
 		}
 	}
@@ -723,6 +850,52 @@ static void DestroyCaches(nedpool *RESTRICT p) THROWSPEC
 				tc->frees++;
 				RemoveCacheEntries(p, tc, 0);
 				assert(!tc->freeInCache);
+			}
+		}
+#if ENABLE_LOGGING
+		{
+			char buffer[MAX_PATH]=NEDMALLOC_LOGFILE;
+			FILE *oh=fopen(buffer, "r+");
+			fpos_t pos1, pos2;
+			while(!oh)
+			{
+				char *bptr;
+				if((oh=fopen(buffer, "w"))) break;
+				if(ENOSPC==errno) break;
+				bptr=strrchr(buffer, '.');
+				if(bptr-buffer>=MAX_PATH-6) abort();
+				memcpy(bptr, "!.csv", 6);
+			}
+			if(oh)
+			{
+				fgetpos(oh, &pos1);
+				fseek(oh, 0, SEEK_END);
+				fgetpos(oh, &pos2);
+				if(pos1==pos2)
+					fprintf(oh, "Timestamp, Pool, Operation, MSpace, Size, Block, Alignment, Flags, Returned\n");
+				for(n=0; n<THREADCACHEMAXCACHES; n++)
+				{
+					if((tc=p->caches[n]) && tc->logentries)
+					{
+						logentry *le;
+						for(le=tc->logentries; le<tc->logentriesptr; le++)
+						{
+							const char *LogEntryTypeString=LogEntryTypeStrings[size2binidx(((size_t)le->type)<<4)];
+							fprintf(oh, "%llu, 0x%p, %s, %d, %Iu, 0x%p, %Iu, 0x%x, 0x%p\n",
+								le->timestamp, le->np, LogEntryTypeString, le->mspace, le->size, le->mem, le->alignment, le->flags, le->returned);
+						}
+						CallFree(0, tc->logentries, 0);
+						tc->logentries=tc->logentriesptr=tc->logentriesend=0;
+					}
+				}
+				fclose(oh);
+			}
+		}
+#endif
+		for(n=0; n<THREADCACHEMAXCACHES; n++)
+		{
+			if((tc=p->caches[n]))
+			{
 				tc->mymspace=-1;
 				tc->threadid=0;
 				CallFree(0, tc, 0);
@@ -767,6 +940,21 @@ static NOINLINE threadcache *AllocCache(nedpool *RESTRICT p) THROWSPEC
 #endif
 	for(end=0; p->m[end]; end++);
 	tc->mymspace=abs(tc->threadid) % end;
+#if ENABLE_LOGGING
+	{
+		size_t logentrieslen=2048/sizeof(logentry);		/* One page */
+		tc->logentries=tc->logentriesptr=(logentry *) CallMalloc(p->m[0], logentrieslen*sizeof(logentry), 0, M2_ZERO_MEMORY|M2_ALWAYS_MMAP|M2_RESERVE_MULT(8));
+		if(!tc->logentries)
+		{
+#if USE_LOCKS
+			RELEASE_LOCK(&p->mutex);
+#endif
+			return 0;
+		}
+		logentrieslen=chunksize(mem2chunk(tc->logentries))/sizeof(logentry);
+		tc->logentriesend=tc->logentries+logentrieslen;
+	}
+#endif
 #if USE_LOCKS
 	RELEASE_LOCK(&p->mutex);
 #endif
@@ -1324,15 +1512,22 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpool *p, size_t size
 #if THREADCACHEMAX
 	if(alignment<=MALLOC_ALIGNMENT && !(flags & NM_FLAGS_MASK) && tc && size<=THREADCACHEMAX)
 	{	/* Use the thread cache */
-		if((ret=threadcache_malloc(p, tc, &size)) && (flags & M2_ZERO_MEMORY))
-			memset(ret, 0, size);
+		if((ret=threadcache_malloc(p, tc, &size)))
+		{
+			if((flags & M2_ZERO_MEMORY))
+				memset(ret, 0, size);
+			LogOperation(tc, p, LOGENTRY_THREADCACHE_MALLOC, mymspace, size, 0, alignment, flags, ret);
+		}
 	}
 #endif
 	if(!ret)
 	{	/* Use this thread's mspace */
         GETMSPACE(m, p, tc, mymspace, size,
                   ret=CallMalloc(m, size, alignment, flags));
+		if(ret)
+			LogOperation(tc, p, LOGENTRY_POOL_MALLOC, mymspace, size, 0, alignment, flags, ret);
 	}
+	LogOperation(tc, p, LOGENTRY_MALLOC, mymspace, size, 0, alignment, flags, ret);
 	return ret;
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC
@@ -1367,10 +1562,17 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem,
 			memcpy(ret, mem, tocopy);
 			if((flags & M2_ZERO_MEMORY) && size>memsize)
 				memset((void *)((size_t)ret+memsize), 0, size-memsize);
+			LogOperation(tc, p, LOGENTRY_THREADCACHE_MALLOC, mymspace, size, mem, alignment, flags, ret);
 			if(memsize>=sizeof(threadcacheblk) && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
+			{
 				threadcache_free(p, tc, mymspace, mem, memsize, isforeign);
+				LogOperation(tc, p, LOGENTRY_THREADCACHE_FREE, mymspace, memsize, mem, 0, 0, 0);
+			}
 			else
+			{
 				CallFree(0, mem, isforeign);
+				LogOperation(tc, p, LOGENTRY_POOL_FREE, mymspace, memsize, mem, 0, 0, 0);
+			}
 		}
 	}
 #endif
@@ -1378,7 +1580,10 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem,
 	{	/* Reallocs always happen in the mspace they happened in, so skip
 		locking the preferred mspace for this thread */
 		ret=CallRealloc(p->m[mymspace], mem, isforeign, memsize, size, alignment, flags);
+		if(ret)
+			LogOperation(tc, p, LOGENTRY_POOL_REALLOC, mymspace, size, mem, alignment, flags, ret);
 	}
+	LogOperation(tc, p, LOGENTRY_REALLOC, mymspace, size, mem, alignment, flags, ret);
 	return ret;
 }
 void   nedpfree(nedpool *p, void *mem) THROWSPEC
@@ -1404,10 +1609,17 @@ void   nedpfree(nedpool *p, void *mem) THROWSPEC
 	GetThreadCache(&p, &tc, &mymspace, 0);
 #if THREADCACHEMAX
 	if(mem && tc && memsize>=sizeof(threadcacheblk) && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
+	{
 		threadcache_free(p, tc, mymspace, mem, memsize, isforeign);
+		LogOperation(tc, p, LOGENTRY_THREADCACHE_FREE, mymspace, memsize, mem, 0, 0, 0);
+	}
 	else
 #endif
+	{
 		CallFree(0, mem, isforeign);
+		LogOperation(tc, p, LOGENTRY_POOL_FREE, mymspace, memsize, mem, 0, 0, 0);
+	}
+	LogOperation(tc, p, LOGENTRY_FREE, mymspace, memsize, mem, 0, 0, 0);
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size) THROWSPEC
 {
