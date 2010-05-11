@@ -107,7 +107,7 @@ if sys.platform=='win32':
     env['LINKFLAGS']+=["/NXCOMPAT"]             # Likes no execute
 
     env['LINKFLAGS']+=["/ENTRY:DllPreMainCRTStartup"]
-    env['LINKFLAGS']+=["/VERSION:1.0.6"]        # Version
+    env['LINKFLAGS']+=["/VERSION:1.1.0"]        # Version
     env['LINKFLAGS']+=["/MANIFEST"]             # Be UAC compatible
     
     if not env.GetOption('debug'):
