@@ -755,9 +755,18 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 	else if(DLL_PROCESS_DETACH==dllcode)
 	{
 #ifdef REPLACE_SYSTEM_ALLOCATOR
+		nedpool **pools=nedpoollist();
 #if defined(_DEBUG)
 		DebugPrint("Winpatcher: patcher DLL being kicked out from %p\n", myModuleBase);
 #endif
+		if(pools)
+		{
+			nedpool **pool;
+			for(pool=pools; *pool; ++pool)
+				nedflushlogs(*pool, 0);
+			nedfree(pools);
+		}
+		nedflushlogs(0, 0);
 		/* You can enable the below if you want, but you probably don't */
 		/*if(!DepatchInNedmallocDLL())
 			return FALSE;*/

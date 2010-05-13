@@ -65,8 +65,8 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_UK
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,6,0
- PRODUCTVERSION 1,0,6,0
+ FILEVERSION 1,1,0,0
+ PRODUCTVERSION 1,1,0,0
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -83,12 +83,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "ned Productions Ltd."
             VALUE "FileDescription", "nedmalloc: The Fastest Free Portable Memory Allocator"
-            VALUE "FileVersion", "1, 0, 6, 0"
+            VALUE "FileVersion", "1, 1, 0, 0"
             VALUE "InternalName", "nedmalloc"
-            VALUE "LegalCopyright", "Copyright (C) 2005-2009 Niall Douglas"
+            VALUE "LegalCopyright", "Copyright (C) 2005-2010 Niall Douglas"
             VALUE "OriginalFilename", "nedmalloc.dll"
             VALUE "ProductName", "nedmalloc Dynamic Link Library"
-            VALUE "ProductVersion", "1, 0, 6, 0"
+            VALUE "ProductVersion", "1, 1, 0, 0"
         END
     END
     BLOCK "VarFileInfo"

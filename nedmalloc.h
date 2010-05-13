@@ -536,6 +536,19 @@ Remember to ALWAYS call with zero if you used the system pool.
 */
 NEDMALLOCEXTSPEC void neddisablethreadcache(nedpool *p) THROWSPEC;
 
+/*! \brief Releases all memory in all threadcaches in the pool, and writes all
+accumulated memory operations to the log if enabled.
+
+You can pass zero for filepath to use the compiled default, or else a char[MAX_PATH]
+containing the path you wish to use for the log file. The log file is always
+appended to if it already exists. After writing the logs, the logging ability
+is disabled for that pool.
+
+\warning Do NOT call this if the pool is in use - this call is NOT threadsafe.
+*/
+NEDMALLOCEXTSPEC size_t nedflushlogs(nedpool *p, char *filepath) THROWSPEC;
+
+
 /*! \brief Equivalent to nedpmalloc2(p, size, 0, 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size) THROWSPEC;
 /*! \brief Equivalent to nedpmalloc2(p, no*size, 0, M2_ZERO_MEMORY) */
@@ -1586,6 +1599,27 @@ ACQUIRE_LOCK, RELEASE_LOCK, TRY_LOCK, IS_LOCKED and NULL_LOCK_INITIALIZER.
 \brief Defines how many free() ops should occur before checking how much free memory there is.
 */
 #define MAX_RELEASE_CHECK_RATE 4095
+
+/*! \def NEDMALLOC_FORCERESERVE
+\brief Lets you force address space reservation in the \b standard malloc API
+
+Note that by default realloc() sets M2_RESERVE_MULT(8) when thunking to realloc2(),
+so you probably don't need to override this
+*/
+#define NEDMALLOC_FORCERESERVE(p, mem, size) 0
+
+/*! \def NEDMALLOC_TESTLOGENTRY
+\brief Used to determine whether a given memory operation should be logged.
+*/
+#define NEDMALLOC_TESTLOGENTRY(tc, np, type, mspace, size, mem, alignment, flags, returned) ((type)&ENABLE_LOGGING)
+
+/*! \def NEDMALLOC_STACKBACKTRACEDEPTH
+\brief Turns on stack backtracing in the logger.
+
+You almost certainly want to constrain what gets logged using NEDMALLOC_TESTLOGENTRY
+if you turn this on as the sheer volume of data output can make execution very slow.
+*/
+#define NEDMALLOC_STACKBACKTRACEDEPTH 0
 
 #endif
 

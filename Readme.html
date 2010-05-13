@@ -83,7 +83,8 @@ you can see real world improvements of up to three times in normal code!</p>
 		<li>B2. <a href="#memoryleaks">Memory Leakage</a></li>
 		<li>B3. <a href="#threadcache">The Threadcache</a></li>
 		<li>B4. <a href="#largepages">Large Page support</a></li>
-		<li>B5. <a href="#windowsonly">Windows-only features</a></li>
+		<li>B5. <a href="#logger">Memory operation logging</a></li>
+		<li>B6. <a href="#windowsonly">Windows-only features</a></li>
 	</ul>
 </li>
 	<li><a href="#speedcomparisons">Speed Comparisons</a></li>
@@ -152,6 +153,12 @@ malloc2() to reserve additional address space after the allocation such that a
 realloc2() up to that reserved space will be very quick. On 32 bit Windows and 
 Linux this reservation costs no address space in your process, so using it will 
 NOT cause premature address space exhaustion.</p>
+<p>You should note that realloc()&#39;s thunk to realloc2() defaults the flags to 
+M2_RESERVE_MULT(8) i.e. if realloc() needs to allocate a block larger than 
+mmap_threshold, it will also reserve eight times the address space of that 
+allocation in order to make future realloc()&#39;s up to that point much faster. 
+This catches the vast majority of situations where large arrays are repeatedly 
+extended.</p>
 <h2><a name="notes">B. Notes:</a></h2>
 <p>If you want the very latest version of this allocator, get it from the TnFOX 
 GIT repository at either of (both are identical mirrors):</p>
@@ -177,7 +184,7 @@ safely set DEFAULTMAXTHREADSINPOOL or even MAXTHREADSINPOOL to one.</p>
 is causing memory bloating. You can call nedtrimthreadcache() to trim the cache 
 in a thread when you know that it won&#39;t be doing memory allocation (e.g. just before 
 going to sleep), or alternatively you can set THREADCACHEMAXFREESPACE to something 
-smaller than its default of 512Kb.</p>
+smaller than its default of 1Mb.</p>
 <p>Lastly, some people find that memory is not returned to the system when they 
 think it ought to be. dlmalloc only returns free memory to the system when there 
 is DEFAULT_TRIM_THRESHOLD (default=2Mb) free in a mspace, and it only checks how 
@@ -227,15 +234,29 @@ initialisation - therefore if you are not using the DLL you will have to do this
 manually yourself. As with Linux support, if at any stage large pages cannot be 
 allocated, then dlmalloc silently disables support - this allows one binary to function 
 correctly in any environment.</p>
-<h3><a name="windowsonly">B5: Windows-only features</a></h3>
+<h3><a name="logger">B5: Memory operation logging</a></h3>
+<p>It is often very useful to have a log of the memory operations which an 
+application performs - you would be amazed at the inefficiencies in memory usage 
+that this can reveal. nedalloc contains a very fast memory operation logger 
+which keeps a per-thread log of selected operations, including an optional stack 
+backtrace. On pool destruction, or nedflushlogs(), nedalloc will write out the 
+log as a Comma Separated Value format file which can be loaded into applications 
+such as Excel for analysis.</p>
+<p>To use, define ENABLE_LOGGING to the bitmask of enum LogEntryType items in 
+which you are interested, so 0xffffffff would log absolutely everything. The 
+macro NEDMALLOC_TESTLOGENTRY, whose default is (ENABLE_LOGGING &amp; logentrytype), 
+is then used to determine which items should be logged. You can also enable 
+stack backtracing on MSVC and GCC using NEDMALLOC_STACKBACKTRACEDEPTH.</p>
+<h3><a name="windowsonly">B6: Windows-only features</a></h3>
 <p>If you are running on Windows, there are quite a few extra options available 
 thanks to work generously sponsored by
 <a href="http://www.ara.com/" target="_blank">Applied Research Associates (USA)</a>:</p>
 <dl>
-	<dt>Automatic threadcache cleanup</dt>
+	<dt>Automatic threadcache cleanup and log output</dt>
 	<dd>If you build nedalloc as a DLL and link that into your application, then 
 	the DLL can trap thread exits in your application and call neddisablethreadcache() 
-	on all currently existing nedpool&#39;s for you. </dd>
+	on all currently existing nedpool&#39;s for you. On process exit, the DLL 
+	will also call nedflushlogs() for you on all still extant nedpool&#39;s.</dd>
 	<dt>Replacing the system allocator in the whole process</dt>
 	<dd>
 	<p>If you define REPLACE_SYSTEM_ALLOCATOR when building the DLL then the DLL 
@@ -381,6 +402,10 @@ now tends to be worth it in the long run.</p>
 	allocator class.</li>
 	<li><span class="gitcommit">[nedmalloc_fast_realloc d851bde]</span> Added a 
 	CHM documenting the nedalloc API.</li>
+	<li><span class="gitcommit">[nedmalloc_fast_realloc dbd3991]</span> Added a 
+	fast malloc operations logger which outputs a CSV log on process exit.</li>
+	<li><span class="gitcommit">[nedmalloc_fast_realloc xxxxxxx]</span> Added 
+	stack backtracing to the logger.</li>
 </ul>
 <h3>v1.06 beta 2 21st March 2010:</h3>
 <ul>

@@ -29,6 +29,7 @@ DEALINGS IN THE SOFTWARE.
 #ifdef _MSC_VER
 /* Enable full aliasing on MSVC */
 /*#pragma optimize("a", on)*/
+
 #pragma warning(push)
 #pragma warning(disable:4100)	/* unreferenced formal parameter */
 #pragma warning(disable:4127)	/* conditional expression is constant */
@@ -36,13 +37,20 @@ DEALINGS IN THE SOFTWARE.
 #pragma warning(disable:4706)	/* assignment within conditional expression */
 
 #define _CRT_SECURE_NO_WARNINGS 1	/* Don't care about MSVC warnings on POSIX functions */
-#define fopen(f, m) _fsopen(f, m, 0x40/*_SH_DENYNO*/)	/* Have Windows let other programs view the log file as it is written */
+#include <stdio.h>
+#define fopen(f, m) _fsopen((f), (m), 0x40/*_SH_DENYNO*/)	/* Have Windows let other programs view the log file as it is written */
+#ifndef UNICODE
+#define UNICODE					/* Turn on windows unicode support */
+#endif
 #endif
 
-/*#define ENABLE_TOLERANT_NEDMALLOC 1*/
-/*#define ENABLE_FAST_HEAP_DETECTION 1*/
 /*#define NEDMALLOC_DEBUG 1*/
-#define ENABLE_LOGGING 0xffffffff
+/*#define ENABLE_LOGGING 7
+#define NEDMALLOC_TESTLOGENTRY(tc, np, type, mspace, size, mem, alignment, flags, returned) (((type)&ENABLE_LOGGING)&&((size)>16*1024))
+#define NEDMALLOC_STACKBACKTRACEDEPTH 16*/
+/*#define NEDMALLOC_FORCERESERVE(p, mem, size) (((size)>=(256*1024)) ? M2_RESERVE_MULT(8) : 0)*/
+/*#define WIN32_DIRECT_USE_FILE_MAPPINGS 0*/
+
 
 /*#define FULLSANITYCHECKS*/
 /* If link time code generation is on, don't force or prevent inlining */
@@ -151,11 +159,29 @@ size_t malloc_usable_size(void *);
 #ifndef THREADCACHEMAXFREESPACE
 #define THREADCACHEMAXFREESPACE (1024*1024)
 #endif
+/* NEDMALLOC_FORCERESERVE is used to force malloc2 flags for normal malloc, calloc et al */
+#ifndef NEDMALLOC_FORCERESERVE
+#define NEDMALLOC_FORCERESERVE(p, mem, size) 0
+#endif
 /* ENABLE_LOGGING is a bitmask of what events to log */
 #if ENABLE_LOGGING
 #ifndef NEDMALLOC_LOGFILE
 #define NEDMALLOC_LOGFILE "nedmalloc.csv"
 #endif
+#endif
+/* NEDMALLOC_TESTLOGENTRY returns non-zero if the entry should be logged */
+#ifndef NEDMALLOC_TESTLOGENTRY
+#define NEDMALLOC_TESTLOGENTRY(tc, np, type, mspace, size, mem, alignment, flags, returned) ((type)&ENABLE_LOGGING)
+#endif
+/* NEDMALLOC_STACKBACKTRACEDEPTH has the logger store a stack backtrace per logged item. Slow! */
+#ifndef NEDMALLOC_STACKBACKTRACEDEPTH
+#define NEDMALLOC_STACKBACKTRACEDEPTH 0
+#endif
+#if NEDMALLOC_STACKBACKTRACEDEPTH
+#include "Dbghelp.h"
+#include "psapi.h"
+#pragma comment(lib, "dbghelp.lib")
+#pragma comment(lib, "psapi.lib")
 #endif
 #define NM_FLAGS_MASK (M2_FLAGS_MASK&~M2_ZERO_MEMORY)
 
@@ -253,7 +279,8 @@ static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallMalloc(void *
 #ifndef ENABLE_FAST_HEAP_DETECTION
 	if(ret)
 	{
-		size_t truesize=chunksize(mem2chunk(ret));
+		mchunkptr p=mem2chunk(ret);
+		size_t truesize=chunksize(p) - overhead_for(p);
 		if(!leastusedaddress || (void *)((mstate) mspace)->least_addr<leastusedaddress) leastusedaddress=(void *)((mstate) mspace)->least_addr;
 		if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);
 	}
@@ -318,7 +345,8 @@ static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallRealloc(void 
 #ifndef ENABLE_FAST_HEAP_DETECTION
 	if(ret)
 	{
-		size_t truesize=chunksize(mem2chunk(ret));
+		mchunkptr p=mem2chunk(ret);
+		size_t truesize=chunksize(p) - overhead_for(p);
 		if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);
 	}
 #endif
@@ -467,7 +495,7 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 				if((!ismmapped && !is_inuse(p)) || (p->head & FLAG4_BIT)) return 0;
 				/* Reduced uncertainty by 0.5^2 = 25.0% */
 				/* size should never exceed largestusedblock */
-				if(chunksize(p)>largestusedblock_) return 0;
+				if(chunksize(p)-overhead_for(p)>largestusedblock_) return 0;
 				/* Reduced uncertainty by a minimum of 0.5^3 = 12.5%, maximum 0.5^16 = 0.0015% */
 				/* Having sanity checked prev_foot and head, check next block */
 				if(!ismmapped && (!next_pinuse(p) || (next_chunk(p)->head & FLAG4_BIT))) return 0;
@@ -610,6 +638,16 @@ typedef enum LogEntryType_t
 	LOGENTRY_POOL_REALLOC			=(1<<7),
 	LOGENTRY_POOL_FREE				=(1<<8)
 } LogEntryType;
+#if NEDMALLOC_STACKBACKTRACEDEPTH
+typedef struct StackFrameType_t
+{
+	void *pc;
+	char module[64];
+	char functname[256];
+	char file[96];
+	int lineno;
+} StackFrameType;
+#endif
 typedef struct logentry_t
 {
 	timeCount timestamp;
@@ -621,6 +659,9 @@ typedef struct logentry_t
 	size_t alignment;
 	unsigned flags;
 	void *returned;
+#if NEDMALLOC_STACKBACKTRACEDEPTH
+	StackFrameType stack[NEDMALLOC_STACKBACKTRACEDEPTH];
+#endif
 } logentry;
 static const char *LogEntryTypeStrings[]={
 	"LOGENTRY_MALLOC",
@@ -679,23 +720,251 @@ struct nedpool_t
 };
 static nedpool syspool;
 
-static FORCEINLINE logentry *LogOperation(threadcache *tc, nedpool *np, LogEntryType type, int mspace, size_t size, void *mem, size_t alignment, unsigned flags, void *returned)
+#if ENABLE_LOGGING
+#if NEDMALLOC_STACKBACKTRACEDEPTH
+#if defined(WIN32) && defined(_MSC_VER)
+#define COPY_STRING(d, s, maxlen) { size_t len=strlen(s); len=(len>maxlen) ? maxlen-1 : len; memcpy(d, s, len); d[len]=0; }
+
+#pragma optimize("g", off)
+static int ExceptionFilter(unsigned int code, struct _EXCEPTION_POINTERS *ep, CONTEXT *ct) THROWSPEC
 {
-	if(type&ENABLE_LOGGING)
+	*ct=*ep->ContextRecord;
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+static DWORD64 __stdcall GetModBase(HANDLE hProcess, DWORD64 dwAddr) THROWSPEC
+{
+	DWORD64 modulebase;
+	// Try to get the module base if already loaded, otherwise load the module
+	modulebase=SymGetModuleBase64(hProcess, dwAddr);
+    if(modulebase)
+        return modulebase;
+    else
+    {
+        MEMORY_BASIC_INFORMATION stMBI ;
+        if ( 0 != VirtualQueryEx ( hProcess, (LPCVOID)(size_t)dwAddr, &stMBI, sizeof(stMBI)))
+        {
+			int n;
+            DWORD dwPathLen=0, dwNameLen=0 ;
+            TCHAR szFile[ MAX_PATH ], szModuleName[ MAX_PATH ] ;
+			MODULEINFO mi={0};
+            dwPathLen = GetModuleFileName ( (HMODULE) stMBI.AllocationBase , szFile, MAX_PATH );
+            dwNameLen = GetModuleBaseName (hProcess, (HMODULE) stMBI.AllocationBase , szModuleName, MAX_PATH );
+			for(n=dwNameLen; n>0; n--)
+			{
+				if(szModuleName[n]=='.')
+				{
+					szModuleName[n]=0;
+					break;
+				}
+			}
+			if(!GetModuleInformation(hProcess, (HMODULE) stMBI.AllocationBase, &mi, sizeof(mi)))
+			{
+				//fxmessage("WARNING: GetModuleInformation() returned error code %d\n", GetLastError());
+			}
+			if(!SymLoadModule64 ( hProcess, NULL, (PSTR)( (dwPathLen) ? szFile : 0), (PSTR)( (dwNameLen) ? szModuleName : 0),
+				(DWORD64) mi.lpBaseOfDll, mi.SizeOfImage))
+			{
+				//fxmessage("WARNING: SymLoadModule64() returned error code %d\n", GetLastError());
+			}
+			//fxmessage("%s, %p, %x, %x\n", szFile, mi.lpBaseOfDll, mi.SizeOfImage, (DWORD) mi.lpBaseOfDll+mi.SizeOfImage);
+			modulebase=SymGetModuleBase64(hProcess, dwAddr);
+			return modulebase;
+        }
+    }
+    return 0;
+}
+
+static HANDLE myprocess;
+static void DeinitSym(void) THROWSPEC
+{
+	if(myprocess)
+	{
+		SymCleanup(myprocess);
+		CloseHandle(myprocess);
+		myprocess=0;
+	}
+}
+
+static void DoStackWalk(logentry *p) THROWSPEC
+{
+	int i,i2;
+	HANDLE mythread=(HANDLE) GetCurrentThread();
+	STACKFRAME64 sf={ 0 };
+	CONTEXT ct={ 0 };
+	static VOID (WINAPI *RtlCaptureContextAddr)(PCONTEXT)=(VOID (WINAPI *)(PCONTEXT)) -1;
+	if(!myprocess)
+	{
+		DWORD symopts;
+		DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &myprocess, 0, FALSE, DUPLICATE_SAME_ACCESS);
+		symopts=SymGetOptions();
+		SymSetOptions(symopts /*| SYMOPT_DEFERRED_LOADS*/ | SYMOPT_LOAD_LINES);
+		SymInitialize(myprocess, NULL, TRUE);
+		atexit(DeinitSym);
+	}
+	ct.ContextFlags=CONTEXT_FULL;
+
+	// Use RtlCaptureContext() if we have it as it saves an exception throw
+	if((VOID (WINAPI *)(PCONTEXT)) -1==RtlCaptureContextAddr)
+		RtlCaptureContextAddr=(VOID (WINAPI *)(PCONTEXT)) GetProcAddress(GetModuleHandle(L"kernel32"), "RtlCaptureContext");
+	if(RtlCaptureContextAddr)
+		RtlCaptureContextAddr(&ct);
+	else
+	{	// This is nasty, but it works
+		__try
+		{
+			int *foo=0;
+			*foo=78;
+		}
+		__except (ExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &ct))
+		{
+		}
+	}
+
+	sf.AddrPC.Mode=sf.AddrStack.Mode=sf.AddrFrame.Mode=AddrModeFlat;
+#if !(defined(_M_AMD64) || defined(_M_X64))
+	sf.AddrPC.Offset   =ct.Eip;
+	sf.AddrStack.Offset=ct.Esp;
+	sf.AddrFrame.Offset=ct.Ebp;
+#else
+	sf.AddrPC.Offset   =ct.Rip;
+	sf.AddrStack.Offset=ct.Rsp;
+	sf.AddrFrame.Offset=ct.Rbp; // maybe Rdi?
+#endif
+	for(i2=0; i2<NEDMALLOC_STACKBACKTRACEDEPTH; i2++)
+	{
+		IMAGEHLP_MODULE64 ihm={ sizeof(IMAGEHLP_MODULE64) };
+		char temp[MAX_PATH+sizeof(IMAGEHLP_SYMBOL64)];
+		IMAGEHLP_SYMBOL64 *ihs;
+		IMAGEHLP_LINE64 ihl={ sizeof(IMAGEHLP_LINE64) };
+		DWORD64 offset;
+		if(!StackWalk64(
+#if !(defined(_M_AMD64) || defined(_M_X64))
+			IMAGE_FILE_MACHINE_I386,
+#else
+			IMAGE_FILE_MACHINE_AMD64,
+#endif
+			myprocess, mythread, &sf, &ct, NULL, SymFunctionTableAccess64, GetModBase, NULL))
+			break;
+		if(0==sf.AddrPC.Offset)
+			break;
+		i=i2;
+		if(i)	// Skip first entry relating to this function
+		{
+			DWORD lineoffset=0;
+			p->stack[i-1].pc=(void *)(size_t) sf.AddrPC.Offset;
+			if(SymGetModuleInfo64(myprocess, sf.AddrPC.Offset, &ihm))
+			{
+				char *leaf;
+				leaf=strrchr(ihm.ImageName, '\\');
+				if(!leaf) leaf=ihm.ImageName-1;
+				COPY_STRING(p->stack[i-1].module, leaf+1, sizeof(p->stack[i-1].module));
+			}
+			else strcpy(p->stack[i-1].module, "<unknown>");
+			//fxmessage("WARNING: SymGetModuleInfo64() returned error code %d\n", GetLastError());
+			memset(temp, 0, MAX_PATH+sizeof(IMAGEHLP_SYMBOL64));
+			ihs=(IMAGEHLP_SYMBOL64 *) temp;
+			ihs->SizeOfStruct=sizeof(IMAGEHLP_SYMBOL64);
+			ihs->Address=sf.AddrPC.Offset;
+			ihs->MaxNameLength=MAX_PATH;
+
+			if(SymGetSymFromAddr64(myprocess, sf.AddrPC.Offset, &offset, ihs))
+			{
+				COPY_STRING(p->stack[i-1].functname, ihs->Name, sizeof(p->stack[i-1].functname));
+				if(strlen(p->stack[i-1].functname)<sizeof(p->stack[i-1].functname)-8)
+				{
+					sprintf(strchr(p->stack[i-1].functname, 0), " +0x%x", offset);
+				}
+			}
+			else
+				strcpy(p->stack[i-1].functname, "<unknown>");
+			if(SymGetLineFromAddr64(myprocess, sf.AddrPC.Offset, &lineoffset, &ihl))
+			{
+				char *leaf;
+				p->stack[i-1].lineno=ihl.LineNumber;
+
+				leaf=strrchr(ihl.FileName, '\\');
+				if(!leaf) leaf=ihl.FileName-1;
+				COPY_STRING(p->stack[i-1].file, leaf+1, sizeof(p->stack[i-1].file));
+			}
+			else
+				strcpy(p->stack[i-1].file, "<unknown>");
+		}
+	}
+}
+#pragma optimize("g", on)
+#else
+static void DoStackWalk(logentry *p) THROWSPEC
+{
+	void *backtr[NEDMALLOC_STACKBACKTRACEDEPTH];
+	size_t size;
+	char **strings;
+	size_t i2;
+	size=backtrace(backtr, NEDMALLOC_STACKBACKTRACEDEPTH);
+	strings=backtrace_symbols(backtr, size);
+	for(i2=0; i2<size; i2++)
+	{	// Format can be <file path>(<mangled symbol>+0x<offset>) [<pc>]
+		// or can be <file path> [<pc>]
+		int start=0, end=strlen(strings[i2]), which=0, idx;
+		for(idx=0; idx<end; idx++)
+		{
+			if(0==which && (' '==strings[i2][idx] || '('==strings[i2][idx]))
+			{
+				int len=FXMIN(idx-start, (int) sizeof(p->stack[i2].file));
+				memcpy(p->stack[i2].file, strings[i2]+start, len);
+				p->stack[i2].file[len]=0;
+				which=(' '==strings[i2][idx]) ? 2 : 1;
+				start=idx+1;
+			}
+			else if(1==which && ')'==strings[i2][idx])
+			{
+				FXString functname(strings[i2]+start, idx-start);
+				FXint offset=functname.rfind("+0x");
+				FXString rawsymbol(functname.left(offset));
+				FXString symbol(rawsymbol.length() ? fxdemanglesymbol(rawsymbol, false) : rawsymbol);
+				symbol.append(functname.mid(offset));
+				int len=FXMIN(symbol.length(), (int) sizeof(p->stack[i2].functname));
+				memcpy(p->stack[i2].functname, symbol.text(), len);
+				p->stack[i2].functname[len]=0;
+				which=2;
+			}
+			else if(2==which && '['==strings[i2][idx])
+			{
+				start=idx+1;
+				which=3;
+			}
+			else if(3==which && ']'==strings[i2][idx])
+			{
+				FXString v(strings[i2]+start+2, idx-start-2);
+				p->stack[i2].pc=(void *)(FXuval)v.toULong(0, 16);
+			}
+		}
+	}
+	free(strings);
+}
+#endif
+#endif
+#endif
+static FORCEINLINE logentry *LogOperation(threadcache *tc, nedpool *np, LogEntryType type, int mspace, size_t size, void *mem, size_t alignment, unsigned flags, void *returned) THROWSPEC
+{
+#if ENABLE_LOGGING
+	if(tc->logentries && NEDMALLOC_TESTLOGENTRY(tc, np, type, mspace, size, mem, alignment, flags, returned))
 	{
 		logentry *le;
 		if(tc->logentriesptr==tc->logentriesend)
 		{
-			size_t logentrieslen=chunksize(mem2chunk(tc->logentries));
+			mchunkptr cp=mem2chunk(tc->logentries);
+			size_t logentrieslen=chunksize(cp)-overhead_for(cp);
 			le=(logentry *) CallRealloc(0, tc->logentries, 0, logentrieslen, (logentrieslen*3)/2, 0, M2_ZERO_MEMORY|M2_ALWAYS_MMAP|M2_RESERVE_MULT(8));
 			if(!le) return 0;
 			tc->logentriesptr=le+(tc->logentriesptr-tc->logentries);
 			tc->logentries=le;
-			logentrieslen=chunksize(mem2chunk(tc->logentries))/sizeof(logentry);
+			cp=mem2chunk(tc->logentries);
+			logentrieslen=(chunksize(cp)-overhead_for(cp))/sizeof(logentry);
 			tc->logentriesend=tc->logentries+logentrieslen;
 		}
 		le=tc->logentriesptr++;
-		assert(le<tc->logentriesend);
+		assert(le+1<=tc->logentriesend);
 		le->timestamp=GetTimestamp();
 		le->np=np;
 		le->type=type;
@@ -705,8 +974,12 @@ static FORCEINLINE logentry *LogOperation(threadcache *tc, nedpool *np, LogEntry
 		le->alignment=alignment;
 		le->flags=flags;
 		le->returned=returned;
+#if NEDMALLOC_STACKBACKTRACEDEPTH
+		DoStackWalk(le);
+#endif
 		return le;
 	}
+#endif
 	return 0;
 }
 
@@ -798,6 +1071,7 @@ static void tcfullsanitycheck(threadcache *tc) THROWSPEC
 }
 #endif
 
+static NOINLINE int InitPool(nedpool *RESTRICT p, size_t capacity, int threads) THROWSPEC;
 static NOINLINE void RemoveCacheEntries(nedpool *RESTRICT p, threadcache *RESTRICT tc, unsigned int age) THROWSPEC
 {
 #ifdef FULLSANITYCHECKS
@@ -837,8 +1111,14 @@ static NOINLINE void RemoveCacheEntries(nedpool *RESTRICT p, threadcache *RESTRI
 	tcfullsanitycheck(tc);
 #endif
 }
-static void DestroyCaches(nedpool *RESTRICT p) THROWSPEC
+size_t nedflushlogs(nedpool *p, char *filepath) THROWSPEC
 {
+	size_t count=0;
+	if(!p)
+	{
+		p=&syspool;
+		if(!syspool.threads) InitPool(&syspool, 0, -1);
+	}
 	if(p->caches)
 	{
 		threadcache *tc;
@@ -847,23 +1127,27 @@ static void DestroyCaches(nedpool *RESTRICT p) THROWSPEC
 		{
 			if((tc=p->caches[n]))
 			{
+				count+=tc->freeInCache;
 				tc->frees++;
 				RemoveCacheEntries(p, tc, 0);
 				assert(!tc->freeInCache);
 			}
 		}
 #if ENABLE_LOGGING
+		if(tc->logentries)
 		{
 			char buffer[MAX_PATH]=NEDMALLOC_LOGFILE;
-			FILE *oh=fopen(buffer, "r+");
+			FILE *oh;
 			fpos_t pos1, pos2;
+			if(!filepath) filepath=buffer;
+			oh=fopen(filepath, "r+");
 			while(!oh)
 			{
 				char *bptr;
-				if((oh=fopen(buffer, "w"))) break;
+				if((oh=fopen(filepath, "w"))) break;
 				if(ENOSPC==errno) break;
-				bptr=strrchr(buffer, '.');
-				if(bptr-buffer>=MAX_PATH-6) abort();
+				bptr=strrchr(filepath, '.');
+				if(bptr-filepath>=MAX_PATH-6) abort();
 				memcpy(bptr, "!.csv", 6);
 			}
 			if(oh)
@@ -872,7 +1156,7 @@ static void DestroyCaches(nedpool *RESTRICT p) THROWSPEC
 				fseek(oh, 0, SEEK_END);
 				fgetpos(oh, &pos2);
 				if(pos1==pos2)
-					fprintf(oh, "Timestamp, Pool, Operation, MSpace, Size, Block, Alignment, Flags, Returned\n");
+					fprintf(oh, "Timestamp, Pool, Operation, MSpace, Size, Block, Alignment, Flags, Returned,\"Stack Backtrace\"\n");
 				for(n=0; n<THREADCACHEMAXCACHES; n++)
 				{
 					if((tc=p->caches[n]) && tc->logentries)
@@ -881,8 +1165,24 @@ static void DestroyCaches(nedpool *RESTRICT p) THROWSPEC
 						for(le=tc->logentries; le<tc->logentriesptr; le++)
 						{
 							const char *LogEntryTypeString=LogEntryTypeStrings[size2binidx(((size_t)le->type)<<4)];
-							fprintf(oh, "%llu, 0x%p, %s, %d, %Iu, 0x%p, %Iu, 0x%x, 0x%p\n",
-								le->timestamp, le->np, LogEntryTypeString, le->mspace, le->size, le->mem, le->alignment, le->flags, le->returned);
+							char stackbacktrace[16384]="?";
+#if NEDMALLOC_STACKBACKTRACEDEPTH
+							char *sbtp=stackbacktrace;
+							int i;
+							for(i=0; i<NEDMALLOC_STACKBACKTRACEDEPTH && le->stack[i].pc; i++)
+							{
+								sbtp+=sprintf(sbtp, "0x%p:%s:%s (%s:%u),",
+									le->stack[i].pc, le->stack[i].module, le->stack[i].functname, le->stack[i].file, le->stack[i].lineno);
+								if(sbtp>=stackbacktrace+sizeof(stackbacktrace)) abort();
+							}
+							if(NEDMALLOC_STACKBACKTRACEDEPTH==i)
+								strcpy(sbtp, "<backtrace may continue ...>");
+							else
+								strcpy(sbtp, "<backtrace ends>");
+							if(strchr(sbtp, 0)>=stackbacktrace+sizeof(stackbacktrace)) abort();
+#endif
+							fprintf(oh, "%llu, 0x%p, %s, %d, %Iu, 0x%p, %Iu, 0x%x, 0x%p,\"%s\"\n",
+								le->timestamp, le->np, LogEntryTypeString, le->mspace, le->size, le->mem, le->alignment, le->flags, le->returned, stackbacktrace);
 						}
 						CallFree(0, tc->logentries, 0);
 						tc->logentries=tc->logentriesptr=tc->logentriesend=0;
@@ -892,6 +1192,16 @@ static void DestroyCaches(nedpool *RESTRICT p) THROWSPEC
 			}
 		}
 #endif
+	}
+	return count;
+}
+static void DestroyCaches(nedpool *RESTRICT p) THROWSPEC
+{
+	if(p->caches)
+	{
+		threadcache *tc;
+		int n;
+		nedflushlogs(p, 0);
 		for(n=0; n<THREADCACHEMAXCACHES; n++)
 		{
 			if((tc=p->caches[n]))
@@ -942,6 +1252,7 @@ static NOINLINE threadcache *AllocCache(nedpool *RESTRICT p) THROWSPEC
 	tc->mymspace=abs(tc->threadid) % end;
 #if ENABLE_LOGGING
 	{
+		mchunkptr cp;
 		size_t logentrieslen=2048/sizeof(logentry);		/* One page */
 		tc->logentries=tc->logentriesptr=(logentry *) CallMalloc(p->m[0], logentrieslen*sizeof(logentry), 0, M2_ZERO_MEMORY|M2_ALWAYS_MMAP|M2_RESERVE_MULT(8));
 		if(!tc->logentries)
@@ -951,7 +1262,8 @@ static NOINLINE threadcache *AllocCache(nedpool *RESTRICT p) THROWSPEC
 #endif
 			return 0;
 		}
-		logentrieslen=chunksize(mem2chunk(tc->logentries))/sizeof(logentry);
+		cp=mem2chunk(tc->logentries);
+		logentrieslen=(chunksize(cp)-overhead_for(cp))/sizeof(logentry);
 		tc->logentriesend=tc->logentries+logentrieslen;
 	}
 #endif
@@ -1623,19 +1935,26 @@ void   nedpfree(nedpool *p, void *mem) THROWSPEC
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size) THROWSPEC
 {
-	return nedpmalloc2(p, size, 0, 0);
+	unsigned flags=NEDMALLOC_FORCERESERVE(p, 0, size);
+	return nedpmalloc2(p, size, 0, flags);
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC
 {
-	return nedpmalloc2(p, size*no, 0, M2_ZERO_MEMORY);
+	unsigned flags=NEDMALLOC_FORCERESERVE(p, 0, no*size);
+	return nedpmalloc2(p, size*no, 0, M2_ZERO_MEMORY|flags);
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC
 {
-	return nedprealloc2(p, mem, size, 0, 0);
+	unsigned flags=NEDMALLOC_FORCERESERVE(p, mem, size);
+	/* If he reallocs even once, it's probably wise to turn on address space reservation.
+	If the size is larger than mmap_threshold then it'll set the reserve. */
+	if(!(flags & M2_RESERVE_MASK)) flags=M2_RESERVE_MULT(8);
+	return nedprealloc2(p, mem, size, 0, flags);
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes) THROWSPEC
 {
-	return nedpmalloc2(p, bytes, alignment, 0);
+	unsigned flags=NEDMALLOC_FORCERESERVE(p, 0, bytes);
+	return nedpmalloc2(p, bytes, alignment, flags);
 }
 
 struct nedmallinfo nedpmallinfo(nedpool *p) THROWSPEC
@@ -1727,6 +2046,16 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_calloc(nedpool *p, 
     GETMSPACE(m, p, tc, mymspace, elemsno*elemsize,
               ret=mspace_independent_calloc(m, elemsno, elemsize, chunks));
 #endif
+#if ENABLE_LOGGING
+	if(ret && (ENABLE_LOGGING & LOGENTRY_POOL_MALLOC))
+	{
+		size_t n;
+		for(n=0; n<elemsno; n++)
+		{
+			LogOperation(tc, p, LOGENTRY_POOL_MALLOC, mymspace, elemsize, 0, 0, M2_ZERO_MEMORY, ret[n]);
+		}
+	}
+#endif
 	return ret;
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_comalloc(nedpool *p, size_t elems, size_t *sizes, void **chunks) THROWSPEC
@@ -1745,6 +2074,16 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_comalloc(nedpool *p
 #elif USE_ALLOCATOR==1
 	GETMSPACE(m, p, tc, mymspace, 0,
               ret=mspace_independent_comalloc(m, elems, adjustedsizes, chunks));
+#endif
+#if ENABLE_LOGGING
+	if(ret && (ENABLE_LOGGING & LOGENTRY_POOL_MALLOC))
+	{
+		size_t n;
+		for(n=0; n<elems; n++)
+		{
+			LogOperation(tc, p, LOGENTRY_POOL_MALLOC, mymspace, sizes[n], 0, 0, 0, ret[n]);
+		}
+	}
 #endif
 	return ret;
 }

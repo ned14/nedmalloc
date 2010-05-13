@@ -3,6 +3,7 @@ An example of how to use nedalloc in C
 (C) 2005-2010 Niall Douglas
 */
 
+#define _CRT_SECURE_NO_WARNINGS 1	/* Don't care about MSVC warnings on POSIX functions */
 #include <stdio.h>
 #include <stdlib.h>
 #include "nedmalloc.h"
