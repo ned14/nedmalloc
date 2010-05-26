@@ -1826,7 +1826,11 @@ static FORCEINLINE void* win32direct_mmap(void **handle, size_t size, unsigned f
     if (reservesize < size)
       reservesize = size;
     fmh = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE|SEC_RESERVE,
-                            (DWORD)(sizeof(size_t)==4 ? 0 : (reservesize>>32)),
+#if defined(_M_IA64) || defined(_M_X64) || defined(WIN64)
+                            (DWORD)(reservesize>>32),
+#else
+                            0,
+#endif
                             (DWORD)(reservesize&((DWORD)-1)), NULL);
     if (!fmh)
       return MFAIL;

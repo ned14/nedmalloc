@@ -50,6 +50,7 @@ DEALINGS IN THE SOFTWARE.
 #define NEDMALLOC_STACKBACKTRACEDEPTH 16*/
 /*#define NEDMALLOC_FORCERESERVE(p, mem, size) (((size)>=(256*1024)) ? M2_RESERVE_MULT(8) : 0)*/
 /*#define WIN32_DIRECT_USE_FILE_MAPPINGS 0*/
+#define ENABLE_USERMODEPAGEALLOCATOR
 
 
 /*#define FULLSANITYCHECKS*/
@@ -58,7 +59,6 @@ DEALINGS IN THE SOFTWARE.
 #define FORCEINLINE
 #define NOINLINE
 #endif
-
 
 #include "nedmalloc.h"
 #include <errno.h>
@@ -112,7 +112,19 @@ size_t malloc_usable_size(void *);
 #endif
 /*#define USE_SPIN_LOCKS 0*/
 
+#ifdef ENABLE_USERMODEPAGEALLOCATOR
+#define USERPAGE_TOP_DOWN                  (M2_CUSTOM_FLAGS_BEGIN<<0)
+static int userpagedisabled;
+static void *userpage_malloc(size_t size, unsigned flags);
+static int userpage_free(void *mem, size_t size);
+static void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2);
 
+#define MUNMAP(h, a, s)                    (userpagedisabled ? MUNMAP_DEFAULT((h), (a), (s)) : userpage_free((a), (s)))
+#define MMAP(s, f)                         (userpagedisabled ? MMAP_DEFAULT((s)) : userpage_malloc((s), (f)))
+#define MREMAP(addr, osz, nsz, mv)         (userpagedisabled ? MREMAP_DEFAULT((addr), (osz), (nsz), (mv)) : userpage_realloc((addr), (osz), (nsz), (mv), 0))
+#define DIRECT_MMAP(h, s, f)               (userpagedisabled ? DIRECT_MMAP_DEFAULT((h), (s), (f)) : userpage_malloc((s), (f)|USERPAGE_TOP_DOWN))
+#define DIRECT_MREMAP(h, a, os, ns, f, f2) (userpagedisabled ? DIRECT_MREMAP_DEFAULT((h), (a), (os), (ns), (f), (f2)) : userpage_realloc((a), (os), (ns), (f), (f2)|USERPAGE_TOP_DOWN))
+#endif
 #include "malloc.c.h"
 #ifdef NDEBUG               /* Disable assert checking on release builds */
  #undef DEBUG
@@ -215,6 +227,10 @@ static LPVOID ChkedTlsGetValue(DWORD idx)
  #define TLSFREE(k)		(k=0)
  #define TLSGET(k)		k
  #define TLSSET(k, a)	(k=a, 0)
+#endif
+
+#ifdef ENABLE_USERMODEPAGEALLOCATOR
+#include "usermodepageallocator.c"
 #endif
 
 #if defined(__cplusplus)

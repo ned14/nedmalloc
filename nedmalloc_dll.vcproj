@@ -390,6 +390,18 @@
 				>
 			</File>
 			<File
+				RelativePath=".\usermodepageallocator.c"
+				>
+				<FileConfiguration
+					Name="Debug|Win32"
+					ExcludedFromBuild="true"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+					/>
+				</FileConfiguration>
+			</File>
+			<File
 				RelativePath=".\winpatcher.c"
 				>
 			</File>
