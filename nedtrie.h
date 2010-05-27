@@ -628,7 +628,7 @@ namespace nedtries {
 namespace nedtries {
   template<class trietype, class type, size_t fieldoffset, size_t (*keyfunct)(const type *RESTRICT)> DEBUGINLINE type *trieNfind(trietype *RESTRICT head, type *RESTRICT r)
   {
-    type *RESTRICT node, *RESTRICT childnode, *RESTRICT ret=0;
+    type *RESTRICT node=0, *RESTRICT childnode, *RESTRICT ret=0;
     TrieLink_t<type> *RESTRICT nodelink, *RESTRICT rlink;
     size_t rkey=keyfunct(r), keybit, nodekey;
     unsigned binbitidx;
@@ -683,7 +683,7 @@ namespace nedtries {
 #define NEDTRIE_GENERATE_NFIND(proto, name, type, field, keyfunct) \
   proto INLINE struct type * name##_NEDTRIE_NFIND(struct name *RESTRICT head, struct type *RESTRICT r)		\
   { \
-    struct type *RESTRICT node, *RESTRICT childnode, *RESTRICT ret=0; \
+    struct type *RESTRICT node=0, *RESTRICT childnode, *RESTRICT ret=0; \
     size_t rkey=keyfunct(r), keybit, nodekey; \
     unsigned binbitidx; \
     int keybitset; \
@@ -740,7 +740,7 @@ namespace nedtries {
 namespace nedtries {
   template<class trietype, class type, size_t fieldoffset, size_t (*keyfunct)(const type *RESTRICT)> DEBUGINLINE type *trieminmax(trietype *RESTRICT head, unsigned dir)
   {
-    type *RESTRICT node, *RESTRICT child;
+    type *RESTRICT node=0, *RESTRICT child;
     TrieLink_t<type> *RESTRICT nodelink;
     unsigned bitidx;
     if(!head->count) return 0;
@@ -773,7 +773,7 @@ namespace nedtries {
 #define NEDTRIE_GENERATE_MINMAX(proto, name, type, field, keyfunct) \
   proto INLINE struct type * name##_NEDTRIE_MINMAX(struct name *RESTRICT head, unsigned dir)		\
   { \
-    struct type *RESTRICT node, *RESTRICT child; \
+    struct type *RESTRICT node=0, *RESTRICT child; \
     unsigned bitidx; \
     if(!head->count) return 0; \
     if(!dir) \
@@ -1138,7 +1138,7 @@ namespace nedtries {
     TrieLink_t<type> *RESTRICT nodelink, *RESTRICT childlink;
     unsigned n, bitidx;
     TrieValidityState state={0};
-    for(n=0; n<NEDNEDTRIE_INDEXBINS; n++)
+    for(n=0; n<NEDTRIE_INDEXBINS; n++)
     {
       if((node=head->triebins[n]))
       {
