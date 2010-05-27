@@ -1086,7 +1086,7 @@ namespace nedtries {
 #ifndef NDEBUG
   typedef struct TrieValidityState_t
   {
-    size_t count, smallestkey, largestkey, lefts, rights, leafs;
+    size_t count, smallestkey, largestkey, tops, lefts, rights, leafs;
   } TrieValidityState;
 
   template<class trietype, class type, size_t fieldoffset, size_t (*keyfunct)(const type *RESTRICT)> DEBUGINLINE
@@ -1098,26 +1098,26 @@ namespace nedtries {
 
     if(nodekey<state.smallestkey) state.smallestkey=nodekey;
     if(nodekey>state.largestkey) state.largestkey=nodekey;
-    nodelink=(struct TrieLink_t *RESTRICT)((size_t) node + fieldoffset);
+    nodelink=(TrieLink_t<type> *RESTRICT)((size_t) node + fieldoffset);
     assert(nodelink->trie_parent);
     child=nodelink->trie_parent;
-    childlink=(struct TrieLink_t *RESTRICT)((size_t) child + fieldoffset);
+    childlink=(TrieLink_t<type> *RESTRICT)((size_t) child + fieldoffset);
     assert(childlink->trie_child[0]==node || childlink->trie_child[1]==node);
     assert(node==childlink->trie_child[!!(nodekey & ((size_t) 1<<bitidx))]);
     assert(!nodelink->trie_prev);
     while((child=nodelink->trie_next))
     {
       state.leafs++;
-      childlink=(struct TrieLink_t *RESTRICT)((size_t) child + fieldoffset);
+      childlink=(TrieLink_t<type> *RESTRICT)((size_t) child + fieldoffset);
       assert(!childlink->trie_parent);
       assert(!childlink->trie_child[0]);
       assert(!childlink->trie_child[1]);
       assert(childlink->trie_prev);
-      assert(!childlink->trie_next || child==((struct TrieLink_t *RESTRICT)((size_t) childlink->trie_next + fieldoffset))->trie_prev);
+      assert(!childlink->trie_next || child==((TrieLink_t<type> *RESTRICT)((size_t) childlink->trie_next + fieldoffset))->trie_prev);
       nodelink=childlink;
       state.count++;
     }
-    nodelink=(struct TrieLink_t *RESTRICT)((size_t) node + fieldoffset);
+    nodelink=(TrieLink_t<type> *RESTRICT)((size_t) node + fieldoffset);
     state.count++;
     if(nodelink->trie_child[0])
     {
@@ -1142,9 +1142,9 @@ namespace nedtries {
     {
       if((node=head->triebins[n]))
       {
-        size_t nodekey=keyfunct(node), smallestkey, largestkey;
+        size_t nodekey=keyfunct(node);
         state.tops++;
-        nodelink=(struct TrieLink_t *RESTRICT)((size_t) node + fieldoffset);
+        nodelink=(TrieLink_t<type> *RESTRICT)((size_t) node + fieldoffset);
         bitidx=(unsigned)(((size_t) nodelink->trie_parent)>>2);
         assert(bitidx==n);
         assert(head->triebins[bitidx]==node);
@@ -1153,20 +1153,20 @@ namespace nedtries {
         while((child=nodelink->trie_next))
         {
           state.leafs++;
-          childlink=(struct TrieLink_t *RESTRICT)((size_t) child + fieldoffset);
+          childlink=(TrieLink_t<type> *RESTRICT)((size_t) child + fieldoffset);
           assert(!childlink->trie_parent);
           assert(!childlink->trie_child[0]);
           assert(!childlink->trie_child[1]);
           assert(childlink->trie_prev);
-          assert(!childlink->trie_next || child==((struct TrieLink_t *RESTRICT)((size_t) childlink->trie_next + fieldoffset))->trie_prev);
+          assert(!childlink->trie_next || child==((TrieLink_t<type> *RESTRICT)((size_t) childlink->trie_next + fieldoffset))->trie_prev);
           nodelink=childlink;
           state.count++;
         }
-        nodelink=(struct TrieLink_t *RESTRICT)((size_t) node + fieldoffset);
+        nodelink=(TrieLink_t<type> *RESTRICT)((size_t) node + fieldoffset);
         state.count++;
         if(nodelink->trie_child[0])
         {
-          lefts++;
+          state.lefts++;
           state.smallestkey=(size_t)-1;
           state.largestkey=0;
           triecheckvaliditybranch<trietype, type, fieldoffset, keyfunct>(head, nodelink->trie_child[0], bitidx-1, state);
@@ -1175,7 +1175,7 @@ namespace nedtries {
         }
         if(nodelink->trie_child[1])
         {
-          rights++;
+          state.rights++;
           state.smallestkey=(size_t)-1;
           state.largestkey=0;
           triecheckvaliditybranch<trietype, type, fieldoffset, keyfunct>(head, nodelink->trie_child[1], bitidx-1, state);

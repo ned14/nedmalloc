@@ -27,6 +27,21 @@ DEALINGS IN THE SOFTWARE.
 
 #ifdef ENABLE_USERMODEPAGEALLOCATOR
 
+/* This is how many free pages relative to used pages to keep around before
+returning them to the system. It gets ignored if system free memory is
+perceived to be tight. */
+#define USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(usedpages, freepages) ((usedpages)/4)
+
+/* This is how many subsequent free operations must happen since a page was
+freed before it will be eligible to be returned to the system. It helps prevent
+large amounts of memory getting repeatedly freed and reallocated. It gets ignored
+if system free memory is perceived to be tight. */
+#define USERMODEPAGEALLOCATOR_FREEPAGECACHEAGE(usedpages, freepages) 50
+
+/* This defines how frequently the system free memory state should be
+checked, and it must be a power of two. */
+#define USERMODEPAGEALLOCATOR_SYSTEMFREEMEMORYCHECKRATE 16
+
 #include "nedtrie.h"
 
 #ifndef PAGE_SIZE
@@ -100,6 +115,10 @@ typedef size_t PageFrameType;
 /* This function determines whether the host OS allows user mode physical memory
 page mapping. */
 static int OSDeterminePhysicalPageSupport(void);
+
+/* This function determines whether the host OS is currently short of memory.
+The value is LINEAR between 0.0 (no pressure) and 1.0 (terrible pressure). */
+static double OSSystemMemoryPressure(void);
 
 /* This function could ask the host OS for address space, or on embedded systems
 it could simply parcel out space via moving a pointer. The second two void *
@@ -196,6 +215,13 @@ static int OSDeterminePhysicalPageSupport(void)
 #endif
   }
   return PhysicalPageSupport;
+}
+static double OSSystemMemoryPressure(void)
+{
+  MEMORYSTATUSEX ms={sizeof(MEMORYSTATUSEX)};
+  if(!GlobalMemoryStatusEx(&ms))
+    return 0;
+  return ms.dwMemoryLoad/100.0;
 }
 static OSAddressSpaceReservationData OSReserveAddrSpace(size_t space)
 {
@@ -400,6 +426,7 @@ typedef struct FreePageHeader_t FreePageHeader;
 struct FreePageHeader_t
 {
   FreePageHeader *older, *newer;
+  size_t age;
 };
 typedef struct AddressSpaceReservation_s AddressSpaceReservation_t;
 static struct AddressSpaceReservation_s
@@ -408,6 +435,7 @@ static struct AddressSpaceReservation_s
   AddressSpaceReservation_t *RESTRICT next;
   void *front, *frontptr;         /* Grows upward */
   void *back, *backptr;           /* Grows downward */
+  size_t opcount;
   FreePageHeader *oldestclean, *newestclean;
   FreePageHeader *oldestdirty, *newestdirty;
   size_t freepages;
@@ -501,7 +529,7 @@ static PageFrameType *RESTRICT FillWithFreePages(AddressSpaceReservation_t *REST
   size_t memtodecommitidx=0;
   for(pf=start; pf!=end; pf++)
   {
-    FreePageHeader *RESTRICT *RESTRICT freepage=0;
+    FreePageHeader *RESTRICT *RESTRICT freepage=0, *RESTRICT *RESTRICT freepagen=0;
     int wipeall=0;
     if(addr->freepages)
     {
@@ -509,17 +537,20 @@ static PageFrameType *RESTRICT FillWithFreePages(AddressSpaceReservation_t *REST
       {
         assert(!addr->oldestclean->older);
         freepage=&addr->oldestclean;
+        freepagen=&addr->newestclean;
       }
       else if(addr->oldestdirty)
       {
         assert(!addr->oldestdirty->older);
         freepage=&addr->oldestdirty;
+        freepagen=&addr->newestdirty;
         wipeall=1;
       }
       else if(!needclean && addr->oldestclean)
       {
         assert(!addr->oldestclean->older);
         freepage=&addr->oldestclean;
+        freepagen=&addr->newestclean;
       }
       /* Add to the list of pages to demap */
       memtodecommit.addrs[memtodecommitidx]=*freepage;
@@ -529,6 +560,8 @@ static PageFrameType *RESTRICT FillWithFreePages(AddressSpaceReservation_t *REST
       *freepage=(*freepage)->newer;
       if(*freepage)
         (*freepage)->older=0;
+      else
+        *freepagen=0;
       addr->freepages--;
       addr->usedpages++;
       if(needclean)
@@ -695,6 +728,12 @@ static AddressSpaceReservation_t *RESTRICT AddressSpaceFromMem(int *RESTRICT fro
   }
   return 0;
 }
+static double mypow8(double v)
+{
+  double t1=v*v;
+  double t2=t1*t1;
+  return t2+t2;
+}
 static int ReleasePages(void *mem, size_t size)
 { /* Returns 1 if address space was freed */
   int fromback;
@@ -704,6 +743,7 @@ static int ReleasePages(void *mem, size_t size)
     FreePageHeader *RESTRICT freepage=(FreePageHeader *RESTRICT) mem;
     size_t n, sizeinpages=size/PAGE_SIZE;
     PageFrameType *RESTRICT pagemappings=addr->pagemapping+((size_t)freepage-(size_t)addr)/PAGE_SIZE;
+    int dofreesystemmemorycheck=0;
     if(mem>=addr->frontptr && mem<addr->backptr)
     {
       fprintf(stderr, "User Mode Page Allocator: Attempt to free memory in dead man's land\n");
@@ -716,6 +756,7 @@ static int ReleasePages(void *mem, size_t size)
       {
         freepage->older=addr->newestdirty;
         freepage->newer=0;
+        freepage->age=addr->opcount;
         if(addr->newestdirty)
         {
           assert(!addr->newestdirty->newer);
@@ -728,14 +769,76 @@ static int ReleasePages(void *mem, size_t size)
         addr->usedpages--;
       }
     }
+    /* Do I need to return memory to the system? */
+    if((dofreesystemmemorycheck=!(++addr->opcount & (USERMODEPAGEALLOCATOR_SYSTEMFREEMEMORYCHECKRATE-1))) || addr->freepages>USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(addr->usedpages, addr->freepages))
+    {
+      FreePageHeader *RESTRICT freepage;
+      size_t pagestofree=addr->freepages-USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(addr->usedpages, addr->freepages), pagesmustfree=0;
+      static double memorypressurescale=0;
+      if(dofreesystemmemorycheck)
+        memorypressurescale=mypow8(OSSystemMemoryPressure());
+      pagesmustfree=(size_t)(addr->freepages*memorypressurescale);
+      pagestofree+=pagesmustfree;
+      if(pagestofree)
+      {
+        RemapMemoryPagesBlock memtodecommit;
+        size_t memtodecommitidx=0;
+        /* Try to cull dirty before clean pages if poss */
+        for(freepage=addr->oldestdirty; freepage && pagestofree; freepage=addr->oldestdirty, pagestofree--, pagesmustfree=pagesmustfree ? pagesmustfree-1 : 0)
+        {
+          if(!pagesmustfree && addr->opcount-freepage->age<USERMODEPAGEALLOCATOR_FREEPAGECACHEAGE(addr->usedpages, addr->freepages))
+            pagestofree=1;
+          else
+          {
+            size_t freepagepfidx;
+            assert(!freepage->older);
+            addr->oldestdirty=freepage->newer;
+            if(addr->oldestdirty)
+              addr->oldestdirty->older=0;
+            else
+              addr->newestdirty=0;
+            freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
+            memtodecommit.addrs[memtodecommitidx]=freepage;
+            memtodecommit.pageframes[memtodecommitidx]=addr->pagemapping[freepagepfidx];
+            addr->pagemapping[freepagepfidx]=0;
+            memtodecommitidx++;
+          }
+          if(16==memtodecommitidx || 1==pagestofree)
+          { /* Not actually needed, and it interferes with physical page emulation.
+            OSRemapMemoryPagesOntoAddrs(memtodecommit.addrs, memtodecommitidx, memtodecommit.pageframes, &addr->OSreservedata);*/
+            if(OSReleaseMemoryPages(memtodecommit.pageframes, memtodecommitidx, &addr->OSreservedata))
+              memtodecommitidx=0;
+            else
+            {
+              size_t n, freepagepfidx;
+              for(n=0; n<memtodecommitidx; n++)
+              {
+                freepage=(FreePageHeader *RESTRICT) memtodecommit.addrs[n];
+                freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
+                addr->pagemapping[freepagepfidx]=memtodecommit.pageframes[n];
+                freepage->older=0;
+                freepage->newer=addr->oldestdirty;
+                if(addr->oldestdirty)
+                  addr->oldestdirty->older=freepage;
+                else
+                  addr->newestdirty=freepage;
+                addr->oldestdirty=freepage;
+              }
+              pagestofree+=memtodecommitidx;
+              break;
+            }
+          }
+        }
+      }
+    }
     if((size_t) addr->frontptr-size==(size_t) mem || (size_t) addr->backptr==(size_t) mem)
     {
       if(fromback)
         addr->backptr=(void *)((size_t) addr->backptr + size);
       else
         addr->frontptr=(void *)((size_t) addr->frontptr - size);
-      //if(!addr->pagesused)
-      //  CheckFreeAddressSpaces(&addressspacereservation);
+      /*if(!addr->pagesused)
+          CheckFreeAddressSpaces(&addressspacereservation); */
       return 1;
     }
     return 0;
