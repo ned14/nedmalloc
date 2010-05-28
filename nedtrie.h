@@ -132,7 +132,7 @@ static INLINE unsigned nedtriebitscanr(size_t value)
 {
 #ifdef _MSC_VER
   unsigned long bitpos;
-#ifdef WIN64
+#if defined(_M_IA64) || defined(_M_X64) || defined(WIN64)
   assert(8==sizeof(size_t));
   _BitScanReverse64(&bitpos, value);
 #else
