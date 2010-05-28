@@ -64,43 +64,32 @@ checked, and it must be a power of two. */
 #define REGION_FOREACH(var, treetype, treevar)    NEDTRIE_FOREACH(var, treetype, treevar)
 #define REGION_HASNODEHEADER(treevar, node, link) NEDTRIE_HASNODEHEADER(treevar, node, link)
 
-#define FLAG_TOPDOWN  0x1
-#define FLAG_NOCOMMIT 0x2
-
 typedef struct region_node_s region_node_t;
 struct region_node_s {
-    REGION_ENTRY(region_node_s) linkS; /* by start addr */
-    REGION_ENTRY(region_node_s) linkE; /* by end addr */
+    REGION_ENTRY(region_node_s) linkA; /* by start addr */
     REGION_ENTRY(region_node_s) linkL; /* by length */
+    region_node_t *prev, *next;
     void *start, *end;
 };
-typedef struct regionS_tree_s regionS_tree_t;
-REGION_HEAD(regionS_tree_s, region_node_s);
-typedef struct regionE_tree_s regionE_tree_t;
-REGION_HEAD(regionE_tree_s, region_node_s);
+typedef struct regionA_tree_s regionA_tree_t;
+REGION_HEAD(regionA_tree_s, region_node_s);
 typedef struct regionL_tree_s regionL_tree_t;
 REGION_HEAD(regionL_tree_s, region_node_s);
 
-static size_t regionkeyS(const region_node_t *RESTRICT r)
+static size_t regionkeyA(const region_node_t *RESTRICT r)
 {
   return (size_t) r->start;
-}
-static size_t regionkeyE(const region_node_t *RESTRICT r)
-{
-  return (size_t) r->end;
 }
 static size_t regionkeyL(const region_node_t *RESTRICT r)
 {
   return (size_t) r->end - (size_t) r->start;
 }
-REGION_GENERATE(static, regionS_tree_s, region_node_s, linkS, regionkeyS);
-REGION_GENERATE(static, regionE_tree_s, region_node_s, linkE, regionkeyE);
+REGION_GENERATE(static, regionA_tree_s, region_node_s, linkA, regionkeyA);
 REGION_GENERATE(static, regionL_tree_s, region_node_s, linkL, regionkeyL);
 typedef struct MemorySource_t MemorySource;
 static struct MemorySource_t
 {
-  regionS_tree_t regiontreeS; /* The list of free regions, keyed by start addr */
-  regionE_tree_t regiontreeE; /* The list of free regions, keyed by end addr */
+  regionA_tree_t regiontreeA; /* The list of allocated regions, keyed by start addr */
   regionL_tree_t regiontreeL; /* The list of free regions, keyed by length */
 } lower, upper;
 
@@ -115,6 +104,10 @@ typedef size_t PageFrameType;
 /* This function determines whether the host OS allows user mode physical memory
 page mapping. */
 static int OSDeterminePhysicalPageSupport(void);
+
+/* This function returns a simple true or false if the host OS allows user mode
+physical page mapping */
+static int OSHavePhysicalPageSupport(void);
 
 /* This function determines whether the host OS is currently short of memory.
 The value is LINEAR between 0.0 (no pressure) and 1.0 (terrible pressure). */
@@ -158,8 +151,8 @@ static size_t OSRemapMemoryPagesOntoAddrs(void **addrs, size_t entries, PageFram
 #else
 static enum {
   DISABLEEVERYTHING=1,
-  HAVEPHYSICALPAGESUPPORT=4,
-  NOPHYSICALPAGESUPPORT=5
+  NOPHYSICALPAGESUPPORT=2,
+  HAVEPHYSICALPAGESUPPORT=4
 } PhysicalPageSupport;
 
 #ifdef ENABLE_PHYSICALPAGEEMULATION
@@ -176,7 +169,8 @@ typedef struct PageFrameType_t
 typedef ULONG_PTR PageFrameType;
 #endif
 
-
+/* Returns 1 for bad compile, 2 for no support on this machine/user,
+4 for supported */
 static int OSDeterminePhysicalPageSupport(void)
 {
   if(!PhysicalPageSupport)
@@ -215,6 +209,11 @@ static int OSDeterminePhysicalPageSupport(void)
 #endif
   }
   return PhysicalPageSupport;
+}
+static int OSHavePhysicalPageSupport(void)
+{
+  if(!PhysicalPageSupport) OSDeterminePhysicalPageSupport();
+  return HAVEPHYSICALPAGESUPPORT==PhysicalPageSupport;
 }
 static double OSSystemMemoryPressure(void)
 {
@@ -422,9 +421,11 @@ static size_t OSRemapMemoryPagesOntoAddrs(void *RESTRICT *addrs, size_t entries,
 #endif
 
 /* Maps an address reservation */
+#define FREEPAGEHEADERMAGIC (*(size_t *)"UMPAFREE")
 typedef struct FreePageHeader_t FreePageHeader;
 struct FreePageHeader_t
 {
+  size_t magic;
   FreePageHeader *older, *newer;
   size_t age;
 };
@@ -446,7 +447,7 @@ static struct AddressSpaceReservation_s
 static AddressSpaceReservation_t *ReserveSpace(size_t space)
 {
   const size_t RESERVEALWAYSLEAVEFREE=64*1024*1024; /* Windows goes seriously screwy if you take away all address space */
-  OSAddressSpaceReservationData addrR;
+  OSAddressSpaceReservationData addrR={0};
   AddressSpaceReservation_t *RESTRICT addr=0;
   size_t pagemappingsize, n, pagesallocated;
   PageFrameType pagebuffer[256];
@@ -556,6 +557,7 @@ static PageFrameType *RESTRICT FillWithFreePages(AddressSpaceReservation_t *REST
       memtodecommit.addrs[memtodecommitidx]=*freepage;
       memtodecommit.pageframes[memtodecommitidx]=0;
       /* Remove from free page lists */
+      assert(FREEPAGEHEADERMAGIC==(*freepage)->magic);
       assert(!(*freepage)->older);
       *freepage=(*freepage)->newer;
       if(*freepage)
@@ -614,7 +616,7 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
   }
   for(addr=addressspacereservation; addr; addr=addr->next)
   {
-    int fromback=(flags & FLAG_TOPDOWN);
+    int fromback=(flags & USERPAGE_TOPDOWN);
     if((mem && ((mem>=addr->front && mem<addr->frontptr && !(fromback=0)) || (mem>=addr->backptr && mem<addr->back && (fromback=1)))
       || (!mem && (size_t) addr->backptr - (size_t) addr->frontptr>=size)))
     {
@@ -629,7 +631,7 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
         else
           addr->frontptr=(void *)((size_t) addr->frontptr + size);
       }
-      if(!(flags & FLAG_NOCOMMIT))
+      if(!(flags & USERPAGE_NOCOMMIT))
       { /* We leave memory still held by the application mapped at the addresses it was mapped at
         when freed and only nobble these when we need new pages. Hence between addresses ret and
         ret+size there may be a patchwork of already allocated regions, so what we do is to firstly
@@ -641,7 +643,7 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
         {
           if(*pagemappings)
           {
-            FreePageHeader *RESTRICT freepage=(FreePageHeader *RESTRICT) retptr, *RESTRICT *RESTRICT prevnextaddr, *RESTRICT *RESTRICT nextprevaddr;
+            FreePageHeader *RESTRICT freepage=(FreePageHeader *RESTRICT) retptr, *RESTRICT *RESTRICT prevnextaddr=0, *RESTRICT *RESTRICT nextprevaddr=0;
             if(freepage->older)
             {
               assert(freepage->older->newer==freepage);
@@ -672,6 +674,7 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
               assert(!freepage->newer);
               nextprevaddr=&addr->newestclean;
             }
+            assert(FREEPAGEHEADERMAGIC==freepage->magic);
             *prevnextaddr=freepage->newer;
             *nextprevaddr=freepage->older;
             addr->freepages--;
@@ -754,6 +757,7 @@ static int ReleasePages(void *mem, size_t size)
     {
       if(*pagemappings)
       {
+        freepage->magic=FREEPAGEHEADERMAGIC;
         freepage->older=addr->newestdirty;
         freepage->newer=0;
         freepage->age=addr->opcount;
@@ -791,6 +795,7 @@ static int ReleasePages(void *mem, size_t size)
           else
           {
             size_t freepagepfidx;
+            assert(FREEPAGEHEADERMAGIC==freepage->magic);
             assert(!freepage->older);
             addr->oldestdirty=freepage->newer;
             if(addr->oldestdirty)
@@ -816,6 +821,7 @@ static int ReleasePages(void *mem, size_t size)
                 freepage=(FreePageHeader *RESTRICT) memtodecommit.addrs[n];
                 freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
                 addr->pagemapping[freepagepfidx]=memtodecommit.pageframes[n];
+                freepage->magic=FREEPAGEHEADERMAGIC;
                 freepage->older=0;
                 freepage->newer=addr->oldestdirty;
                 if(addr->oldestdirty)
@@ -846,6 +852,22 @@ static int ReleasePages(void *mem, size_t size)
   return 0;
 }
 
+static int RelocatePages(void *dest, void *start, void *end)
+{
+  int destfromback;
+  AddressSpaceReservation_t *destaddr=AddressSpaceFromMem(&destfromback, dest), *srcaddr=AddressSpaceFromMem(0, start);
+  size_t destpfidx=((size_t)dest-(size_t)destaddr)/PAGE_SIZE, srcpfidx=((size_t)start-(size_t)srcaddr)/PAGE_SIZE, endpfidx=((size_t)end-(size_t)srcaddr)/PAGE_SIZE;
+  PageFrameType *RESTRICT destpf=destaddr->pagemapping+destpfidx, *RESTRICT srcpf=srcaddr->pagemapping+srcpfidx, *RESTRICT endpf=srcaddr->pagemapping+endpfidx;
+  memmove(destpf, srcpf, (size_t)endpf-(size_t)srcpf);
+  memset(srcpf, 0, (size_t)endpf-(size_t)srcpf);
+  OSRemapMemoryPagesOntoAddr(dest, endpf-srcpf, destpf, &destaddr->OSreservedata);
+  srcaddr->usedpages-=endpf-srcpf;
+  destaddr->usedpages+=endpf-srcpf;
+  return 1;
+}
+
+/************************************************************************************/
+
 #define REGIONSTORAGESIZE (PAGE_SIZE*4)
 #define REGIONSPERSTORAGE ((REGIONSTORAGESIZE-2*sizeof(void *))/sizeof(region_node_t))
 typedef struct RegionStorage_s RegionStorage_t;
@@ -865,7 +887,7 @@ static region_node_t *AllocateRegionNode(void)
     RegionStorage_t **_rs=!regionstorage ? &regionstorage : &regionstorage->next, *rs;
     if(regionstorage) while(*_rs) _rs=&((*_rs)->next);
     assert(sizeof(RegionStorage_t)<=REGIONSTORAGESIZE);
-    if((rs=*_rs=(RegionStorage_t *) AllocatePages(0, REGIONSTORAGESIZE, FLAG_TOPDOWN)))
+    if((rs=*_rs=(RegionStorage_t *) AllocatePages(0, REGIONSTORAGESIZE, USERPAGE_TOPDOWN)))
     {
       for(n=REGIONSPERSTORAGE-1; n>=0; n--)
       {
@@ -912,12 +934,18 @@ static void FreeRegionNode(region_node_t *node)
 #if USE_LOCKS
 static MLOCK_T userpagemutex;
 #endif
+static struct LastRegionInfo_t
+{
+  region_node_t *firstregion, *lastregion;
+} lastregionfront, lastregionback;
 
+/* Special flags: USERPAGE_TOPDOWN causes the allocation to be made from the top down.
+USERPAGE_NOCOMMIT causes no memory to be committed */
 static void *userpage_malloc(size_t toallocate, unsigned flags)
 {
   void *ret=0;
-  region_node_t node, *r;
-  MemorySource *source=(flags & M2_RESERVED1) ? &upper : &lower;
+  region_node_t node, *RESTRICT r, *RESTRICT newnode;
+  MemorySource *source=(flags & USERPAGE_TOPDOWN) ? &upper : &lower;
   unsigned mremapvalue = (flags & M2_RESERVE_MASK)>>8;
   size_t size = mremapvalue ? ((flags & M2_RESERVE_ISMULTIPLIER) ? toallocate*mremapvalue : (size_t)1<<mremapvalue) : toallocate;
   if(size < toallocate)
@@ -938,28 +966,50 @@ static void *userpage_malloc(size_t toallocate, unsigned flags)
       assert(rlen>=size);
       abort();
     }
-    REGION_REMOVE(regionS_tree_s, &source->regiontreeS, r);
     REGION_REMOVE(regionL_tree_s, &source->regiontreeL, r);
     if(rlen==size)
-    { /* Release the node entirely */
+    { /* Don't need to split */
       ret=r->start;
-      REGION_REMOVE(regionE_tree_s, &source->regiontreeE, r);
-      FreeRegionNode(r);
       goto commitpages;
     }
-    /* Reinsert r with new start addr */
+    /* Split r with new start addr */
+    if(!(newnode=AllocateRegionNode()))
+      goto mfail;
     ret=r->start;
-    r->start=(void *)((size_t) r->start + size);
-    REGION_INSERT(regionS_tree_s, &source->regiontreeS, r);
-    REGION_INSERT(regionL_tree_s, &source->regiontreeL, r);
+    newnode->start=(void *)((size_t) r->start + size);
+    newnode->end=r->end;
+    r->end=newnode->start;
+    newnode->prev=r;
+    newnode->next=r->next;
+    if(newnode->next) newnode->next->prev=newnode;
+    r->next=newnode;
+    REGION_INSERT(regionA_tree_s, &source->regiontreeA, newnode);
+    REGION_INSERT(regionL_tree_s, &source->regiontreeL, newnode);
   }
   else
   { /* Reserve sufficient new address space */
-    ret=AllocatePages(0, size, FLAG_NOCOMMIT|(source==&upper ? FLAG_TOPDOWN : 0));
+    if(!(newnode=AllocateRegionNode()))
+      goto mfail;
+    if(!(ret=AllocatePages(0, size, USERPAGE_NOCOMMIT|flags)))
+      FreeRegionNode(newnode);
+    else
+    {
+      struct LastRegionInfo_t *RESTRICT lastregion=(source==&upper ? &lastregionback : &lastregionfront);
+      newnode->prev=lastregion->lastregion;
+      newnode->next=0;
+      newnode->start=ret;
+      newnode->end=(void *)((size_t) ret + size);
+      REGION_INSERT(regionA_tree_s, &source->regiontreeA, newnode);
+      if(lastregion->lastregion)
+        lastregion->lastregion->next=newnode;
+      else
+        lastregion->firstregion=newnode;
+      lastregion->lastregion=newnode;
+    }
   }
 commitpages:
   if(!ret) goto mfail;
-  if(!AllocatePages(ret, toallocate, 0))
+  if(!(flags & USERPAGE_NOCOMMIT) && !AllocatePages(ret, toallocate, 0))
   {
     ReleasePages(ret, size);
     goto mfail;
@@ -977,12 +1027,11 @@ mfail:
 
 static int userpage_free(void *mem, size_t size)
 {
-  region_node_t node, *RESTRICT prev, *RESTRICT next, *RESTRICT r=0;
-  int fromback;
+  region_node_t node, *RESTRICT r=0;
+  int fromback, prevIsFree, nextIsFree;
   MemorySource *source=0;
-  /* Can I merge with adjacent free blocks? */
-  node.start=(void *)((size_t)mem+size);
-  node.end=mem;
+  node.start=mem;
+  node.end=0; /* size may actually be quite a lot smaller than region size */
 #if USE_LOCKS
   ACQUIRE_LOCK(&userpagemutex);
 #endif
@@ -990,79 +1039,56 @@ static int userpage_free(void *mem, size_t size)
     source=fromback ? &upper : &lower;
   else
     goto fail;
-  prev=REGION_FIND(regionE_tree_s, &source->regiontreeE, &node);
-  next=REGION_FIND(regionS_tree_s, &source->regiontreeS, &node);
-  node.start=mem;
-  node.end=(void *)((size_t)mem+size);
-  if(prev && next)
+  r=REGION_FIND(regionA_tree_s, &source->regiontreeA, &node);
+  if(!r)
+  { /* Block not found */
+    assert(r);
+    goto fail;
+  }
+  /* Can I merge with adjacent free blocks? */
+  prevIsFree=r->prev && REGION_HASNODEHEADER(regionF_tree_s, r->prev, linkL);
+  nextIsFree=r->next && REGION_HASNODEHEADER(regionF_tree_s, r->next, linkL);
+  if(nextIsFree)
+  { /* Consolidate into r */
+    region_node_t *RESTRICT t;
+    assert(r->next->start==r->end);
+    assert(r->next->prev==r);
+    REGION_REMOVE(regionA_tree_s, &source->regiontreeA, r->next);
+    REGION_REMOVE(regionL_tree_s, &source->regiontreeL, r->next);
+    t=r->next;
+    r->end=t->end;
+    r->next=t->next;
+    if(r->next) r->next->prev=r;
+    FreeRegionNode(t);
+  }
+  if(prevIsFree)
   { /* Consolidate into prev */
-    assert(prev->end==node.start);
-    assert(next->start==node.end);
-    REGION_REMOVE(regionS_tree_s, &source->regiontreeS, next);
-    REGION_REMOVE(regionE_tree_s, &source->regiontreeE, next);
-    REGION_REMOVE(regionL_tree_s, &source->regiontreeL, next);
-    node.end=next->end;
-    FreeRegionNode(next);
+    region_node_t *RESTRICT t;
+    assert(r->prev->end==r->start);
+    assert(r->prev->next==r);
+    REGION_REMOVE(regionA_tree_s, &source->regiontreeA, r);
+    REGION_REMOVE(regionL_tree_s, &source->regiontreeL, r->prev);
+    t=r->prev;
+    t->end=r->end;
+    t->next=r->next;
+    if(t->next) t->next->prev=t;
+    FreeRegionNode(r);
+    r=t;
   }
-  if(prev)
-  { /* Consolidate into prev */
-    assert(prev->end==node.start);
-    REGION_REMOVE(regionE_tree_s, &source->regiontreeE, prev);
-    REGION_REMOVE(regionL_tree_s, &source->regiontreeL, prev);
-    r=prev;
-    r->end=node.end;
-  }
-  else if(next)
-  { /* Consolidate into next */
-    assert(next->start==node.end);
-    REGION_REMOVE(regionS_tree_s, &source->regiontreeS, next);
-    REGION_REMOVE(regionL_tree_s, &source->regiontreeL, next);
-    r=next;
-    r->start=node.start;
-  }
-  if(ReleasePages(r ? r->start : node.start, r ? (size_t)r->end - (size_t)r->start : (size_t)node.end - (size_t)node.start))
-  {
-    if(prev)
-    {
-      assert(r==prev);
-      REGION_REMOVE(regionS_tree_s, &source->regiontreeS, prev);
-    }
-    else if(next)
-    {
-      assert(r==next);
-      REGION_REMOVE(regionE_tree_s, &source->regiontreeE, next);
-    }
-    if(r) FreeRegionNode(r);
+  if(!ReleasePages(r->start, (size_t)r->end - (size_t)r->start))
+  { /* We didn't shrink VA, so add newly freed region to free list */
+    REGION_INSERT(regionL_tree_s, &source->regiontreeL, r);
   }
   else
-  {
-    if(!r)
-    {
-      r=AllocateRegionNode();
-      assert(r);
-      if(r)
-      {
-        r->start=node.start;
-        r->end=node.end;
-      }
-      else
-        goto fail;
-    }
-    if(r)
-    {
-      if(r!=prev)
-      {
-        REGION_INSERT(regionS_tree_s, &source->regiontreeS, r);
-      }
-      if(r!=next)
-      {
-        REGION_INSERT(regionE_tree_s, &source->regiontreeE, r);
-      }
-      REGION_INSERT(regionL_tree_s, &source->regiontreeL, r);
-    }
+  { /* We did shrink VA, so remove newly freed region from allocated list */
+    struct LastRegionInfo_t *RESTRICT lastregion=(source==&upper ? &lastregionback : &lastregionfront);
+    REGION_REMOVE(regionA_tree_s, &source->regiontreeA, r);
+    /* Do we also need to tap lastregion? */
+    assert(lastregion->lastregion==r);
+    lastregion->lastregion=r->prev;
+    if(!lastregion->lastregion) lastregion->firstregion=0;
+    FreeRegionNode(r);
   }
-  assert(NEDTRIE_COUNT(&source->regiontreeS)==NEDTRIE_COUNT(&source->regiontreeE));
-  assert(NEDTRIE_COUNT(&source->regiontreeS)==NEDTRIE_COUNT(&source->regiontreeL));
 #if USE_LOCKS
   RELEASE_LOCK(&userpagemutex);
 #endif
@@ -1076,7 +1102,73 @@ fail:
 
 static void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2)
 {
-	return MFAIL;
+  void *ret=0;
+  region_node_t node, *RESTRICT r=0;
+  int fromback;
+  MemorySource *source=0;
+  node.start=mem;
+  node.end=(void *)((size_t) mem + newsize); /* not actually used for the search */
+#if USE_LOCKS
+  ACQUIRE_LOCK(&userpagemutex);
+#endif
+  if(AddressSpaceFromMem(&fromback, mem))
+    source=fromback ? &upper : &lower;
+  else
+    goto mfail;
+  r=REGION_FIND(regionA_tree_s, &source->regiontreeA, &node);
+  if(!r)
+  { /* Block not found */
+    assert(r);
+    goto mfail;
+  }
+  if(node.end>r->end)
+  { /* We ordinarily have the region's size available to us, but if he wants
+    more then can we expand? */
+    if(r->next && REGION_HASNODEHEADER(regionF_tree_s, r->next, linkL))
+    {
+      region_node_t *RESTRICT t;
+      if(node.end>r->next->end)
+        goto relocate;
+      /* Consolidate into r */
+      assert(r->next->start==r->end);
+      assert(r->next->prev==r);
+      REGION_REMOVE(regionA_tree_s, &source->regiontreeA, r->next);
+      REGION_REMOVE(regionL_tree_s, &source->regiontreeL, r->next);
+      t=r->next;
+      r->end=t->end;
+      r->next=t->next;
+      if(r->next) r->next->prev=r;
+      FreeRegionNode(t);
+    }
+  }
+  /* Ensure there are pages up to newsize */
+  if(!AllocatePages(mem, newsize, 0))
+    goto mfail;
+  /* Free anything after newsize up to r->end */
+  if(!ReleasePages(node.end, (size_t) r->end - (size_t) node.end))
+    goto mfail;
+#if USE_LOCKS
+  RELEASE_LOCK(&userpagemutex);
+#endif
+  return mem;
+relocate:
+  if(!(flags & MREMAP_MAYMOVE)) goto mfail;
+  if(MFAIL==(ret=userpage_malloc(newsize, flags2|USERPAGE_NOCOMMIT|(fromback ? USERPAGE_TOPDOWN : 0)))) goto mfail;
+  if(!RelocatePages(ret, r->start, r->end))
+  {
+    userpage_free(ret, newsize);
+    goto mfail;
+  }
+  userpage_free(r->start, (size_t) r->end - (size_t) r->start);
+#if USE_LOCKS
+  RELEASE_LOCK(&userpagemutex);
+#endif
+  return ret;
+mfail:
+#if USE_LOCKS
+  RELEASE_LOCK(&userpagemutex);
+#endif
+  return MFAIL;
 }
 
 #endif
