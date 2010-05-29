@@ -91,26 +91,44 @@ int main(void)
     printf("Working ...\n");
   #endif
     // First test: give me a large stretch of memory, and then be very mean to it
+    if(0)
     {
-      const size_t regionsize=256*1024*1024;
+      const size_t regionsize=4*1024*1024;
       const size_t pagesinregion=regionsize/PAGE_SIZE;
+      size_t allocations=0, releases=0;
       void *region;
       start=GetUsCount();
       region=AllocatePages(0, regionsize, 0);
       end=GetUsCount();
       printf("Allocating %uMb (%u pages) takes %lf ms\n", regionsize/1024/1024, pagesinregion, (end-start)/1000000000.0);
+      start=GetUsCount();
       for(m=1; m<ALLOCATIONS; m++)
       {
-        size_t pageoffset=rand() & ~(pagesinregion-1), pagelength=(rand() & ~(pagesinregion-1))/2, size;
-        void *addr;
-        if(pageoffset+pagelength>pagesinregion) pagelength=pagesinregion-pageoffset;
-        addr=(void *)((size_t) region + pageoffset*PAGE_SIZE);
-        size=pagelength*PAGE_SIZE;
-        if(m & 1)
-          ReleasePages(addr, size);
-        else
-          AllocatePages(addr, size, 0);
+        //for(i=0; i<LOOPS; i++)
+        {
+          size_t pageoffset=rand() & (pagesinregion-1), pagelength=(rand() & (pagesinregion-1))/2, size;
+          void *addr;
+          if(pageoffset+pagelength>=pagesinregion) pagelength=pagesinregion-1-pageoffset;
+          addr=(void *)((size_t) region + pageoffset*PAGE_SIZE);
+          size=pagelength*PAGE_SIZE;
+          if(m & 1)
+          {
+            ReleasePages(addr, size);
+            releases+=pagelength;
+          }
+          else
+          {
+            AllocatePages(addr, size, 0);
+            allocations+=pagelength;
+          }
+        }
       }
+      end=GetUsCount();
+      printf("allocate=%u, release=%u takes %lf ms (%lf ops/sec)\n", allocations, releases, (end-start)/1000000000.0, (allocations+releases)/((end-start)/1000000000000.0));
+      start=GetUsCount();
+      ReleasePages(region, regionsize);
+      end=GetUsCount();
+      printf("Releasing %uMb (%u pages) takes %lf ms\n", regionsize/1024/1024, pagesinregion, (end-start)/1000000000.0);
     }
     // Second test: allocate and randomly free lots of varying lengths
     for(m=1; m<ALLOCATIONS; m++)
@@ -127,6 +145,7 @@ int main(void)
           { // Allocate
             size_t length=(r<<10) & 0xffff;
             length&=~(PAGE_SIZE-1);
+            if(length<PAGE_SIZE) length=PAGE_SIZE;
             if(!(addrsize[n].addr=userpage_malloc(length, 0)))
             {
               assert(0);
@@ -148,9 +167,10 @@ int main(void)
       end=GetUsCount();
       times[m]=end-start;
       opcounts[m]=opcount;
-  #ifndef NDEBUG
+#ifdef NDEBUG
+      if(!(m & 15))
+#endif
       printf("%d allocations (%uMb) takes %lf ms (%lf ops/sec)\n", m, bytesallocated/1024/1024, times[m]/1000000000.0, opcounts[m]/(times[m]/1000000000000.0));
-  #endif
     }
     opcount=0;
     start=GetUsCount();

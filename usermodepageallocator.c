@@ -318,8 +318,32 @@ static size_t OSObtainMemoryPages(PageFrameType *RESTRICT buffer, size_t number,
 #ifdef ENABLE_PHYSICALPAGEEMULATION
     number*=sizeof(PageFrameType)/sizeof(ULONG_PTR);
 #endif
+#if 1
     if(!AllocateUserPhysicalPages((HANDLE)(size_t)-1, (PULONG_PTR) &number, (PULONG_PTR) buffer))
+    {
+      if(number)
+        FreeUserPhysicalPages((HANDLE)(size_t)-1, (PULONG_PTR) &number, (PULONG_PTR) buffer);
       return 0;
+    }
+#else
+    {
+      size_t n;
+      PageFrameType *RESTRICT bptr;
+      for(n=0, bptr=buffer; n<number; n++, bptr++)
+      {
+        size_t no=1;
+        if(!AllocateUserPhysicalPages((HANDLE)(size_t)-1, (PULONG_PTR) &no, (PULONG_PTR) bptr))
+        {
+          for(bptr--; bptr>=buffer; bptr--)
+          {
+            no=1;
+            FreeUserPhysicalPages((HANDLE)(size_t)-1, (PULONG_PTR) &no, (PULONG_PTR) bptr);
+          }
+          return 0;
+        }
+      }
+    }
+#endif
 #ifdef ENABLE_PHYSICALPAGEEMULATION
     number/=sizeof(PageFrameType)/sizeof(ULONG_PTR);
 #endif
@@ -344,7 +368,22 @@ static size_t OSReleaseMemoryPages(PageFrameType *RESTRICT buffer, size_t number
 #ifdef ENABLE_PHYSICALPAGEEMULATION
     number*=sizeof(PageFrameType)/sizeof(ULONG_PTR);
 #endif
+#if 1
     if(!FreeUserPhysicalPages((HANDLE)(size_t)-1, (PULONG_PTR) &number, (PULONG_PTR) buffer)) return 0;
+#else
+    {
+      size_t n;
+      PageFrameType *RESTRICT bptr;
+      for(n=0, bptr=buffer; n<number; n++, bptr++)
+      {
+        size_t no=1;
+        if(!FreeUserPhysicalPages((HANDLE)(size_t)-1, (PULONG_PTR) &no, (PULONG_PTR) bptr))
+        {
+          assert(0);
+        }
+      }
+    }
+#endif
 #ifdef ENABLE_PHYSICALPAGEEMULATION
     number/=sizeof(PageFrameType)/sizeof(ULONG_PTR);
 #endif
@@ -359,12 +398,46 @@ static size_t OSReleaseMemoryPages(PageFrameType *RESTRICT buffer, size_t number
 }
 static size_t OSRemapMemoryPagesOntoAddr(void *addr, size_t entries, PageFrameType *RESTRICT pageframes, OSAddressSpaceReservationData *RESTRICT data)
 {
+#ifdef DEBUG
+  size_t n;
+  PageFrameType *RESTRICT pf;
+  assert(entries);
+  for(pf=pageframes, n=0; n<entries; n++, pf++)
+  {
+    assert(*pf);
+  }
+#endif
   if(!data->data[0])
   {
+    BOOL ret;
 #ifdef ENABLE_PHYSICALPAGEEMULATION
     entries*=sizeof(PageFrameType)/sizeof(ULONG_PTR);
 #endif
-    return MapUserPhysicalPages(addr, entries, (PULONG_PTR) pageframes);
+#if 1
+    MapUserPhysicalPages(addr, entries, NULL);
+    ret=MapUserPhysicalPages(addr, entries, (PULONG_PTR) pageframes);
+    if(!ret)
+    {
+      assert(ret);
+    }
+    return ret;
+#else
+    {
+      size_t n;
+      PageFrameType *RESTRICT bptr;
+      MapUserPhysicalPages(addr, entries, NULL);
+      for(n=0, bptr=pageframes; n<entries; n++, bptr++, addr=(void *)((size_t) addr + PAGE_SIZE))
+      {
+        ret=MapUserPhysicalPages(addr, 1, bptr);
+        if(!ret)
+        {
+          assert(ret);
+          return 0;
+        }
+      }
+      return 1;
+    }
+#endif
   }
 #ifdef ENABLE_PHYSICALPAGEEMULATION
   else
@@ -400,12 +473,25 @@ static size_t OSRemapMemoryPagesOntoAddr(void *addr, size_t entries, PageFrameTy
 }
 static size_t OSRemapMemoryPagesOntoAddrs(void *RESTRICT *addrs, size_t entries, PageFrameType *RESTRICT pageframes, OSAddressSpaceReservationData *RESTRICT data)
 {
+#ifdef DEBUG
+  size_t n;
+  void *RESTRICT *addr;
+  PageFrameType *RESTRICT pf;
+  assert(entries);
+  for(addr=addrs, pf=pageframes, n=0; n<entries; n++, addr++, pf++)
+  {
+    assert(*addr);
+  }
+#endif
   if(!data->data[0])
   {
+    BOOL ret;
 #ifdef ENABLE_PHYSICALPAGEEMULATION
     entries*=sizeof(PageFrameType)/sizeof(ULONG_PTR);
 #endif
-    return MapUserPhysicalPagesScatter(addrs, entries, (PULONG_PTR) pageframes);
+    ret=MapUserPhysicalPagesScatter(addrs, entries, (PULONG_PTR) pageframes);
+    assert(ret);
+    return ret;
   }
 #ifdef ENABLE_PHYSICALPAGEEMULATION
   else
@@ -466,6 +552,34 @@ static struct AddressSpaceReservation_s
   PageFrameType pagemapping[1];   /* Includes this structure */
 } *RESTRICT addressspacereservation;
 
+static void ValidateFreePageLists(AddressSpaceReservation_t *RESTRICT addr)
+{
+#ifndef NDEBUG
+  FreePageHeader *RESTRICT freepage;
+  size_t count=0;
+  for(freepage=addr->oldestclean; freepage; freepage=freepage->newer)
+  {
+    size_t freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
+    assert(addr->pagemapping[freepagepfidx]);
+    assert(FREEPAGEHEADERMAGIC==freepage->magic);
+    assert((!freepage->older && addr->oldestclean==freepage) || freepage->older->newer==freepage);
+    assert((!freepage->newer && addr->newestclean==freepage) || freepage->newer->older==freepage);
+    assert(freepage->age<=addr->opcount);
+    count++;
+  }
+  for(freepage=addr->oldestdirty; freepage; freepage=freepage->newer)
+  {
+    size_t freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
+    assert(addr->pagemapping[freepagepfidx]);
+    assert(FREEPAGEHEADERMAGIC==freepage->magic);
+    assert((!freepage->older && addr->oldestdirty==freepage) || freepage->older->newer==freepage);
+    assert((!freepage->newer && addr->newestdirty==freepage) || freepage->newer->older==freepage);
+    assert(freepage->age<=addr->opcount);
+    count++;
+  }
+  assert(count==addr->freepages);
+#endif
+}
 static AddressSpaceReservation_t *ReserveSpace(size_t space)
 {
   const size_t RESERVEALWAYSLEAVEFREE=64*1024*1024; /* Windows goes seriously screwy if you take away all address space */
@@ -550,70 +664,72 @@ static PageFrameType *RESTRICT FillWithFreePages(AddressSpaceReservation_t *REST
   PageFrameType *RESTRICT pf=start;
   RemapMemoryPagesBlock memtodecommit;
   size_t memtodecommitidx=0;
-  if(addr->freepages)
+  for(; pf!=end && addr->freepages; pf++)
   {
-    for(; pf!=end; pf++)
+    FreePageHeader *RESTRICT *RESTRICT freepage=0, *RESTRICT *RESTRICT freepagen=0;
+    int wipeall=0;
+    if(needclean && addr->oldestclean)
     {
-      FreePageHeader *RESTRICT *RESTRICT freepage=0, *RESTRICT *RESTRICT freepagen=0;
-      int wipeall=0;
-      if(addr->freepages)
+      assert(!addr->oldestclean->older);
+      freepage=&addr->oldestclean;
+      freepagen=&addr->newestclean;
+    }
+    else if(addr->oldestdirty)
+    {
+      assert(!addr->oldestdirty->older);
+      freepage=&addr->oldestdirty;
+      freepagen=&addr->newestdirty;
+      wipeall=1;
+    }
+    else if(!needclean && addr->oldestclean)
+    {
+      assert(!addr->oldestclean->older);
+      freepage=&addr->oldestclean;
+      freepagen=&addr->newestclean;
+    }
+    /* Add to the list of pages to demap */
+    memtodecommit.addrs[memtodecommitidx]=*freepage;
+    memtodecommit.pageframes[memtodecommitidx]=0;
+    /* Remove from free page lists */
+    assert(FREEPAGEHEADERMAGIC==(*freepage)->magic);
+    assert(!(*freepage)->older);
+    *freepage=(*freepage)->newer;
+    if(*freepage)
+      (*freepage)->older=0;
+    else
+      *freepagen=0;
+    addr->freepages--;
+    addr->usedpages++;
+    if(needclean && wipeall)
+      memset(memtodecommit.addrs[memtodecommitidx], 0, PAGE_SIZE);
+    else
+      memset(memtodecommit.addrs[memtodecommitidx], 0, sizeof(FreePageHeader));
+    ValidateFreePageLists(addr);
+
+    if(16==++memtodecommitidx || !addr->freepages || pf+1==end)
+    {
+      size_t n;
+      PageFrameType freepageframe, *RESTRICT pfout=pf-memtodecommitidx+1;
+      /* Relocate these pages */
+      for(n=0; n<memtodecommitidx; n++, pfout++)
       {
-        if(needclean && addr->oldestclean)
-        {
-          assert(!addr->oldestclean->older);
-          freepage=&addr->oldestclean;
-          freepagen=&addr->newestclean;
-        }
-        else if(addr->oldestdirty)
-        {
-          assert(!addr->oldestdirty->older);
-          freepage=&addr->oldestdirty;
-          freepagen=&addr->newestdirty;
-          wipeall=1;
-        }
-        else if(!needclean && addr->oldestclean)
-        {
-          assert(!addr->oldestclean->older);
-          freepage=&addr->oldestclean;
-          freepagen=&addr->newestclean;
-        }
-        /* Add to the list of pages to demap */
-        memtodecommit.addrs[memtodecommitidx]=*freepage;
-        memtodecommit.pageframes[memtodecommitidx]=0;
-        /* Remove from free page lists */
-        assert(FREEPAGEHEADERMAGIC==(*freepage)->magic);
-        assert(!(*freepage)->older);
-        *freepage=(*freepage)->newer;
-        if(*freepage)
-          (*freepage)->older=0;
-        else
-          *freepagen=0;
-        addr->freepages--;
-        addr->usedpages++;
-        if(needclean)
-        {
-          if(wipeall)
-            memset(memtodecommit.addrs[memtodecommitidx], 0, PAGE_SIZE);
-          else
-            memset(memtodecommit.addrs[memtodecommitidx], 0, sizeof(FreePageHeader));
-        }
+        size_t freepagepfidx=((size_t)memtodecommit.addrs[n]-(size_t)addr)/PAGE_SIZE;
+        freepageframe=addr->pagemapping[freepagepfidx];
+        *pfout=freepageframe;
+        addr->pagemapping[freepagepfidx]=0;
       }
-      if(16==++memtodecommitidx || !freepage)
+      if(!OSRemapMemoryPagesOntoAddrs(memtodecommit.addrs, memtodecommitidx, memtodecommit.pageframes, &addr->OSreservedata))
       {
-        size_t n;
-        /* Relocate these pages */
-        for(n=0; n<memtodecommitidx; n++)
+        pfout=pf-memtodecommitidx+1;
+        for(n=0; n<memtodecommitidx; n++, pfout++)
         {
-          PageFrameType freepageframe;
           size_t freepagepfidx=((size_t)memtodecommit.addrs[n]-(size_t)addr)/PAGE_SIZE;
-          freepageframe=addr->pagemapping[freepagepfidx];
-          *(pf-memtodecommitidx+n)=freepageframe;
+          addr->pagemapping[freepagepfidx]=*pfout;
+          *pfout=0;
         }
-        if(!OSRemapMemoryPagesOntoAddrs(memtodecommit.addrs, memtodecommitidx, memtodecommit.pageframes, &addr->OSreservedata))
-          return pf-memtodecommitidx;
-        memtodecommitidx=0;
-        if(!freepage) break;
+        return pf-memtodecommitidx;
       }
+      memtodecommitidx=0;
     }
   }
   /* Allocate more pages if needed */
@@ -629,6 +745,18 @@ static PageFrameType *RESTRICT FillWithFreePages(AddressSpaceReservation_t *REST
     addr->usedpages+=newpagesobtained;
     pf+=newpagesobtained;
   }
+#ifdef DEBUG
+  {
+    PageFrameType *RESTRICT pf2;
+    for(pf2=start; pf2!=pf; pf2++)
+    {
+      if(!*pf2)
+      {
+        assert(*pf2);
+      }
+    }
+  }
+#endif
   return pf;
 }
 static int ReleasePages(void *mem, size_t size);
@@ -670,43 +798,46 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
           if(*pagemappings)
           {
             FreePageHeader *RESTRICT freepage=(FreePageHeader *RESTRICT) retptr, *RESTRICT *RESTRICT prevnextaddr=0, *RESTRICT *RESTRICT nextprevaddr=0;
-            if(freepage->older)
+            if(FREEPAGEHEADERMAGIC==freepage->magic)
             {
-              assert(freepage->older->newer==freepage);
-              prevnextaddr=&freepage->older->newer;
-            }
-            else if(addr->oldestdirty==freepage)
-            {
-              assert(!freepage->older);
-              prevnextaddr=&addr->oldestdirty;
-            }
-            else if(addr->oldestclean==freepage)
-            {
-              assert(!freepage->older);
-              prevnextaddr=&addr->oldestclean;
-            }
-            if(freepage->newer)
-            {
-              assert(freepage->newer->older==freepage);
-              nextprevaddr=&freepage->newer->older;
-            }
-            else if(addr->newestdirty==freepage)
-            {
-              assert(!freepage->newer);
-              nextprevaddr=&addr->newestdirty;
-            }
-            else if(addr->newestclean==freepage)
-            {
-              assert(!freepage->newer);
-              nextprevaddr=&addr->newestclean;
-            }
-            assert(FREEPAGEHEADERMAGIC==freepage->magic);
-            *prevnextaddr=freepage->newer;
-            *nextprevaddr=freepage->older;
-            addr->freepages--;
-            addr->usedpages++;
-            if(fromback)
+              ValidateFreePageLists(addr);
+              if(freepage->older)
+              {
+                assert(freepage->older->newer==freepage);
+                prevnextaddr=&freepage->older->newer;
+              }
+              else if(addr->oldestdirty==freepage)
+              {
+                assert(!freepage->older);
+                prevnextaddr=&addr->oldestdirty;
+              }
+              else if(addr->oldestclean==freepage)
+              {
+                assert(!freepage->older);
+                prevnextaddr=&addr->oldestclean;
+              }
+              if(freepage->newer)
+              {
+                assert(freepage->newer->older==freepage);
+                nextprevaddr=&freepage->newer->older;
+              }
+              else if(addr->newestdirty==freepage)
+              {
+                assert(!freepage->newer);
+                nextprevaddr=&addr->newestdirty;
+              }
+              else if(addr->newestclean==freepage)
+              {
+                assert(!freepage->newer);
+                nextprevaddr=&addr->newestclean;
+              }
+              *prevnextaddr=freepage->newer;
+              *nextprevaddr=freepage->older;
+              addr->freepages--;
+              addr->usedpages++;
               memset(freepage, 0, sizeof(FreePageHeader));
+              ValidateFreePageLists(addr);
+            }
           }
           else
             needtofillwithfree=1;
@@ -783,7 +914,7 @@ static int ReleasePages(void *mem, size_t size)
     }
     for(n=0; n<sizeinpages; n++, pagemappings++, freepage=(FreePageHeader *RESTRICT)((size_t)freepage + PAGE_SIZE))
     {
-      if(*pagemappings)
+      if(*pagemappings && FREEPAGEHEADERMAGIC!=freepage->magic)
       {
         freepage->magic=FREEPAGEHEADERMAGIC;
         freepage->older=addr->newestdirty;
@@ -799,10 +930,12 @@ static int ReleasePages(void *mem, size_t size)
         addr->newestdirty=freepage;
         addr->freepages++;
         addr->usedpages--;
+        ValidateFreePageLists(addr);
       }
     }
+#if 1
     /* Do I need to return memory to the system? */
-    if((dofreesystemmemorycheck=!(++addr->opcount & (USERMODEPAGEALLOCATOR_SYSTEMFREEMEMORYCHECKRATE-1))) || addr->freepages>USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(addr->usedpages, addr->freepages))
+    if((dofreesystemmemorycheck=!(addr->opcount++ & (USERMODEPAGEALLOCATOR_SYSTEMFREEMEMORYCHECKRATE-1))) || addr->freepages>USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(addr->usedpages, addr->freepages))
     {
       FreePageHeader *RESTRICT freepage;
       size_t pagestofree=addr->freepages-USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(addr->usedpages, addr->freepages), pagesmustfree=0;
@@ -830,41 +963,49 @@ static int ReleasePages(void *mem, size_t size)
               addr->oldestdirty->older=0;
             else
               addr->newestdirty=0;
+            addr->freepages--;
             freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
             memtodecommit.addrs[memtodecommitidx]=freepage;
             memtodecommit.pageframes[memtodecommitidx]=addr->pagemapping[freepagepfidx];
             addr->pagemapping[freepagepfidx]=0;
             memtodecommitidx++;
+            ValidateFreePageLists(addr);
           }
           if(16==memtodecommitidx || 1==pagestofree)
           { /* Not actually needed, and it interferes with physical page emulation.
             OSRemapMemoryPagesOntoAddrs(memtodecommit.addrs, memtodecommitidx, memtodecommit.pageframes, &addr->OSreservedata);*/
-            if(OSReleaseMemoryPages(memtodecommit.pageframes, memtodecommitidx, &addr->OSreservedata))
-              memtodecommitidx=0;
-            else
+            if(memtodecommitidx)
             {
-              size_t n, freepagepfidx;
-              for(n=0; n<memtodecommitidx; n++)
+              if(OSReleaseMemoryPages(memtodecommit.pageframes, memtodecommitidx, &addr->OSreservedata))
+                memtodecommitidx=0;
+              else
               {
-                freepage=(FreePageHeader *RESTRICT) memtodecommit.addrs[n];
-                freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
-                addr->pagemapping[freepagepfidx]=memtodecommit.pageframes[n];
-                freepage->magic=FREEPAGEHEADERMAGIC;
-                freepage->older=0;
-                freepage->newer=addr->oldestdirty;
-                if(addr->oldestdirty)
-                  addr->oldestdirty->older=freepage;
-                else
-                  addr->newestdirty=freepage;
-                addr->oldestdirty=freepage;
+                size_t n, freepagepfidx;
+                for(n=0; n<memtodecommitidx; n++)
+                {
+                  freepage=(FreePageHeader *RESTRICT) memtodecommit.addrs[n];
+                  freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
+                  addr->pagemapping[freepagepfidx]=memtodecommit.pageframes[n];
+                  freepage->magic=FREEPAGEHEADERMAGIC;
+                  freepage->older=0;
+                  freepage->newer=addr->oldestdirty;
+                  if(addr->oldestdirty)
+                    addr->oldestdirty->older=freepage;
+                  else
+                    addr->newestdirty=freepage;
+                  addr->oldestdirty=freepage;
+                  addr->freepages++;
+                  ValidateFreePageLists(addr);
+                }
+                pagestofree+=memtodecommitidx;
               }
-              pagestofree+=memtodecommitidx;
-              break;
             }
+            break;
           }
         }
       }
     }
+#endif
     if((size_t) addr->frontptr-size==(size_t) mem || (size_t) addr->backptr==(size_t) mem)
     {
       if(fromback)
@@ -1173,8 +1314,8 @@ static int userpage_free(void *mem, size_t size)
     goto fail;
   }
   /* Can I merge with adjacent free blocks? */
-  prevIsFree=r->prev && REGION_HASNODEHEADER(regionF_tree_s, r->prev, linkL);
-  nextIsFree=r->next && REGION_HASNODEHEADER(regionF_tree_s, r->next, linkL);
+  prevIsFree=r->prev && REGION_HASNODEHEADER(regionL_tree_s, r->prev, linkL);
+  nextIsFree=r->next && REGION_HASNODEHEADER(regionL_tree_s, r->next, linkL);
   if(nextIsFree)
   { /* Consolidate into r */
     region_node_t *RESTRICT t;
@@ -1211,11 +1352,14 @@ static int userpage_free(void *mem, size_t size)
     struct LastRegionInfo_t *RESTRICT lastregion=(source==&upper ? &lastregionback : &lastregionfront);
     REGION_REMOVE(regionA_tree_s, &source->regiontreeA, r);
     /* Do we also need to tap lastregion? */
-    assert(lastregion->lastregion==r);
     lastregion->lastregion=r->prev;
-    if(!lastregion->lastregion) lastregion->firstregion=0;
+    if(lastregion->lastregion)
+      lastregion->lastregion->next=0;
+    else
+      lastregion->firstregion=0;
     FreeRegionNode(r);
   }
+  userpage_validatestate(source);
 #if USE_LOCKS
   RELEASE_LOCK(&userpagemutex);
 #endif
@@ -1252,7 +1396,7 @@ static void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int fla
   if(node.end>r->end)
   { /* We ordinarily have the region's size available to us, but if he wants
     more then can we expand? */
-    if(r->next && REGION_HASNODEHEADER(regionF_tree_s, r->next, linkL))
+    if(r->next && REGION_HASNODEHEADER(regionL_tree_s, r->next, linkL))
     {
       region_node_t *RESTRICT t;
       if(node.end>r->next->end)
