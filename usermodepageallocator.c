@@ -38,11 +38,11 @@ perceived to be tight. */
 freed before it will be eligible to be returned to the system. It helps prevent
 large amounts of memory getting repeatedly freed and reallocated. It gets ignored
 if system free memory is perceived to be tight. */
-#define USERMODEPAGEALLOCATOR_FREEPAGECACHEAGE(usedpages, freepages) 50
+#define USERMODEPAGEALLOCATOR_FREEPAGECACHEAGE(usedpages, freepages) 256
 
 /* This defines how frequently the system free memory state should be
 checked, and it must be a power of two. */
-#define USERMODEPAGEALLOCATOR_SYSTEMFREEMEMORYCHECKRATE 16
+#define USERMODEPAGEALLOCATOR_SYSTEMFREEMEMORYCHECKRATE 64
 
 #include "nedtrie.h"
 
@@ -414,7 +414,6 @@ static size_t OSRemapMemoryPagesOntoAddr(void *addr, size_t entries, PageFrameTy
     entries*=sizeof(PageFrameType)/sizeof(ULONG_PTR);
 #endif
 #if 1
-    MapUserPhysicalPages(addr, entries, NULL);
     ret=MapUserPhysicalPages(addr, entries, (PULONG_PTR) pageframes);
     if(!ret)
     {
@@ -490,7 +489,10 @@ static size_t OSRemapMemoryPagesOntoAddrs(void *RESTRICT *addrs, size_t entries,
     entries*=sizeof(PageFrameType)/sizeof(ULONG_PTR);
 #endif
     ret=MapUserPhysicalPagesScatter(addrs, entries, (PULONG_PTR) pageframes);
-    assert(ret);
+    if(!ret)
+    {
+      assert(ret);
+    }
     return ret;
   }
 #ifdef ENABLE_PHYSICALPAGEEMULATION
@@ -654,110 +656,102 @@ static int CheckFreeAddressSpaces(AddressSpaceReservation_t *RESTRICT *RESTRICT 
   }
   return 0;
 }
+#define REMAPMEMORYPAGESBLOCKSIZE 16
 typedef struct RemapMemoryPagesBlock_t
 {
-    void *addrs[16];
-    PageFrameType pageframes[16];
+  size_t idx;
+  void *addrs[REMAPMEMORYPAGESBLOCKSIZE];
+  PageFrameType pageframes[REMAPMEMORYPAGESBLOCKSIZE];
 } RemapMemoryPagesBlock;
-static PageFrameType *RESTRICT FillWithFreePages(AddressSpaceReservation_t *RESTRICT addr, PageFrameType *RESTRICT start, PageFrameType *RESTRICT end, int needclean)
+static size_t FillWithFreePages(AddressSpaceReservation_t *RESTRICT addr, RemapMemoryPagesBlock *RESTRICT memtocommit, void *freespaceaddr, PageFrameType *RESTRICT start, PageFrameType *RESTRICT end, int needclean)
 {
+  size_t n, pages=end-start;
   PageFrameType *RESTRICT pf=start;
-  RemapMemoryPagesBlock memtodecommit;
-  size_t memtodecommitidx=0;
-  for(; pf!=end && addr->freepages; pf++)
+  for(n=0; n<pages && addr->freepages; n++, pf++, freespaceaddr=(void *)((size_t) freespaceaddr + PAGE_SIZE))
   {
-    FreePageHeader *RESTRICT *RESTRICT freepage=0, *RESTRICT *RESTRICT freepagen=0;
+    FreePageHeader *RESTRICT freepage, *RESTRICT *RESTRICT freepageaddr=0, *RESTRICT *RESTRICT freepagenaddr=0;
+    PageFrameType freepageframe;
+    size_t freepagepfidx;
     int wipeall=0;
+    assert(!*pf);
     if(needclean && addr->oldestclean)
     {
       assert(!addr->oldestclean->older);
-      freepage=&addr->oldestclean;
-      freepagen=&addr->newestclean;
+      freepageaddr=&addr->oldestclean;
+      freepagenaddr=&addr->newestclean;
     }
     else if(addr->oldestdirty)
     {
       assert(!addr->oldestdirty->older);
-      freepage=&addr->oldestdirty;
-      freepagen=&addr->newestdirty;
+      freepageaddr=&addr->oldestdirty;
+      freepagenaddr=&addr->newestdirty;
       wipeall=1;
     }
     else if(!needclean && addr->oldestclean)
     {
       assert(!addr->oldestclean->older);
-      freepage=&addr->oldestclean;
-      freepagen=&addr->newestclean;
+      freepageaddr=&addr->oldestclean;
+      freepagenaddr=&addr->newestclean;
     }
+    freepage=*freepageaddr;
     /* Add to the list of pages to demap */
-    memtodecommit.addrs[memtodecommitidx]=*freepage;
-    memtodecommit.pageframes[memtodecommitidx]=0;
+    /*memtocommit->addrs[memtocommit->idx]=freepage;
+    memtocommit->pageframes[memtocommit->idx]=0;
+    memtocommit->idx++;*/
+    /* Add to the list of pages to remap */
+    freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
+    freepageframe=addr->pagemapping[freepagepfidx];
+    addr->pagemapping[freepagepfidx]=0;
+    memtocommit->addrs[memtocommit->idx]=freespaceaddr;
+    memtocommit->pageframes[memtocommit->idx]=*pf=freepageframe;
+    memtocommit->idx++;
     /* Remove from free page lists */
-    assert(FREEPAGEHEADERMAGIC==(*freepage)->magic);
-    assert(!(*freepage)->older);
-    *freepage=(*freepage)->newer;
-    if(*freepage)
-      (*freepage)->older=0;
+    assert(FREEPAGEHEADERMAGIC==freepage->magic);
+    assert(!freepage->older);
+    *freepageaddr=freepage->newer;
+    if(*freepageaddr)
+      (*freepageaddr)->older=0;
     else
-      *freepagen=0;
+      *freepagenaddr=0;
     addr->freepages--;
     addr->usedpages++;
     if(needclean && wipeall)
-      memset(memtodecommit.addrs[memtodecommitidx], 0, PAGE_SIZE);
+      memset(freepage, 0, PAGE_SIZE);
     else
-      memset(memtodecommit.addrs[memtodecommitidx], 0, sizeof(FreePageHeader));
+      memset(freepage, 0, sizeof(FreePageHeader));
     ValidateFreePageLists(addr);
 
-    if(16==++memtodecommitidx || !addr->freepages || pf+1==end)
+    if(REMAPMEMORYPAGESBLOCKSIZE==memtocommit->idx || 1)
     {
-      size_t n;
-      PageFrameType freepageframe, *RESTRICT pfout=pf-memtodecommitidx+1;
-      /* Relocate these pages */
-      for(n=0; n<memtodecommitidx; n++, pfout++)
-      {
-        size_t freepagepfidx=((size_t)memtodecommit.addrs[n]-(size_t)addr)/PAGE_SIZE;
-        freepageframe=addr->pagemapping[freepagepfidx];
-        *pfout=freepageframe;
-        addr->pagemapping[freepagepfidx]=0;
-      }
-      if(!OSRemapMemoryPagesOntoAddrs(memtodecommit.addrs, memtodecommitidx, memtodecommit.pageframes, &addr->OSreservedata))
-      {
-        pfout=pf-memtodecommitidx+1;
-        for(n=0; n<memtodecommitidx; n++, pfout++)
-        {
-          size_t freepagepfidx=((size_t)memtodecommit.addrs[n]-(size_t)addr)/PAGE_SIZE;
-          addr->pagemapping[freepagepfidx]=*pfout;
-          *pfout=0;
-        }
-        return pf-memtodecommitidx;
-      }
-      memtodecommitidx=0;
+      OSRemapMemoryPagesOntoAddrs(memtocommit->addrs, memtocommit->idx, memtocommit->pageframes, &addr->OSreservedata);
+      memtocommit->idx=0;
     }
   }
   /* Allocate more pages if needed */
-  if(pf!=end)
+  while(pages-n>0)
   {
-    size_t newpagesrequired=end-pf, newpagesobtained;
-    newpagesobtained=OSObtainMemoryPages(pf, newpagesrequired, &addr->OSreservedata);
-    if(newpagesrequired!=newpagesobtained)
+    size_t newpagesnow=pages-n, newpagesobtained, m;
+    if(newpagesnow>REMAPMEMORYPAGESBLOCKSIZE-memtocommit->idx) newpagesnow=REMAPMEMORYPAGESBLOCKSIZE-memtocommit->idx;
+    newpagesobtained=OSObtainMemoryPages(&memtocommit->pageframes[memtocommit->idx], newpagesnow, &addr->OSreservedata);
+    if(newpagesnow!=newpagesobtained)
     {
-      if(newpagesobtained) OSReleaseMemoryPages(pf, newpagesobtained, &addr->OSreservedata);
-      return pf-memtodecommitidx;
+      if(newpagesobtained) OSReleaseMemoryPages(&memtocommit->pageframes[memtocommit->idx], newpagesobtained, &addr->OSreservedata);
+      return n;
     }
-    addr->usedpages+=newpagesobtained;
-    pf+=newpagesobtained;
-  }
-#ifdef DEBUG
-  {
-    PageFrameType *RESTRICT pf2;
-    for(pf2=start; pf2!=pf; pf2++)
+    for(m=memtocommit->idx; m<memtocommit->idx+newpagesobtained; m++, pf++, freespaceaddr=(void *)((size_t) freespaceaddr + PAGE_SIZE))
     {
-      if(!*pf2)
-      {
-        assert(*pf2);
-      }
+      memtocommit->addrs[m]=freespaceaddr;
+      *pf=memtocommit->pageframes[m];
+    }
+    memtocommit->idx+=newpagesobtained;
+    n+=newpagesobtained;
+    if(REMAPMEMORYPAGESBLOCKSIZE==memtocommit->idx)
+    {
+      OSRemapMemoryPagesOntoAddrs(memtocommit->addrs, memtocommit->idx, memtocommit->pageframes, &addr->OSreservedata);
+      memtocommit->idx=0;
     }
   }
-#endif
-  return pf;
+  return n;
 }
 static int ReleasePages(void *mem, size_t size);
 static void *AllocatePages(void *mem, size_t size, unsigned flags)
@@ -774,10 +768,12 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
     if((mem && ((mem>=addr->front && mem<addr->frontptr && !(fromback=0)) || (mem>=addr->backptr && mem<addr->back && (fromback=1)))
       || (!mem && (size_t) addr->backptr - (size_t) addr->frontptr>=size)))
     {
+      RemapMemoryPagesBlock memtocommit;
       size_t n, sizeinpages=size/PAGE_SIZE;
       void *ret=mem ? mem : ((fromback) ? (void *)((size_t) addr->backptr - size) : addr->frontptr), *retptr;
       PageFrameType *RESTRICT pagemappingsbase=addr->pagemapping+((size_t)ret-(size_t)addr)/PAGE_SIZE, *RESTRICT pagemappings;
       int needtofillwithfree=0;
+      memtocommit.idx=0;
       if(!mem)
       {
         if(fromback)
@@ -850,21 +846,23 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
           {
             if(!*pagemappings)
             {
-              PageFrameType *emptyframestart=pagemappings, *filledto;
+              void *emptyaddrstart=retptr;
+              PageFrameType *emptyframestart=pagemappings;
+              size_t filled;
               for(; n<sizeinpages && !*pagemappings; n++, pagemappings++, retptr=(void *)((size_t)retptr + PAGE_SIZE));
-              if(pagemappings!=(filledto=FillWithFreePages(addr, emptyframestart, pagemappings, fromback)))
-              {
-                pagemappings=filledto;
-                break;
+              if(pagemappings-emptyframestart!=(filled=FillWithFreePages(addr, &memtocommit, emptyaddrstart, emptyframestart, pagemappings, fromback)))
+              { /* We failed to allocate everything, so release */
+                assert(0);
+                ReleasePages(ret, size);
+                return 0;
               }
               if(n==sizeinpages) break;
             }
           }
-          if(!OSRemapMemoryPagesOntoAddr(ret, pagemappings-pagemappingsbase, pagemappingsbase, &addr->OSreservedata) || n<sizeinpages)
-          { /* We failed to allocate everything, so release */
-            assert(0);
-            ReleasePages(ret, size);
-            return 0;
+          if(memtocommit.idx)
+          {
+            OSRemapMemoryPagesOntoAddrs(memtocommit.addrs, memtocommit.idx, memtocommit.pageframes, &addr->OSreservedata);
+            memtocommit.idx=0;
           }
         }
       }
@@ -971,7 +969,7 @@ static int ReleasePages(void *mem, size_t size)
             memtodecommitidx++;
             ValidateFreePageLists(addr);
           }
-          if(16==memtodecommitidx || 1==pagestofree)
+          if(REMAPMEMORYPAGESBLOCKSIZE==memtodecommitidx || 1==pagestofree)
           { /* Not actually needed, and it interferes with physical page emulation.
             OSRemapMemoryPagesOntoAddrs(memtodecommit.addrs, memtodecommitidx, memtodecommit.pageframes, &addr->OSreservedata);*/
             if(memtodecommitidx)

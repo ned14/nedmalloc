@@ -8,7 +8,7 @@ Does some unit testing of the user mode page allocator internal functions
 #include <stdlib.h>
 #include "nedmalloc.h"
 
-#define LOOPS 40
+#define LOOPS 4
 #define ALLOCATIONS 4096
 
 #ifdef _MSC_VER
@@ -91,7 +91,7 @@ int main(void)
     printf("Working ...\n");
   #endif
     // First test: give me a large stretch of memory, and then be very mean to it
-    if(0)
+    if(1)
     {
       const size_t regionsize=4*1024*1024;
       const size_t pagesinregion=regionsize/PAGE_SIZE;
@@ -104,7 +104,7 @@ int main(void)
       start=GetUsCount();
       for(m=1; m<ALLOCATIONS; m++)
       {
-        //for(i=0; i<LOOPS; i++)
+        for(i=0; i<LOOPS; i++)
         {
           size_t pageoffset=rand() & (pagesinregion-1), pagelength=(rand() & (pagesinregion-1))/2, size;
           void *addr;
