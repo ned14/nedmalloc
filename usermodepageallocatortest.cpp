@@ -8,7 +8,7 @@ Does some unit testing of the user mode page allocator internal functions
 #include <stdlib.h>
 #include "nedmalloc.h"
 
-#define LOOPS 4
+#define LOOPS 16
 #define ALLOCATIONS 4096
 
 #ifdef _MSC_VER
@@ -91,7 +91,7 @@ int main(void)
     printf("Working ...\n");
   #endif
     // First test: give me a large stretch of memory, and then be very mean to it
-    if(1)
+    if(0)
     {
       const size_t regionsize=4*1024*1024;
       const size_t pagesinregion=regionsize/PAGE_SIZE;
@@ -113,7 +113,7 @@ int main(void)
           size=pagelength*PAGE_SIZE;
           if(m & 1)
           {
-            ReleasePages(addr, size);
+            ReleasePages(addr, size, 0);
             releases+=pagelength;
           }
           else
@@ -126,7 +126,7 @@ int main(void)
       end=GetUsCount();
       printf("allocate=%u, release=%u takes %lf ms (%lf ops/sec)\n", allocations, releases, (end-start)/1000000000.0, (allocations+releases)/((end-start)/1000000000000.0));
       start=GetUsCount();
-      ReleasePages(region, regionsize);
+      ReleasePages(region, regionsize, 0);
       end=GetUsCount();
       printf("Releasing %uMb (%u pages) takes %lf ms\n", regionsize/1024/1024, pagesinregion, (end-start)/1000000000.0);
     }
@@ -143,7 +143,7 @@ int main(void)
           unsigned r=rand()<<2;
           if(!addrsize[n].addr)
           { // Allocate
-            size_t length=(r<<10) & 0xffff;
+            size_t length=(r<<10) & 0x0fff;
             length&=~(PAGE_SIZE-1);
             if(length<PAGE_SIZE) length=PAGE_SIZE;
             if(!(addrsize[n].addr=userpage_malloc(length, 0)))
@@ -151,17 +151,40 @@ int main(void)
               assert(0);
               abort();
             }
-            addrsize[n].size=length;
+            *(size_t *)addrsize[n].addr=length;
             bytesallocated+=length;
+            addrsize[n].size=length;
             opcount++;
           }
           else if(r&4)
+#if 1
+          { // 50% realloc
+            size_t length=(r<<10) & 0xffff0;
+            length&=~(PAGE_SIZE-1);
+            if(length<PAGE_SIZE) length=PAGE_SIZE;
+            if(!(addrsize[n].addr=userpage_realloc(addrsize[n].addr, addrsize[n].size, length, MREMAP_MAYMOVE, 0)))
+            {
+              assert(0);
+              abort();
+            }
+            if(*(size_t *)addrsize[n].addr!=addrsize[n].size)
+            {
+              assert(0);
+              abort();
+            }
+            *(size_t *)addrsize[n].addr=length;
+            bytesallocated+=length-addrsize[n].size;
+            addrsize[n].size=length;
+            opcount++;
+          }
+#else
           { // 50% Free
             userpage_free(addrsize[n].addr, addrsize[n].size);
             bytesallocated-=addrsize[n].size;
             addrsize[n].addr=0;
             opcount++;
           }
+#endif
         }
       }
       end=GetUsCount();

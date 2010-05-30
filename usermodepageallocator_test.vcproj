@@ -194,6 +194,7 @@
 				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
+				EnableEnhancedInstructionSet="2"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
 				DebugInformationFormat="3"
@@ -286,7 +287,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				LinkIncremental="1"
-				UACExecutionLevel="2"
+				UACExecutionLevel="0"
 				GenerateDebugInformation="true"
 				SubSystem="1"
 				OptimizeReferences="2"
