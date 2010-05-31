@@ -121,12 +121,17 @@ static void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int fla
 #define USERPAGE_TOPDOWN                   (M2_CUSTOM_FLAGS_BEGIN<<0)
 #define USERPAGE_NOCOMMIT                  (M2_CUSTOM_FLAGS_BEGIN<<1)
 
+/* This can provide a very significant speed boost */
+#undef MMAP_CLEARS
+#define MMAP_CLEARS 0
+
 #define MUNMAP(h, a, s)                    (!OSHavePhysicalPageSupport() ? MUNMAP_DEFAULT((h), (a), (s)) : userpage_free((a), (s)))
 #define MMAP(s, f)                         (!OSHavePhysicalPageSupport() ? MMAP_DEFAULT((s)) : userpage_malloc((s), (f)))
 #define MREMAP(addr, osz, nsz, mv)         (!OSHavePhysicalPageSupport() ? MREMAP_DEFAULT((addr), (osz), (nsz), (mv)) : userpage_realloc((addr), (osz), (nsz), (mv), 0))
 #define DIRECT_MMAP(h, s, f)               (!OSHavePhysicalPageSupport() ? DIRECT_MMAP_DEFAULT((h), (s), (f)) : userpage_malloc((s), (f)|USERPAGE_TOPDOWN))
 #define DIRECT_MREMAP(h, a, os, ns, f, f2) (!OSHavePhysicalPageSupport() ? DIRECT_MREMAP_DEFAULT((h), (a), (os), (ns), (f), (f2)) : userpage_realloc((a), (os), (ns), (f), (f2)|USERPAGE_TOPDOWN))
 
+/* User mode page allocator currently doesn't correctly implement mremap() */
 #undef MREMAP
 #undef DIRECT_MREMAP
 #define MREMAP(addr, osz, nsz, mv)         (!OSHavePhysicalPageSupport() ? MREMAP_DEFAULT((addr), (osz), (nsz), (mv)) : MFAIL)

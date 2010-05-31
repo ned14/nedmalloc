@@ -535,11 +535,13 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #ifndef MALLOC_FAILURE_ACTION
 #define MALLOC_FAILURE_ACTION
 #endif /* MALLOC_FAILURE_ACTION */
+#ifndef MMAP_CLEARS
 #ifdef _WIN32_WCE /* WINCE reportedly does not clear */
 #define MMAP_CLEARS 0
 #else
 #define MMAP_CLEARS 1
 #endif /* _WIN32_WCE */
+#endif
 #endif  /* WIN32 */
 
 #if defined(DARWIN) || defined(_DARWIN)

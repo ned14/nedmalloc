@@ -229,6 +229,7 @@ typedef ULONG_PTR PageFrameType;
 
 /* Returns 1 for bad compile, 2 for no support on this machine/user,
 4 for supported */
+#pragma comment(lib, "advapi32.lib")
 static int OSDeterminePhysicalPageSupport(void)
 {
   if(!PhysicalPageSupport)
@@ -852,9 +853,11 @@ static size_t FillWithFreePages(AddressSpaceReservation_t *RESTRICT addr, RemapM
       *freepagenaddr=0;
     addr->freepages--;
     addr->usedpages++;
+#if MMAP_CLEARS
     if(needclean && freepage->dirty)
       memset(freepage, 0, PAGE_SIZE);
     else
+#endif
       ClearFreePageHeader(freepage);
     ValidateFreePageLists(addr);
 
@@ -995,9 +998,11 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
               int wipeall=DetachFreePage(addr, pagemappings, freepage);
               addr->freepages--;
               addr->usedpages++;
+#if MMAP_CLEARS
               if(fromback && wipeall)
                 memset(freepage, 0, PAGE_SIZE);
               else
+#endif
                 ClearFreePageHeader(freepage);
               ValidateFreePageLists(addr);
             }
@@ -1365,6 +1370,9 @@ static region_node_t *AllocateRegionNode(void)
     {
 #ifdef DEBUG
       printf("RegionStorage extends %p to %p\n", rs, ((size_t)rs+REGIONSTORAGESIZE));
+#endif
+#if !MMAP_CLEAR
+      memset(rs, 0, REGIONSTORAGESIZE);
 #endif
       rs->magic=*(size_t *)"UMPARSTO";
       for(n=REGIONSPERSTORAGE-1; n>=0; n--)
