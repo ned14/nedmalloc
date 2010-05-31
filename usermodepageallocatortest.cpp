@@ -12,7 +12,7 @@ Does some unit testing of the user mode page allocator internal functions
 #define ALLOCATIONS 4096
 
 #ifdef _MSC_VER
-/*#pragma optimize("g", off)*/	/* Useful for debugging */
+//#pragma optimize("g", off)	/* Useful for debugging */
 #endif
 
 #if !defined(USE_NEDMALLOC_DLL)
@@ -85,6 +85,17 @@ int main(void)
     assert(OSHavePhysicalPageSupport());
     printf("System memory pressure is %lf\n", OSSystemMemoryPressure());
     srand(1);
+#if 1
+    {
+      const size_t regionsize=512*1024*1024;
+      void *region1, *region2;
+      region2=AllocatePages(0, 65536, USERPAGE_TOPDOWN);
+      region1=AllocatePages(0, regionsize, 0);
+      memset(region1, 0xbe, regionsize);
+      ReleasePages(region2, 65536, 0);
+      ReleasePages(region1, regionsize, 0);
+    }
+#endif
   #ifdef NDEBUG
     printf("\nPress to go ...\n");
     getchar();
@@ -98,7 +109,7 @@ int main(void)
       size_t allocations=0, releases=0;
       void *region;
       start=GetUsCount();
-      region=AllocatePages(0, regionsize, 0);
+      region=AllocatePages(0, regionsize, USERPAGE_TOPDOWN);
       end=GetUsCount();
       printf("Allocating %uMb (%u pages) takes %lf ms\n", regionsize/1024/1024, pagesinregion, (end-start)/1000000000.0);
       start=GetUsCount();
@@ -113,7 +124,7 @@ int main(void)
           size=pagelength*PAGE_SIZE;
           if(m & 1)
           {
-            ReleasePages(addr, size, 0);
+            ReleasePages(addr, size, 1);
             releases+=pagelength;
           }
           else
@@ -143,38 +154,46 @@ int main(void)
           unsigned r=rand()<<2;
           if(!addrsize[n].addr)
           { // Allocate
-            size_t length=(r<<10) & 0x0fff;
+            size_t length=(r<<10) & 0xffff;
             length&=~(PAGE_SIZE-1);
             if(length<PAGE_SIZE) length=PAGE_SIZE;
-            if(!(addrsize[n].addr=userpage_malloc(length, 0)))
+            if(MFAIL==(addrsize[n].addr=userpage_malloc(length, USERPAGE_TOPDOWN)))
             {
               assert(0);
               abort();
             }
+#ifdef DEBUG
+            memset(addrsize[n].addr, 0xcc, length);
+#endif
             *(size_t *)addrsize[n].addr=length;
             bytesallocated+=length;
             addrsize[n].size=length;
             opcount++;
           }
           else if(r&4)
-#if 1
+#if 0
           { // 50% realloc
             size_t length=(r<<10) & 0xffff0;
+            void *newblk;
             length&=~(PAGE_SIZE-1);
             if(length<PAGE_SIZE) length=PAGE_SIZE;
-            if(!(addrsize[n].addr=userpage_realloc(addrsize[n].addr, addrsize[n].size, length, MREMAP_MAYMOVE, 0)))
+            newblk=userpage_realloc(addrsize[n].addr, addrsize[n].size, length, 0/*MREMAP_MAYMOVE*/, 0);
+            //printf("newblk=%p length=%p\n", newblk, length);
+            if(MFAIL!=newblk)
             {
-              assert(0);
-              abort();
+              addrsize[n].addr=newblk;
+              if(*(size_t *)addrsize[n].addr!=addrsize[n].size)
+              {
+                assert(0);
+                abort();
+              }
+  #ifdef DEBUG
+              memset(addrsize[n].addr, 0xcc, length);
+  #endif
+              *(size_t *)addrsize[n].addr=length;
+              bytesallocated+=length-addrsize[n].size;
+              addrsize[n].size=length;
             }
-            if(*(size_t *)addrsize[n].addr!=addrsize[n].size)
-            {
-              assert(0);
-              abort();
-            }
-            *(size_t *)addrsize[n].addr=length;
-            bytesallocated+=length-addrsize[n].size;
-            addrsize[n].size=length;
             opcount++;
           }
 #else

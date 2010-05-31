@@ -126,6 +126,12 @@ static void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int fla
 #define MREMAP(addr, osz, nsz, mv)         (!OSHavePhysicalPageSupport() ? MREMAP_DEFAULT((addr), (osz), (nsz), (mv)) : userpage_realloc((addr), (osz), (nsz), (mv), 0))
 #define DIRECT_MMAP(h, s, f)               (!OSHavePhysicalPageSupport() ? DIRECT_MMAP_DEFAULT((h), (s), (f)) : userpage_malloc((s), (f)|USERPAGE_TOPDOWN))
 #define DIRECT_MREMAP(h, a, os, ns, f, f2) (!OSHavePhysicalPageSupport() ? DIRECT_MREMAP_DEFAULT((h), (a), (os), (ns), (f), (f2)) : userpage_realloc((a), (os), (ns), (f), (f2)|USERPAGE_TOPDOWN))
+
+#undef MREMAP
+#undef DIRECT_MREMAP
+#define MREMAP(addr, osz, nsz, mv)         (!OSHavePhysicalPageSupport() ? MREMAP_DEFAULT((addr), (osz), (nsz), (mv)) : MFAIL)
+#define DIRECT_MREMAP(h, a, os, ns, f, f2) (!OSHavePhysicalPageSupport() ? DIRECT_MREMAP_DEFAULT((h), (a), (os), (ns), (f), (f2)) : MFAIL)
+
 #endif
 #include "malloc.c.h"
 #ifdef NDEBUG               /* Disable assert checking on release builds */

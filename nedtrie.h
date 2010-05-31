@@ -1186,7 +1186,7 @@ namespace nedtries {
     }
     assert(state.count==head->count);
     for(state.count=0, node=trieminmax<trietype, type, fieldoffset, keyfunct>(head, 0); node; (node=trienext<trietype, type, fieldoffset, keyfunct>(head, node)), state.count++)
-#if 1
+#if 0
       printf("%p\n", node)
 #endif
       ;
@@ -1194,11 +1194,11 @@ namespace nedtries {
     {
       assert(state.count==head->count);
     }
-#if 1
+#if 0
     printf("\n");
 #endif
     for(state.count=0, node=trieminmax<trietype, type, fieldoffset, keyfunct>(head, 1); node; (node=trieprev<trietype, type, fieldoffset, keyfunct>(head, node)), state.count++)
-#if 1
+#if 0
       printf("%p\n", node)
 #endif
       ;
@@ -1206,7 +1206,7 @@ namespace nedtries {
     {
       assert(state.count==head->count);
     }
-#if 1
+#if 0
     printf("\n");
 #endif
 #if !defined(NDEBUG) && 0
