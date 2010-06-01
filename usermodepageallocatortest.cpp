@@ -10,6 +10,7 @@ Does some unit testing of the user mode page allocator internal functions
 
 #define LOOPS 16
 #define ALLOCATIONS 4096
+#define NEDTRIEDEBUG 0
 
 #ifdef _MSC_VER
 //#pragma optimize("g", off)	/* Useful for debugging */
@@ -82,14 +83,17 @@ int main(void)
     printf("sizeof(RegionStorage_t)=%d\n", sizeof(RegionStorage_t));
     printf("sizeof(region_node_t)=%d\n", sizeof(region_node_t));
     printf("REGIONSPERSTORAGE=%d\n", REGIONSPERSTORAGE);
+    printf("sizeof(FreePageNodeStorage_t)=%d\n", sizeof(FreePageNodeStorage_t));
+    printf("sizeof(FreePageNode)=%d\n", sizeof(FreePageNode));
+    printf("FREEPAGENODESPERSTORAGE=%d\n", FREEPAGENODESPERSTORAGE);
     assert(OSHavePhysicalPageSupport());
     printf("System memory pressure is %lf\n", OSSystemMemoryPressure());
     srand(1);
-#if 1
+#if 0
     {
       const size_t regionsize=512*1024*1024;
       void *region1, *region2;
-      region2=AllocatePages(0, 65536, USERPAGE_TOPDOWN);
+      region2=AllocatePages(0, 65536, 0);
       region1=AllocatePages(0, regionsize, 0);
       memset(region1, 0xbe, regionsize);
       ReleasePages(region2, 65536, 0);
@@ -109,7 +113,7 @@ int main(void)
       size_t allocations=0, releases=0;
       void *region;
       start=GetUsCount();
-      region=AllocatePages(0, regionsize, USERPAGE_TOPDOWN);
+      region=AllocatePages(0, regionsize, 0);
       end=GetUsCount();
       printf("Allocating %uMb (%u pages) takes %lf ms\n", regionsize/1024/1024, pagesinregion, (end-start)/1000000000.0);
       start=GetUsCount();
@@ -209,9 +213,7 @@ int main(void)
       end=GetUsCount();
       times[m]=end-start;
       opcounts[m]=opcount;
-#ifdef NDEBUG
-      if(!(m & 15))
-#endif
+      if(!(m & 63))
       printf("%d allocations (%uMb) takes %lf ms (%lf ops/sec)\n", m, bytesallocated/1024/1024, times[m]/1000000000.0, opcounts[m]/(times[m]/1000000000000.0));
     }
     opcount=0;
@@ -241,21 +243,21 @@ int main(void)
       {
         printf("*** Free block remaining %p - %p\n", r->start, r->end);
       }
-      REGION_FOREACH(r, regionA_tree_s, &upper.regiontreeA)
-      {
-        printf("*** Allocated block remaining %p - %p\n", r->start, r->end);
-      }
-      REGION_FOREACH(r, regionA_tree_s, &upper.regiontreeA)
-      {
-        printf("*** Allocated block remaining %p - %p\n", r->start, r->end);
-      }
       assert(REGION_EMPTY(&lower.regiontreeA));
       assert(REGION_EMPTY(&lower.regiontreeL));
+#if 0
+      REGION_FOREACH(r, regionA_tree_s, &upper.regiontreeA)
+      {
+        printf("*** Allocated block remaining %p - %p\n", r->start, r->end);
+      }
+      REGION_FOREACH(r, regionA_tree_s, &upper.regiontreeA)
+      {
+        printf("*** Allocated block remaining %p - %p\n", r->start, r->end);
+      }
       assert(REGION_EMPTY(&upper.regiontreeA));
       assert(REGION_EMPTY(&upper.regiontreeL));
+#endif
     }
-    CheckFreeRegionNodes(&regionstorage);
-    assert(!regionstorage);
     {
 	    FILE *oh;
       double opcount=0;

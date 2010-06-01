@@ -32,7 +32,7 @@ DEALINGS IN THE SOFTWARE.
 /* This is how many free pages relative to used pages to keep around before
 returning them to the system. It gets ignored if system free memory is
 perceived to be tight. */
-#define USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(usedpages, freepages) ((usedpages)/4)
+#define USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(usedpages, freepages) (usedpages)
 
 /* This is how many subsequent free operations must happen since a page was
 freed before it will be eligible to be returned to the system. It helps prevent
@@ -44,17 +44,13 @@ if system free memory is perceived to be tight. */
 checked, and it must be a power of two. */
 #define USERMODEPAGEALLOCATOR_SYSTEMFREEMEMORYCHECKRATE 64
 
-/* This turns on the storage of free page status in the top bit of the page frame.
-As on x86/x64 page frames start from one going upwards sequentially, this ought to
-always be safe and it saves a TLB fetch when scanning for pages to fill in. */
+/* This turns on the storage of free page metadata directly in the page tables which
+will halve the page table memory requirements. As on x86/x64 page frames start from
+one going upwards sequentially and will never use the top bit, this ought to always
+be safe. */
 #if (defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))) || (defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64)))
-#define USERMODEPAGEALLOCATOR_USEUNSAFEQUICKFREEPAGEINDICATOR
+//#define USERMODEPAGEALLOCATOR_USECOMPACTFREEPAGEINDICATOR
 #endif
-
-/* This turns on prefetching of the first cache line of free pages when modifying
-a page's free status. It ought to make the code go much quicker, but it doesn't on
-my machine at least :( */
-/*#define USERMODEPAGEALLOCATOR_USEPREFETCHING*/
 
 /* This puts the user mode page allocator into debug config which means that as
 much buffering and caching is disabled as possible in order to best test the code. */
@@ -110,22 +106,14 @@ much buffering and caching is disabled as possible in order to best test the cod
 #define REGION_FOREACH(var, treetype, treevar)    NEDTRIE_FOREACH(var, treetype, treevar)
 #define REGION_HASNODEHEADER(treevar, node, link) NEDTRIE_HASNODEHEADER(treevar, node, link)
 
-#if defined(__x86_64__) || defined(_M_X64)
-#define REGIONNODEALIGNMENT 128
-#else
-#define REGIONNODEALIGNMENT 64
-#endif
+typedef struct RegionStorage_s RegionStorage_t;
 typedef struct region_node_s region_node_t;
-struct STRUCTUREALIGNMENT(REGIONNODEALIGNMENT) region_node_s {
-    REGION_ENTRY(region_node_s) linkA; /* by start addr */
-    REGION_ENTRY(region_node_s) linkL; /* by length */
-    region_node_t *prev, *next;
-    void *start, *end;
-#if defined(__x86_64__) || defined(_M_X64)
-    char padding[16];
-#else
-    char padding[8];
-#endif
+struct region_node_s {
+  RegionStorage_t *owner;
+  region_node_t *prev, *next;        /* Always keep owner, prev at top */
+  REGION_ENTRY(region_node_s) linkA; /* by start addr */
+  REGION_ENTRY(region_node_s) linkL; /* by length */
+  void *start, *end;
 };
 typedef struct regionA_tree_s regionA_tree_t;
 REGION_HEAD(regionA_tree_s, region_node_s);
@@ -599,37 +587,33 @@ size_t OSRemapMemoryPagesOntoAddrs(void *RESTRICT *addrs, size_t entries, PageFr
 
 #endif
 
-#ifdef USERMODEPAGEALLOCATOR_USEUNSAFEQUICKFREEPAGEINDICATOR
-#define USERMODEPAGEALLOCATOR_ISPAGEFREE(pageframe, freepage) ((pageframe) & ((size_t)1<<(8*sizeof(size_t)-1)))
-#define USERMODEPAGEALLOCATOR_SETPAGEFREEBIT(pageframe)       ((pageframe) | ((size_t)1<<(8*sizeof(size_t)-1)))
-#define USERMODEPAGEALLOCATOR_MASKOUTPAGEFREEBIT(pageframe)   ((pageframe) & ~((size_t)1<<(8*sizeof(size_t)-1)))
-#else
-#define USERMODEPAGEALLOCATOR_ISPAGEFREE(pageframe, freepage) (FREEPAGEHEADERMAGIC==(freepage)->magic)
-#define USERMODEPAGEALLOCATOR_SETPAGEFREEBIT(pageframe)       (pageframe)
-#define USERMODEPAGEALLOCATOR_MASKOUTPAGEFREEBIT(pageframe)   (pageframe)
-#endif
-
 /* Maps an address reservation */
-#define FREEPAGEHEADERMAGIC (*(size_t *)"UMPAFREE")
-typedef struct FreePageHeader_t FreePageHeader;
-struct STRUCTUREALIGNMENT(4096) FreePageHeader_t
+typedef struct FreePageNodeStorage_s FreePageNodeStorage_t;
+typedef struct FreePageNode_t FreePageNode;
+struct FreePageNode_t
 {
-  size_t magic;
-  FreePageHeader *older, *newer;
-  size_t age;
-  size_t dirty;
+  FreePageNodeStorage_t *owner;
+  FreePageNode *older, *newer;        /* Always keep owner + older at top */
+  void *freepage;
+  PageFrameType pageframe;
+  size_t dirty: 1;
+  size_t age  :(8*sizeof(size_t)-1);
 };
-static void ClearFreePageHeader(FreePageHeader *RESTRICT fph)
-{
-#if 1
-  memset(fph, 0, sizeof(FreePageHeader));
-#else
-  fph->magic=0;
-  fph->older=fph->newer=0;
-  fph->age=fph->dirty=0;
-#endif
-}
+static FreePageNode *AllocateFPN(void);
+static void FreeFPN(FreePageNode *node);
+
 typedef struct AddressSpaceReservation_s AddressSpaceReservation_t;
+#ifdef USERMODEPAGEALLOCATOR_USECOMPACTFREEPAGEINDICATOR
+typedef union PageMapping_t PageMapping;
+union PageMapping_t
+#else
+typedef struct PageMapping_t PageMapping;
+struct PageMapping_t
+#endif
+{
+  PageFrameType pageframe;      /* Actually the pageframe shifted left by one and the bottom bit always set */
+  FreePageNode *freepagenode;
+};
 static struct AddressSpaceReservation_s
 {
   OSAddressSpaceReservationData OSreservedata;
@@ -637,42 +621,92 @@ static struct AddressSpaceReservation_s
   void *front, *frontptr;         /* Grows upward */
   void *back, *backptr;           /* Grows downward */
   size_t opcount;
-  FreePageHeader *oldestclean, *newestclean;
-  FreePageHeader *oldestdirty, *newestdirty;
+  FreePageNode *oldestclean, *newestclean;
+  FreePageNode *oldestdirty, *newestdirty;
+  FreePageNode *nodestore;
   size_t freepages;
   size_t usedpages;               /* Doesn't include pages used to store this structure */
-  PageFrameType pagemapping[1];   /* Includes this structure */
+  PageMapping pagemapping[1];     /* Includes this structure */
 } *RESTRICT addressspacereservation;
+#ifdef USERMODEPAGEALLOCATOR_USECOMPACTFREEPAGEINDICATOR
+#define ISPAGEFREE(pagemapping)       (!((size_t)((pagemapping).pageframe) & 1))
+#define PAGEFRAME(pagemapping)        (ISPAGEFREE(pagemapping) ? ((pagemapping).freepagenode)->pageframe : (PageFrameType)((size_t)((pagemapping).pageframe)>>1))
+#define SETPAGEFRAME(pagemapping, pf) ((pagemapping).pageframe=!(pf) ? 0 : (PageFrameType)(((size_t)(pf)<<1)|1))
+#define SETPAGEFREE(pagemapping, fpn) ((fpn)->pageframe=(PageFrameType)((size_t)((pagemapping).pageframe)>>1), (pagemapping).freepagenode=(fpn))
+#define SETPAGEUSED(pagemapping, pf)  (SETPAGEFRAME((pagemapping), (pf))
+#else
+#define ISPAGEFREE(pagemapping)       (((pagemapping).freepagenode))
+#define PAGEFRAME(pagemapping)        ((pagemapping).pageframe)
+#define SETPAGEFRAME(pagemapping, pf) ((pagemapping).pageframe=(pf))
+#define SETPAGEFREE(pagemapping, fpn) ((fpn)->pageframe=((pagemapping).pageframe), (pagemapping).freepagenode=(fpn))
+#define SETPAGEUSED(pagemapping, pf)  (SETPAGEFRAME((pagemapping), (pf)), (pagemapping).freepagenode=0)
+#endif
+
 
 static void ValidateFreePageLists(AddressSpaceReservation_t *RESTRICT addr)
 {
 #ifndef NDEBUG
-#if 0
-  FreePageHeader *RESTRICT freepage;
+#if 1
+  FreePageNode *RESTRICT fpn;
   size_t count=0;
-  for(freepage=addr->oldestclean; freepage; freepage=freepage->newer)
+  PageMapping *RESTRICT pf;
+  size_t n, freepagepfidx;
+  for(fpn=addr->oldestclean; fpn; fpn=fpn->newer)
   {
-    size_t freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
-    assert(addr->pagemapping[freepagepfidx]);
-    assert(FREEPAGEHEADERMAGIC==freepage->magic);
-    assert((!freepage->older && addr->oldestclean==freepage) || freepage->older->newer==freepage);
-    assert((!freepage->newer && addr->newestclean==freepage) || freepage->newer->older==freepage);
-    assert(freepage->age<=addr->opcount);
-    assert(!freepage->dirty);
+    freepagepfidx=((size_t)fpn->freepage-(size_t)addr)/PAGE_SIZE;
+    assert(ISPAGEFREE(addr->pagemapping[freepagepfidx]));
+    assert(addr->pagemapping[freepagepfidx].freepagenode==fpn);
+    assert((!fpn->older && addr->oldestclean==fpn) || fpn->older->newer==fpn);
+    assert((!fpn->newer && addr->newestclean==fpn) || fpn->newer->older==fpn);
+    assert(fpn->age<=addr->opcount);
+    assert(!fpn->dirty);
     count++;
   }
-  for(freepage=addr->oldestdirty; freepage; freepage=freepage->newer)
+  for(fpn=addr->oldestdirty; fpn; fpn=fpn->newer)
   {
-    size_t freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
-    assert(addr->pagemapping[freepagepfidx]);
-    assert(FREEPAGEHEADERMAGIC==freepage->magic);
-    assert((!freepage->older && addr->oldestdirty==freepage) || freepage->older->newer==freepage);
-    assert((!freepage->newer && addr->newestdirty==freepage) || freepage->newer->older==freepage);
-    assert(freepage->age<=addr->opcount);
-    assert(freepage->dirty);
+    freepagepfidx=((size_t)fpn->freepage-(size_t)addr)/PAGE_SIZE;
+    assert(ISPAGEFREE(addr->pagemapping[freepagepfidx]));
+    assert(addr->pagemapping[freepagepfidx].freepagenode==fpn);
+    assert((!fpn->older && addr->oldestdirty==fpn) || fpn->older->newer==fpn);
+    assert((!fpn->newer && addr->newestdirty==fpn) || fpn->newer->older==fpn);
+    assert(fpn->age<=addr->opcount);
+    assert(fpn->dirty);
     count++;
   }
   assert(count==addr->freepages);
+#if 0
+  count=0;
+  for(pf=addr->pagemapping, n=0; n<((size_t) addr->frontptr + 16*PAGE_SIZE - (size_t) addr); pf++, n+=PAGE_SIZE)
+  {
+    if(pf->pageframe && ISPAGEFREE(*pf))
+    {
+      fpn=pf->freepagenode;
+      freepagepfidx=((size_t)fpn->freepage-(size_t)addr)/PAGE_SIZE;
+      assert(addr->pagemapping+freepagepfidx==pf);
+      assert((size_t)fpn->freepage-(size_t)addr==n);
+      assert((!fpn->older && addr->oldestdirty==fpn) || fpn->older->newer==fpn);
+      assert((!fpn->newer && addr->newestdirty==fpn) || fpn->newer->older==fpn);
+      assert(fpn->age<=addr->opcount);
+      count++;
+    }
+  }
+  n=((size_t) addr->backptr - 16*PAGE_SIZE - (size_t) addr);
+  for(pf=addr->pagemapping+n/PAGE_SIZE; n<((size_t) addr->back - (size_t) addr); pf++, n+=PAGE_SIZE)
+  {
+    if(pf->pageframe && ISPAGEFREE(*pf))
+    {
+      fpn=pf->freepagenode;
+      freepagepfidx=((size_t)fpn->freepage-(size_t)addr)/PAGE_SIZE;
+      assert(addr->pagemapping+freepagepfidx==pf);
+      assert((size_t)fpn->freepage-(size_t)addr==n);
+      assert((!fpn->older && addr->oldestdirty==fpn) || fpn->older->newer==fpn);
+      assert((!fpn->newer && addr->newestdirty==fpn) || fpn->newer->older==fpn);
+      assert(fpn->age<=addr->opcount);
+      count++;
+    }
+  }
+  assert(count==addr->freepages);
+#endif
 #endif
 #endif
 }
@@ -681,18 +715,19 @@ static void ValidatePageMappings(AddressSpaceReservation_t *RESTRICT addr)
 #ifndef NDEBUG
 #if 0
 #ifdef _MSC_VER
-  PageFrameType *RESTRICT pf;
+  PageMapping *RESTRICT pf;
   size_t n;
   for(pf=addr->pagemapping, n=0; n<((size_t) addr->frontptr + 16*PAGE_SIZE - (size_t) addr); pf++, n+=PAGE_SIZE)
   {
     volatile size_t *RESTRICT pageaddr=(size_t *RESTRICT)((size_t) addr + n + 0x300/* For some odd reason Windows maps 0x2F0 extra bytes */);
     int faulted=0;
-    if(*pf && n)
+    PageFrameType t=pf->pageframe ? PAGEFRAME(*pf) : 0;
+    if(pf->pageframe && n)
     { /* Verify that this is indeed a valid page frame */
-      PageFrameType t=USERMODEPAGEALLOCATOR_MASKOUTPAGEFREEBIT(*pf);
       assert(OSRemapMemoryPagesOntoAddr((void *)((size_t) addr + n), 1, NULL, &addr->OSreservedata));
       assert(OSRemapMemoryPagesOntoAddr((void *)((size_t) addr + n), 1, &t, &addr->OSreservedata));
     }
+#if 0
 #if 1
     {
       char buffer[8];
@@ -708,12 +743,18 @@ static void ValidatePageMappings(AddressSpaceReservation_t *RESTRICT addr)
       faulted=1;
     }
 #endif
-    assert(faulted==!*pf);
+    assert(faulted==!t);
+#endif
   }
 #endif
 #endif
 #endif
 }
+
+
+
+
+
 static AddressSpaceReservation_t *ReserveSpace(size_t space)
 {
   const size_t RESERVEALWAYSLEAVEFREE=64*1024*1024; /* Windows goes seriously screwy if you take away all address space */
@@ -729,7 +770,7 @@ static AddressSpaceReservation_t *ReserveSpace(size_t space)
   while(space>=RESERVEALWAYSLEAVEFREE && !(addrR=OSReserveAddrSpace(space)).addr)
     space>>=1;
   if(space<RESERVEALWAYSLEAVEFREE) return 0;
-  pagemappingsize=sizeof(AddressSpaceReservation_t)+sizeof(PageFrameType)*((space/PAGE_SIZE)-2);
+  pagemappingsize=sizeof(AddressSpaceReservation_t)+sizeof(PageMapping)*((space/PAGE_SIZE)-2);
   pagemappingsize=(pagemappingsize+PAGE_SIZE-1) &~(PAGE_SIZE-1);
   pagemappingsize/=PAGE_SIZE;
   /* We now need pagemappingsize number of pages in order to store the mapping tables, but
@@ -754,7 +795,7 @@ static AddressSpaceReservation_t *ReserveSpace(size_t space)
     /* Add these new pages to the page mappings. Because we are premapping in new pages,
     we are guaranteed to have memory already there ready for us. */
     for(torequest=0; torequest<pagesallocated; torequest++)
-      addr->pagemapping[n+torequest]=pagebuffer[torequest];
+      SETPAGEFRAME(addr->pagemapping[n+torequest], pagebuffer[torequest]);
   }
   ValidatePageMappings(addr);
   return addr;
@@ -764,7 +805,15 @@ badexit:
     OSReleaseMemoryPages(pagebuffer, pagesallocated, &addrR);
   if(addr)
   { /* Now throw away any previously stored */
-    OSReleaseMemoryPages(addr->pagemapping, n, &addrR);
+    size_t m, o, torequest;
+    for(m=0; m<n; m+=torequest)
+    {
+      torequest=sizeof(pagebuffer)/sizeof(PageFrameType);;
+      if(torequest<m-n) torequest=m-n;
+      for(o=m; o<m+torequest; o++)
+        pagebuffer[o]=PAGEFRAME(addr->pagemapping[o]);
+      OSReleaseMemoryPages(pagebuffer, torequest, &addrR);
+    }
   }
   OSReleaseAddrSpace(&addrR, space);
   return 0;
@@ -800,65 +849,63 @@ typedef struct STRUCTUREALIGNMENT(16) RemapMemoryPagesBlock_t
   PageFrameType pageframes[REMAPMEMORYPAGESBLOCKSIZE];
   size_t idx;
 } RemapMemoryPagesBlock;
-static size_t FillWithFreePages(AddressSpaceReservation_t *RESTRICT addr, RemapMemoryPagesBlock *RESTRICT memtodecommit, RemapMemoryPagesBlock *RESTRICT memtocommit, void *freespaceaddr, PageFrameType *RESTRICT start, PageFrameType *RESTRICT end, int needclean)
+static size_t FillWithFreePages(AddressSpaceReservation_t *RESTRICT addr, RemapMemoryPagesBlock *RESTRICT memtodecommit, RemapMemoryPagesBlock *RESTRICT memtocommit, void *freespaceaddr, PageMapping *RESTRICT start, PageMapping *RESTRICT end, int needclean)
 {
   size_t n, pages=end-start;
-  PageFrameType *RESTRICT pf=start;
+  PageMapping *RESTRICT pf=start;
   for(n=0; n<pages && addr->freepages; n++, pf++, freespaceaddr=(void *)((size_t) freespaceaddr + PAGE_SIZE))
   {
-    FreePageHeader *RESTRICT freepage, *RESTRICT *RESTRICT freepageaddr=0, *RESTRICT *RESTRICT freepagenaddr=0;
+    FreePageNode *RESTRICT fpn, *RESTRICT *RESTRICT fpnaddr=0, *RESTRICT *RESTRICT fpnnaddr=0;
     PageFrameType freepageframe;
     size_t freepagepfidx;
-    assert(!*pf);
+    assert(!pf->pageframe);
     if(needclean && addr->oldestclean)
     {
       assert(!addr->oldestclean->older);
-      freepage=addr->oldestclean;
-      freepageaddr=&addr->oldestclean;
-      freepagenaddr=&addr->newestclean;
+      fpn=addr->oldestclean;
+      fpnaddr=&addr->oldestclean;
+      fpnnaddr=&addr->newestclean;
     }
     else if(addr->oldestdirty)
     {
       assert(!addr->oldestdirty->older);
-      freepage=addr->oldestdirty;
-      freepageaddr=&addr->oldestdirty;
-      freepagenaddr=&addr->newestdirty;
+      fpn=addr->oldestdirty;
+      fpnaddr=&addr->oldestdirty;
+      fpnnaddr=&addr->newestdirty;
     }
     else if(!needclean && addr->oldestclean)
     {
       assert(!addr->oldestclean->older);
-      freepage=addr->oldestclean;
-      freepageaddr=&addr->oldestclean;
-      freepagenaddr=&addr->newestclean;
+      fpn=addr->oldestclean;
+      fpnaddr=&addr->oldestclean;
+      fpnnaddr=&addr->newestclean;
     }
     /* Add to the list of pages to demap */
-    memtodecommit->addrs[memtodecommit->idx]=freepage;
+    memtodecommit->addrs[memtodecommit->idx]=fpn->freepage;
     /*memtodecommit->pageframes[memtodecommit->idx]=0;*/
     memtodecommit->idx++;
     /* Add to the list of pages to remap */
-    freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
-    freepageframe=addr->pagemapping[freepagepfidx];
-    addr->pagemapping[freepagepfidx]=0;
+    freepagepfidx=((size_t)fpn->freepage-(size_t)addr)/PAGE_SIZE;
+    freepageframe=fpn->pageframe;
+    SETPAGEUSED(addr->pagemapping[freepagepfidx], 0);
     memtocommit->addrs[memtocommit->idx]=freespaceaddr;
-    *pf=USERMODEPAGEALLOCATOR_MASKOUTPAGEFREEBIT(freepageframe);
-    memtocommit->pageframes[memtocommit->idx]=USERMODEPAGEALLOCATOR_MASKOUTPAGEFREEBIT(freepageframe);
+    SETPAGEUSED(*pf, freepageframe);
+    memtocommit->pageframes[memtocommit->idx]=freepageframe;
     memtocommit->idx++;
     /* Remove from free page lists */
-    assert(FREEPAGEHEADERMAGIC==freepage->magic);
-    assert(!freepage->older);
-    *freepageaddr=freepage->newer;
-    if(*freepageaddr)
-      (*freepageaddr)->older=0;
+    assert(!fpn->older);
+    *fpnaddr=fpn->newer;
+    if(*fpnaddr)
+      (*fpnaddr)->older=0;
     else
-      *freepagenaddr=0;
+      *fpnnaddr=0;
     addr->freepages--;
     addr->usedpages++;
 #if MMAP_CLEARS
     if(needclean && freepage->dirty)
-      memset(freepage, 0, PAGE_SIZE);
-    else
+      memset(fpn->freepage, 0, PAGE_SIZE);
 #endif
-      ClearFreePageHeader(freepage);
+    FreeFPN(fpn);
     ValidateFreePageLists(addr);
 
     if(REMAPMEMORYPAGESBLOCKSIZE==memtocommit->idx)
@@ -883,10 +930,11 @@ static size_t FillWithFreePages(AddressSpaceReservation_t *RESTRICT addr, RemapM
     for(m=memtocommit->idx; m<memtocommit->idx+newpagesobtained; m++, pf++, freespaceaddr=(void *)((size_t) freespaceaddr + PAGE_SIZE))
     {
       memtocommit->addrs[m]=freespaceaddr;
-      *pf=memtocommit->pageframes[m];
+      SETPAGEUSED(*pf, memtocommit->pageframes[m]);
     }
     memtocommit->idx+=newpagesobtained;
     n+=newpagesobtained;
+    addr->usedpages+=newpagesobtained;
     if(REMAPMEMORYPAGESBLOCKSIZE==memtocommit->idx)
     {
       if(memtodecommit->idx) OSRemapMemoryPagesOntoAddrs(memtodecommit->addrs, memtodecommit->idx, NULL, &addr->OSreservedata);
@@ -897,46 +945,46 @@ static size_t FillWithFreePages(AddressSpaceReservation_t *RESTRICT addr, RemapM
   }
   return n;
 }
-static int DetachFreePage(AddressSpaceReservation_t *RESTRICT addr, PageFrameType *RESTRICT pagemappings, FreePageHeader *RESTRICT freepage)
+static int DetachFreePage(AddressSpaceReservation_t *RESTRICT addr, FreePageNode *RESTRICT fpn)
 {
   int wipeall=0;
-  FreePageHeader *RESTRICT *RESTRICT prevnextaddr=0, *RESTRICT *RESTRICT nextprevaddr=0;
-  *pagemappings=USERMODEPAGEALLOCATOR_MASKOUTPAGEFREEBIT(*pagemappings);
-  if(freepage->older)
+  FreePageNode *RESTRICT *RESTRICT prevnextaddr=0, *RESTRICT *RESTRICT nextprevaddr=0;
+  if(fpn->older)
   {
-    assert(freepage->older->newer==freepage);
-    prevnextaddr=&freepage->older->newer;
+    assert(fpn->older->newer==fpn);
+    prevnextaddr=&fpn->older->newer;
   }
-  else if(addr->oldestdirty==freepage)
+  else if(addr->oldestdirty==fpn)
   {
-    assert(!freepage->older);
+    assert(!fpn->older);
     prevnextaddr=&addr->oldestdirty;
     wipeall=1;
   }
-  else if(addr->oldestclean==freepage)
+  else if(addr->oldestclean==fpn)
   {
-    assert(!freepage->older);
+    assert(!fpn->older);
     prevnextaddr=&addr->oldestclean;
   }
-  if(freepage->newer)
+  if(fpn->newer)
   {
-    assert(freepage->newer->older==freepage);
-    nextprevaddr=&freepage->newer->older;
+    assert(fpn->newer->older==fpn);
+    nextprevaddr=&fpn->newer->older;
   }
-  else if(addr->newestdirty==freepage)
+  else if(addr->newestdirty==fpn)
   {
-    assert(!freepage->newer);
+    assert(!fpn->newer);
     nextprevaddr=&addr->newestdirty;
     wipeall=1;
   }
-  else if(addr->newestclean==freepage)
+  else if(addr->newestclean==fpn)
   {
-    assert(!freepage->newer);
+    assert(!fpn->newer);
     nextprevaddr=&addr->newestclean;
   }
-  if(!wipeall) wipeall=(int)freepage->dirty;
-  *prevnextaddr=freepage->newer;
-  *nextprevaddr=freepage->older;
+  if(!wipeall) wipeall=(int)fpn->dirty;
+  assert(prevnextaddr && nextprevaddr);
+  *prevnextaddr=fpn->newer;
+  *nextprevaddr=fpn->older;
   return wipeall;
 }
 static int ReleasePages(void *mem, size_t size, int dontfreeVA);
@@ -957,7 +1005,7 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
       RemapMemoryPagesBlock memtodecommit, memtocommit;
       size_t n, sizeinpages=size/PAGE_SIZE;
       void *ret=mem ? mem : ((fromback) ? (void *)((size_t) addr->backptr - size) : addr->frontptr), *retptr;
-      PageFrameType *RESTRICT pagemappingsbase=addr->pagemapping+((size_t)ret-(size_t)addr)/PAGE_SIZE, *RESTRICT pagemappings;
+      PageMapping *RESTRICT pagemappingsbase=addr->pagemapping+((size_t)ret-(size_t)addr)/PAGE_SIZE, *RESTRICT pagemappings;
       int needtofillwithfree=0;
       memtodecommit.idx=memtocommit.idx=0;
       if(!mem)
@@ -975,37 +1023,22 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
         the blank spots sixteen at a time. */
         pagemappings=pagemappingsbase;
         retptr=ret;
-#ifdef USERMODEPAGEALLOCATOR_USEPREFETCHING
-        { /* Prefetch these - it makes a huge difference to speed! */
-          PageFrameType *RESTRICT pagemappings2=pagemappings;
-          FreePageHeader *RESTRICT freepage2=(FreePageHeader *RESTRICT) retptr;
-          for(n=0; n<sizeinpages; n++, pagemappings2++, freepage2=(FreePageHeader *RESTRICT)((size_t)freepage2 + PAGE_SIZE))
-          {
-            if(*pagemappings && USERMODEPAGEALLOCATOR_ISPAGEFREE(*pagemappings, freepage2))
-            {
-              PREFETCHCACHELINE(freepage2, 1, 3);
-            }
-          }
-        }
-#endif
         for(n=0; n<sizeinpages; n++, pagemappings++, retptr=(void *)((size_t)retptr + PAGE_SIZE))
         {
-          if(*pagemappings)
+          if(pagemappings->pageframe && ISPAGEFREE(*pagemappings))
           {
-            FreePageHeader *RESTRICT freepage=(FreePageHeader *RESTRICT) retptr;
-            if(USERMODEPAGEALLOCATOR_ISPAGEFREE(*pagemappings, freepage))
-            {
-              int wipeall=DetachFreePage(addr, pagemappings, freepage);
-              addr->freepages--;
-              addr->usedpages++;
+            FreePageNode *RESTRICT fpn=pagemappings->freepagenode;
+            int wipeall=DetachFreePage(addr, fpn);
+            assert(fpn->freepage==retptr);
+            SETPAGEUSED(*pagemappings, fpn->pageframe);
+            addr->freepages--;
+            addr->usedpages++;
 #if MMAP_CLEARS
-              if(fromback && wipeall)
-                memset(freepage, 0, PAGE_SIZE);
-              else
+            if(fromback && wipeall)
+              memset(retptr, 0, PAGE_SIZE);
 #endif
-                ClearFreePageHeader(freepage);
-              ValidateFreePageLists(addr);
-            }
+            FreeFPN(fpn);
+            ValidateFreePageLists(addr);
           }
           else
             needtofillwithfree=1;
@@ -1016,12 +1049,12 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
           retptr=ret;
           for(n=0; n<sizeinpages; n++, pagemappings++, retptr=(void *)((size_t)retptr + PAGE_SIZE))
           {
-            if(!*pagemappings)
+            if(!pagemappings->pageframe)
             {
               void *emptyaddrstart=retptr;
-              PageFrameType *emptyframestart=pagemappings;
+              PageMapping *RESTRICT emptyframestart=pagemappings;
               size_t filled;
-              for(; n<sizeinpages && !*pagemappings; n++, pagemappings++, retptr=(void *)((size_t)retptr + PAGE_SIZE));
+              for(; n<sizeinpages && !pagemappings->pageframe; n++, pagemappings++, retptr=(void *)((size_t)retptr + PAGE_SIZE));
               if(pagemappings-emptyframestart!=(filled=FillWithFreePages(addr, &memtodecommit, &memtocommit, emptyaddrstart, emptyframestart, pagemappings, fromback)))
               { /* We failed to allocate everything, so release */
                 assert(0);
@@ -1063,6 +1096,12 @@ static AddressSpaceReservation_t *RESTRICT AddressSpaceFromMem(int *RESTRICT fro
   }
   return 0;
 }
+/* Return 0 for used, 1 for free and 2 for empty. */
+static int IsPageFreeOrEmpty(AddressSpaceReservation_t *RESTRICT addr, void *mem)
+{
+  PageMapping *RESTRICT pagemappings=addr->pagemapping+((size_t)mem-(size_t)addr)/PAGE_SIZE;
+  return !pagemappings->pageframe ? 2 : (ISPAGEFREE(*pagemappings) ? 1 : 0);
+}
 static double mypow8(double v)
 {
   double t1=v*v;
@@ -1075,9 +1114,9 @@ static int ReleasePages(void *mem, size_t size, int dontfreeVA)
   AddressSpaceReservation_t *RESTRICT addr=AddressSpaceFromMem(&fromback, mem);
   if(addr)
   {
-    FreePageHeader *RESTRICT freepage=(FreePageHeader *RESTRICT) mem;
     size_t n, sizeinpages=size/PAGE_SIZE;
-    PageFrameType *RESTRICT pagemappings=addr->pagemapping+((size_t)freepage-(size_t)addr)/PAGE_SIZE;
+    void *mempage=mem;
+    PageMapping *RESTRICT pagemappings=addr->pagemapping+((size_t)mem-(size_t)addr)/PAGE_SIZE;
     int dofreesystemmemorycheck=0;
     if(mem>=addr->frontptr && mem<addr->backptr)
     {
@@ -1085,82 +1124,76 @@ static int ReleasePages(void *mem, size_t size, int dontfreeVA)
       assert(0);
       abort();
     }
-#ifdef USERMODEPAGEALLOCATOR_USEPREFETCHING
-    { /* Prefetch these - it makes a huge difference to speed! */
-      PageFrameType *RESTRICT pagemappings2=pagemappings;
-      FreePageHeader *RESTRICT freepage2=freepage;
-      for(n=0; n<sizeinpages; n++, pagemappings2++, freepage2=(FreePageHeader *RESTRICT)((size_t)freepage2 + PAGE_SIZE))
-      {
-        if(*pagemappings && !USERMODEPAGEALLOCATOR_ISPAGEFREE(*pagemappings, freepage2))
-        { /* We're going to be exclusively writing to it */
-          PREFETCHCACHELINE(freepage2, 1, 0);
-        }
-      }
-    }
-#endif
-    for(n=0; n<sizeinpages; n++, pagemappings++, freepage=(FreePageHeader *RESTRICT)((size_t)freepage + PAGE_SIZE))
+    for(n=0; n<sizeinpages; n++, pagemappings++, mempage=(void *)((size_t)mempage + PAGE_SIZE))
     {
-      if(*pagemappings && !USERMODEPAGEALLOCATOR_ISPAGEFREE(*pagemappings, freepage))
+      if(pagemappings->pageframe && !ISPAGEFREE(*pagemappings))
       {
-        *pagemappings=USERMODEPAGEALLOCATOR_SETPAGEFREEBIT(*pagemappings);
-        freepage->magic=FREEPAGEHEADERMAGIC;
-        freepage->older=addr->newestdirty;
-        freepage->newer=0;
-        freepage->age=addr->opcount;
-        freepage->dirty=1;
+        FreePageNode *RESTRICT fpn=AllocateFPN();
+        if(!fpn) break;
+        fpn->freepage=mempage;
+        SETPAGEFREE(*pagemappings, fpn);
+        fpn->older=addr->newestdirty;
+        fpn->newer=0;
+        fpn->dirty=1;
+        fpn->age=addr->opcount;
         if(addr->newestdirty)
         {
           assert(!addr->newestdirty->newer);
-          addr->newestdirty->newer=freepage;
+          addr->newestdirty->newer=fpn;
         }
         else
-          addr->oldestdirty=freepage;
-        addr->newestdirty=freepage;
+          addr->oldestdirty=fpn;
+        addr->newestdirty=fpn;
         addr->freepages++;
         addr->usedpages--;
         ValidateFreePageLists(addr);
       }
     }
-#if 0
+#if 1
     /* Do I need to return memory to the system? */
     if((dofreesystemmemorycheck=!(addr->opcount++ & (USERMODEPAGEALLOCATOR_SYSTEMFREEMEMORYCHECKRATE-1))) || addr->freepages>USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(addr->usedpages, addr->freepages))
     {
-      FreePageHeader *RESTRICT freepage;
-      size_t pagestofree=USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(addr->usedpages, addr->freepages)<=addr->freepages ? addr->freepages-USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(addr->usedpages, addr->freepages) : 0, pagesmustfree=0;
+      size_t pagestofree=USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(addr->usedpages, addr->freepages), pagesmustfree=0;
       static double memorypressurescale=0;
       if(dofreesystemmemorycheck)
         memorypressurescale=mypow8(OSSystemMemoryPressure());
+      pagestofree=pagestofree>addr->usedpages ? 0 : addr->usedpages-pagestofree;
       pagesmustfree=(size_t)(addr->freepages*memorypressurescale);
       pagestofree+=pagesmustfree;
       /* Don't bother with the overhead of freeing memory unless you have a sizeable chunk to do at once */
       if(pagestofree>=REMAPMEMORYPAGESBLOCKSIZE)
       {
         int done=0;
+        FreePageNode *RESTRICT fpn;
+        size_t pagestofreeorig=pagestofree;
         RemapMemoryPagesBlock memtodecommit;
         memtodecommit.idx=0;
         /* Try to cull dirty before clean pages if poss */
-        for(freepage=addr->oldestdirty; !done; freepage=addr->oldestdirty, pagestofree--, pagesmustfree=pagesmustfree ? pagesmustfree-1 : 0)
+        for(fpn=addr->oldestdirty; !done; fpn=addr->oldestdirty, pagestofree--, pagesmustfree=pagesmustfree ? pagesmustfree-1 : 0)
         {
           size_t freepagepfidx;
-          if(!freepage || !pagestofree || (!pagesmustfree && addr->opcount-freepage->age<USERMODEPAGEALLOCATOR_FREEPAGECACHEAGE(addr->usedpages, addr->freepages)))
+          if(!fpn || !pagestofree || (!pagesmustfree && addr->opcount-fpn->age<USERMODEPAGEALLOCATOR_FREEPAGECACHEAGE(addr->usedpages, addr->freepages)))
           {
             done=1;
+#ifdef DEBUG
+            /*printf("FREEING %u pages\n", pagestofreeorig-pagestofree);*/
+#endif
             goto decommitpages;
           }
-          assert(FREEPAGEHEADERMAGIC==freepage->magic);
-          assert(!freepage->older);
-          addr->oldestdirty=freepage->newer;
+          assert(!fpn->older);
+          addr->oldestdirty=fpn->newer;
           if(addr->oldestdirty)
             addr->oldestdirty->older=0;
           else
             addr->newestdirty=0;
           assert(!addr->oldestclean); /* clean pages not implemented yet */
           addr->freepages--;
-          freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
-          memtodecommit.addrs[memtodecommit.idx]=freepage;
-          memtodecommit.pageframes[memtodecommit.idx]=USERMODEPAGEALLOCATOR_MASKOUTPAGEFREEBIT(addr->pagemapping[freepagepfidx]);
-          addr->pagemapping[freepagepfidx]=0;
+          freepagepfidx=((size_t)fpn->freepage-(size_t)addr)/PAGE_SIZE;
+          memtodecommit.addrs[memtodecommit.idx]=fpn->freepage;
+          memtodecommit.pageframes[memtodecommit.idx]=fpn->pageframe;
+          SETPAGEUSED(addr->pagemapping[freepagepfidx], 0);
           memtodecommit.idx++;
+          FreeFPN(fpn);
           ValidateFreePageLists(addr);
 
           if(REMAPMEMORYPAGESBLOCKSIZE==memtodecommit.idx)
@@ -1179,17 +1212,18 @@ decommitpages:
                 size_t n;
                 for(n=0; n<memtodecommit.idx; n++)
                 {
-                  freepage=(FreePageHeader *RESTRICT) memtodecommit.addrs[n];
-                  freepagepfidx=((size_t)freepage-(size_t)addr)/PAGE_SIZE;
-                  addr->pagemapping[freepagepfidx]=memtodecommit.pageframes[n];
-                  freepage->magic=FREEPAGEHEADERMAGIC;
-                  freepage->older=0;
-                  freepage->newer=addr->oldestdirty;
+                  fpn=AllocateFPN();
+                  fpn->freepage=memtodecommit.addrs[n];
+                  freepagepfidx=((size_t)fpn->freepage-(size_t)addr)/PAGE_SIZE;
+                  fpn->pageframe=memtodecommit.pageframes[n];
+                  SETPAGEFREE(addr->pagemapping[freepagepfidx], fpn);
+                  fpn->older=0;
+                  fpn->newer=addr->oldestdirty;
                   if(addr->oldestdirty)
-                    addr->oldestdirty->older=freepage;
+                    addr->oldestdirty->older=fpn;
                   else
-                    addr->newestdirty=freepage;
-                  addr->oldestdirty=freepage;
+                    addr->newestdirty=fpn;
+                  addr->oldestdirty=fpn;
                   addr->freepages++;
                   ValidateFreePageLists(addr);
                 }
@@ -1220,6 +1254,7 @@ decommitpages:
   return 0;
 }
 
+#if 0
 static int SwapPages(void *dest, void *start, void *end)
 {
   int destfromback;
@@ -1336,6 +1371,114 @@ commitpages:
   ValidatePageMappings(destaddr);
   return 1;
 }
+#endif
+
+/************************************************************************************/
+
+#ifdef USERMODEPAGEALLOCATOR_DEBUGCONFIG
+#define FREEPAGENODESTORAGESIZE (PAGE_SIZE*16)
+#else
+#define FREEPAGENODESTORAGESIZE (PAGE_SIZE*64)
+#endif
+#define FREEPAGENODESPERSTORAGE ((FREEPAGENODESTORAGESIZE-4*sizeof(void *))/sizeof(FreePageNode))
+static struct FreePageNodeStorage_s
+{
+  size_t magic;
+  FreePageNodeStorage_t *next;
+  FreePageNode *freefpns;
+  size_t freeitems;
+  FreePageNode freepagenodes[FREEPAGENODESPERSTORAGE];
+} fpnstorage, *RESTRICT lastfpnstorage;
+
+static FreePageNodeStorage_t *FindFreePageNodeStorage(void)
+{
+  int n;
+  FreePageNodeStorage_t *RESTRICT fpns;
+  if(!fpnstorage.magic)
+  {
+    fpns=&fpnstorage;
+    goto initstorage;
+  }
+  for(fpns=&fpnstorage; fpns; fpns=fpns->next)
+  {
+    lastfpnstorage=fpns;
+    if(fpns->freefpns)
+      return fpns;
+  }
+  /* Need to extend */
+  assert(sizeof(FreePageNodeStorage_t)<=FREEPAGENODESTORAGESIZE);
+  if(lastfpnstorage->next=fpns=(FreePageNodeStorage_t *) AllocatePages(0, FREEPAGENODESTORAGESIZE, USERPAGE_TOPDOWN))
+  {
+#ifdef DEBUG
+    printf("FreePageNodeStorage extends %p to %p\n", fpns, ((size_t)fpns+FREEPAGENODESTORAGESIZE));
+#endif
+#if !MMAP_CLEAR
+    memset(fpns, 0, FREEPAGENODESTORAGESIZE);
+#endif
+initstorage:
+    fpns->magic=*(size_t *)"UMPAFRPN";
+    for(n=FREEPAGENODESPERSTORAGE-1; n>=0; n--)
+    {
+      fpns->freepagenodes[n].owner=fpns;
+      fpns->freepagenodes[n].older=fpns->freefpns;
+      fpns->freefpns=&fpns->freepagenodes[n];
+    }
+    fpns->freeitems=FREEPAGENODESPERSTORAGE;
+  }
+  return fpns;
+}
+static INLINE FreePageNode *AllocateFPN(void)
+{
+  FreePageNode *RESTRICT ret;
+  if(!lastfpnstorage || !lastfpnstorage->freefpns)
+  {
+    if(!(lastfpnstorage=FindFreePageNodeStorage())) return 0;
+  }
+#ifdef DEBUG
+  {
+    FreePageNodeStorage_t *t;
+    for(t=&fpnstorage; t; t=t->next)
+    {
+      assert(*(size_t *)"UMPAFRPN"==t->magic);
+    }
+  }
+#endif
+  assert(lastfpnstorage->freefpns);
+  ret=lastfpnstorage->freefpns;
+  lastfpnstorage->freefpns=ret->older;
+  assert(ret->owner==lastfpnstorage);
+  ret->older=0;
+  lastfpnstorage->freeitems--;
+  return ret;
+}
+static int CheckFreeFPNs(FreePageNodeStorage_t *fpns)
+{
+  if(fpns->next)
+  {
+    if(CheckFreeFPNs(fpns->next))
+    {
+      assert(!fpns->next->next);
+#ifdef DEBUG
+      printf("FreePageNodeStorage releases %p to %p\n", fpns->next, ((size_t)(fpns->next)+FREEPAGENODESTORAGESIZE));
+#endif
+      ReleasePages(fpns->next, FREEPAGENODESTORAGESIZE, 0);
+      fpns->next=0;
+    }
+    else return 0;
+  }
+  return FREEPAGENODESPERSTORAGE==fpns->freeitems;
+}
+static INLINE void FreeFPN(FreePageNode *node)
+{
+  FreePageNodeStorage_t *RESTRICT fpns=node->owner;
+  memset((void *)((size_t) node + 2*sizeof(void *)), 0, sizeof(FreePageNode)-2*sizeof(void *));
+  node->older=fpns->freefpns;
+  fpns->freefpns=node;
+  /* If I'm empty and there is another storage after me, check if we need to free storage */
+  if(FREEPAGENODESPERSTORAGE==++fpns->freeitems && fpns->next && FREEPAGENODESPERSTORAGE==fpns->next->freeitems)
+    CheckFreeFPNs(&fpnstorage);
+}
+
 
 /************************************************************************************/
 
@@ -1344,90 +1487,108 @@ commitpages:
 #else
 #define REGIONSTORAGESIZE (PAGE_SIZE*4)
 #endif
-#define REGIONSPERSTORAGE ((REGIONSTORAGESIZE-3*sizeof(void *))/sizeof(region_node_t))
-typedef struct RegionStorage_s RegionStorage_t;
+#define REGIONSPERSTORAGE ((REGIONSTORAGESIZE-4*sizeof(void *))/sizeof(region_node_t))
 static struct RegionStorage_s
 {
   size_t magic;
   RegionStorage_t *next;
   region_node_t *freeregions;
-  char padding[REGIONSTORAGESIZE-(3*sizeof(void *)+REGIONSPERSTORAGE*sizeof(region_node_t))];
+  size_t freeitems;
   region_node_t regions[REGIONSPERSTORAGE];
-} *regionstorage;
-static size_t regionsallocated, regionsfree;
+} regionstorage, *RESTRICT lastregionstorage;
 
-static region_node_t *AllocateRegionNode(void)
+static RegionStorage_t *FindFreeRegionNodeStorage(void)
 {
   int n;
-  if(!regionstorage || !regionstorage->freeregions)
+  RegionStorage_t *RESTRICT fpns;
+  if(!regionstorage.magic)
   {
-    RegionStorage_t **_rs=!regionstorage ? &regionstorage : &regionstorage->next, *rs;
-    if(regionstorage) while(*_rs) _rs=&((*_rs)->next);
-    assert(128==sizeof(region_node_t) || 64==sizeof(region_node_t));
-    assert(sizeof(RegionStorage_t)<=REGIONSTORAGESIZE);
-    assert(!((size_t) (*_rs)->regions & (sizeof(region_node_t)-1)));
-    if((rs=*_rs=(RegionStorage_t *) AllocatePages(0, REGIONSTORAGESIZE, USERPAGE_TOPDOWN)))
-    {
+    fpns=&regionstorage;
+    goto initstorage;
+  }
+  for(fpns=&regionstorage; fpns; fpns=fpns->next)
+  {
+    lastregionstorage=fpns;
+    if(fpns->freeregions)
+      return fpns;
+  }
+  /* Need to extend */
+  assert(sizeof(RegionStorage_t)<=REGIONSTORAGESIZE);
+  if(lastregionstorage->next=fpns=(RegionStorage_t *) AllocatePages(0, REGIONSTORAGESIZE, USERPAGE_TOPDOWN))
+  {
 #ifdef DEBUG
-      printf("RegionStorage extends %p to %p\n", rs, ((size_t)rs+REGIONSTORAGESIZE));
+    printf("RegionNodeStorage extends %p to %p\n", fpns, ((size_t)fpns+REGIONSTORAGESIZE));
 #endif
 #if !MMAP_CLEAR
-      memset(rs, 0, REGIONSTORAGESIZE);
+    memset(fpns, 0, REGIONSTORAGESIZE);
 #endif
-      rs->magic=*(size_t *)"UMPARSTO";
-      for(n=REGIONSPERSTORAGE-1; n>=0; n--)
-      {
-        *(region_node_t **)&rs->regions[n]=regionstorage->freeregions;
-        regionstorage->freeregions=&rs->regions[n];
-      }
-      regionsallocated+=REGIONSPERSTORAGE;
-      regionsfree+=REGIONSPERSTORAGE;
-    }
-  }
-  if(regionstorage->freeregions)
-  {
-    region_node_t *ret=regionstorage->freeregions;
-#ifdef DEBUG
+initstorage:
+    fpns->magic=*(size_t *)"UMPARNST";
+    for(n=REGIONSPERSTORAGE-1; n>=0; n--)
     {
-      RegionStorage_t *t;
-      for(t=regionstorage; t; t=t->next)
-      {
-        assert(*(size_t *)"UMPARSTO"==t->magic);
-      }
+      fpns->regions[n].owner=fpns;
+      fpns->regions[n].prev=fpns->freeregions;
+      fpns->freeregions=&fpns->regions[n];
     }
-#endif
-    regionstorage->freeregions=*(region_node_t **)ret;
-    *(region_node_t **)ret=0;
-    regionsfree--;
-    return ret;
+    fpns->freeitems=REGIONSPERSTORAGE;
   }
-  return 0;
+  return fpns;
 }
-static int CheckFreeRegionNodes(RegionStorage_t **_rs)
+static INLINE region_node_t *AllocateRegionNode(void)
 {
-  if(regionsfree==regionsallocated)
+  region_node_t *RESTRICT ret;
+  if(!lastregionstorage || !lastregionstorage->freeregions)
   {
-    if(!(*_rs)->next || CheckFreeRegionNodes(&(*_rs)->next))
-    {
-      assert(!(*_rs)->next);
+    if(!(lastregionstorage=FindFreeRegionNodeStorage())) return 0;
+  }
 #ifdef DEBUG
-      printf("RegionStorage releases %p to %p\n", *_rs, ((size_t)(*_rs)+REGIONSTORAGESIZE));
-#endif
-      ReleasePages(*_rs, REGIONSTORAGESIZE, 0);
-      *_rs=0;
-      regionsallocated=regionsfree=0;
-      return 1;
+  {
+    RegionStorage_t *t;
+    for(t=&regionstorage; t; t=t->next)
+    {
+      assert(*(size_t *)"UMPARNST"==t->magic);
     }
   }
-  return 0;
+#endif
+  assert(lastregionstorage->freeregions);
+  ret=lastregionstorage->freeregions;
+  lastregionstorage->freeregions=ret->prev;
+  assert(ret->owner==lastregionstorage);
+  ret->prev=0;
+  lastregionstorage->freeitems--;
+  return ret;
 }
-static void FreeRegionNode(region_node_t *node)
+static int CheckFreeRegionNodeStorages(RegionStorage_t *fpns)
 {
-  memset(node, 0, sizeof(region_node_t));
-  *(region_node_t **)node=regionstorage->freeregions;
-  regionstorage->freeregions=node;
-  regionsfree++;
+  if(fpns->next)
+  {
+    if(CheckFreeRegionNodeStorages(fpns->next))
+    {
+      assert(!fpns->next->next);
+#ifdef DEBUG
+      printf("RegionNodeStorage releases %p to %p\n", fpns->next, ((size_t)(fpns->next)+REGIONSTORAGESIZE));
+#endif
+      ReleasePages(fpns->next, REGIONSTORAGESIZE, 0);
+      fpns->next=0;
+    }
+    else return 0;
+  }
+  return REGIONSPERSTORAGE==fpns->freeitems;
 }
+static INLINE void FreeRegionNode(region_node_t *node)
+{
+  RegionStorage_t *RESTRICT fpns=node->owner;
+  memset((void *)((size_t) node + 2*sizeof(void *)), 0, sizeof(region_node_t)-2*sizeof(void *));
+  node->prev=fpns->freeregions;
+  fpns->freeregions=node;
+  /* If I'm empty and there is another storage after me, check if we need to free storage */
+  if(REGIONSPERSTORAGE==++fpns->freeitems && fpns->next && REGIONSPERSTORAGE==fpns->next->freeitems)
+    CheckFreeRegionNodeStorages(&regionstorage);
+}
+
+
+
+/************************************************************************************/
 
 #if USE_LOCKS
 static MLOCK_T userpagemutex;
@@ -1436,22 +1597,14 @@ static MLOCK_T userpagemutex;
 static void userpage_validatestate(MemorySource *source)
 {
 #ifndef NDEBUG
+#if 0
   region_node_t *RESTRICT r, *RESTRICT rfree;
   int fromback=0;
-#ifdef DEBUG
-    {
-      RegionStorage_t *t;
-      for(t=regionstorage; t; t=t->next)
-      {
-        assert(*(size_t *)"UMPARSTO"==t->magic);
-      }
-    }
-#endif
   NEDTRIE_FOREACH(rfree, regionL_tree_s, &source->regiontreeL)
   {
     AddressSpaceReservation_t *RESTRICT addr=AddressSpaceFromMem(&fromback, rfree->start);
     size_t n, pagepfidx=((size_t)rfree->start-(size_t)addr)/PAGE_SIZE;
-    FreePageHeader *RESTRICT freepage=(FreePageHeader *RESTRICT)rfree->start;
+    FreePageNode *RESTRICT fpn;
     assert(rfree->end>rfree->start);
     /* Ensure that every free block is also allocated */
     assert(REGION_HASNODEHEADER(regionA_tree_s, rfree, linkA));
@@ -1465,11 +1618,13 @@ static void userpage_validatestate(MemorySource *source)
     /* Ensure that this free block lives in an address reservation */
     assert(addr);
     /* Ensure that any pages in this free block are definitely marked as free */
-    for(n=pagepfidx; n<((size_t)rfree->end-(size_t)addr)/PAGE_SIZE; n++, freepage=(FreePageHeader *RESTRICT)((size_t) freepage + PAGE_SIZE))
+    for(n=pagepfidx; n<((size_t)rfree->end-(size_t)addr)/PAGE_SIZE; n++)
     {
-      if(addr->pagemapping[n])
+      if(addr->pagemapping[n].pageframe)
       {
-        assert(FREEPAGEHEADERMAGIC==freepage->magic);
+        assert(ISPAGEFREE(addr->pagemapping[n]));
+        fpn=addr->pagemapping[n].freepagenode;
+        assert(fpn->freepage==(void *)((size_t)rfree->start+(n-pagepfidx)*PAGE_SIZE));
       }
     }
   }
@@ -1488,7 +1643,6 @@ static void userpage_validatestate(MemorySource *source)
       int mode;
       AddressSpaceReservation_t *RESTRICT addr=AddressSpaceFromMem(&fromback, r->start);
       size_t n, pagepfidx=((size_t)r->start-(size_t)addr)/PAGE_SIZE;
-      FreePageHeader *RESTRICT freepage=(FreePageHeader *RESTRICT)r->start;
       assert(r->end>r->start);
       /* Ensure that this block lives in an address reservation */
       assert(addr);
@@ -1528,27 +1682,22 @@ static void userpage_validatestate(MemorySource *source)
       }
       /* Ensure that any pages in this block are contiguously allocated */
       mode=0;
-      for(n=pagepfidx; n<((size_t)r->end-(size_t)addr)/PAGE_SIZE; n++, freepage=(FreePageHeader *RESTRICT)((size_t) freepage + PAGE_SIZE))
+      for(n=pagepfidx; n<((size_t)r->end-(size_t)addr)/PAGE_SIZE; n++)
       {
         if(!mode)
         { /* mode=0: Look for initial range of allocated pages */
-          if(!n) { assert(addr->pagemapping[n]); }
-          if(addr->pagemapping[n])
-          {
-            if(FREEPAGEHEADERMAGIC==freepage->magic) mode=1;
-          }
-          else mode=1;
+          if(!n) { assert(!ISPAGEFREE(addr->pagemapping[n])); }
+          if(ISPAGEFREE(addr->pagemapping[n]))
+            mode=1;
         }
         else if(1==mode)
         { /* mode=1: All pages from now on must be free or not allocated */
-          if(addr->pagemapping[n])
-          {
-            assert(FREEPAGEHEADERMAGIC==freepage->magic);
-          }
+          assert(!addr->pagemapping[n].pageframe || ISPAGEFREE(addr->pagemapping[n]));
         }
       }
     }
   }
+#endif
 #endif
 }
 
@@ -1575,6 +1724,56 @@ static void AddRegionNode(MemorySource *source, region_node_t *RESTRICT newnode,
       source->firstregion=newnode;
     source->lastregion=newnode;
   }
+}
+static void RemoveRegionNode(MemorySource *source, region_node_t *RESTRICT r, int fromback)
+{
+  REGION_REMOVE(regionA_tree_s, &source->regiontreeA, r);
+  if(fromback)
+  {
+    source->lastregion=r->next;
+    if(source->lastregion)
+      source->lastregion->prev=0;
+    else
+      source->firstregion=0;
+  }
+  else
+  {
+    source->lastregion=r->prev;
+    if(source->lastregion)
+      source->lastregion->next=0;
+    else
+      source->firstregion=0;
+  }
+}
+static int HandleVANonContiguity(MemorySource *source, region_node_t *RESTRICT r, int fromback)
+{ /* Occasionally either RegionStorage or FreePageNodeStorage extends or
+  retracts themselves from back which appears to us as unexpected gaps in
+  VA HEAD. We handle this by either inserting or removing dummy region
+  nodes which pretend that the unexpected gap is an allocated region. */
+  assert(fromback);
+  assert(source->lastregion);
+  if(r->end<source->lastregion->start)
+  { /* Storage extension, so insert a dummy allocated block. */
+    region_node_t *RESTRICT dummy;
+    if(!(dummy=AllocateRegionNode())) return 0;
+    dummy->start=r->end;
+    dummy->end=source->lastregion->start;
+#ifdef DEBUG
+    printf("Adding dummy node %p (%p - %p)\n", dummy, dummy->start, dummy->end);
+#endif
+    AddRegionNode(source, dummy, fromback);
+  }
+  else if(r->start>source->lastregion->end)
+  { /* Storage retraction, so remove the previously inserted dummy block. */
+    region_node_t *RESTRICT dummy=source->lastregion;
+    /*assert(IsPageFreeOrEmpty(addr, dummy->start));*/
+#ifdef DEBUG
+    printf("Removing dummy node %p (%p - %p)\n", dummy, dummy->start, dummy->end);
+#endif
+    RemoveRegionNode(source, dummy, fromback);
+    FreeRegionNode(dummy);
+  }
+  return 1;
 }
 /* Special flags: USERPAGE_TOPDOWN causes the allocation to be made from the top down.
 USERPAGE_NOCOMMIT causes no memory to be committed */
@@ -1640,19 +1839,14 @@ static void *userpage_malloc(size_t toallocate, unsigned flags)
       newnode->start=ret;
       newnode->end=(void *)((size_t) ret + size);
       if(source->lastregion && source->lastregion->start!=newnode->end)
-      { /* If this happens, it is because RegionStorage has extended itself.
-        To handle this situation, insert a dummy allocated block. */
-        region_node_t *RESTRICT dummy=AllocateRegionNode();
-        if(!dummy)
+      {
+        if(!HandleVANonContiguity(source, newnode, flags & USERPAGE_TOPDOWN))
         {
           ReleasePages(ret, size, 0);
           FreeRegionNode(newnode);
           ret=0;
           goto mfail;
         }
-        dummy->start=newnode->end;
-        dummy->end=source->lastregion->start;
-        AddRegionNode(source, dummy, flags & USERPAGE_TOPDOWN);
       }
       AddRegionNode(source, newnode, flags & USERPAGE_TOPDOWN);
     }
@@ -1666,6 +1860,7 @@ commitpages:
       ReleasePages(ret, size, 0);
       goto mfail;
     }
+#if 0
     else if(flags & USERPAGE_TOPDOWN)
     {
 #ifdef DEBUG
@@ -1676,6 +1871,7 @@ commitpages:
       }
 #endif
     }
+#endif
   }
   userpage_validatestate(source);
 #if USE_LOCKS
@@ -1763,24 +1959,9 @@ static int userpage_free(void *mem, size_t size)
   }
   else
   { /* We did shrink VA, so remove newly freed region from allocated list */
-    REGION_REMOVE(regionA_tree_s, &source->regiontreeA, r);
-    assert(source->lastregion==r);
-    if(fromback)
-    {
-      source->lastregion=r->next;
-      if(source->lastregion)
-        source->lastregion->prev=0;
-      else
-        source->firstregion=0;
-    }
-    else
-    {
-      source->lastregion=r->prev;
-      if(source->lastregion)
-        source->lastregion->next=0;
-      else
-        source->firstregion=0;
-    }
+    if(source->lastregion && source->lastregion->end==r->start)
+      HandleVANonContiguity(source, r, fromback);
+    RemoveRegionNode(source, r, fromback);
     FreeRegionNode(r);
   }
   userpage_validatestate(source);
@@ -1795,6 +1976,7 @@ fail:
   return -1;
 }
 
+#if 0
 static void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2)
 {
   void *ret=0;
@@ -1901,5 +2083,6 @@ mfail:
 #endif
   return MFAIL;
 }
+#endif
 
 #endif
