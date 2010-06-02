@@ -8,7 +8,7 @@ Does some unit testing of the user mode page allocator internal functions
 #include <stdlib.h>
 #include "nedmalloc.h"
 
-#define LOOPS 16
+#define LOOPS 1
 #define ALLOCATIONS 4096
 #define NEDTRIEDEBUG 0
 
@@ -156,16 +156,17 @@ int main(void)
         for(n=0; n<m; n++)
         {
           unsigned r=rand()<<2;
+          void *newblk;
           if(!addrsize[n].addr)
           { // Allocate
             size_t length=(r<<10) & 0xffff;
             length&=~(PAGE_SIZE-1);
             if(length<PAGE_SIZE) length=PAGE_SIZE;
-            if(MFAIL==(addrsize[n].addr=userpage_malloc(length, USERPAGE_TOPDOWN)))
+            if(MFAIL==(newblk=userpage_malloc(length, USERPAGE_TOPDOWN)))
             {
-              assert(0);
-              abort();
+              goto mfail;
             }
+            addrsize[n].addr=newblk;
 #ifdef DEBUG
             memset(addrsize[n].addr, 0xcc, length);
 #endif
@@ -174,16 +175,22 @@ int main(void)
             addrsize[n].size=length;
             opcount++;
           }
-          else if(r&4)
-#if 0
-          { // 50% realloc
-            size_t length=(r<<10) & 0xffff0;
-            void *newblk;
+#if 1
+          else
+          { // 100% realloc
+            size_t length=(r<<10) & 0xffff;
             length&=~(PAGE_SIZE-1);
             if(length<PAGE_SIZE) length=PAGE_SIZE;
-            newblk=userpage_realloc(addrsize[n].addr, addrsize[n].size, length, 0/*MREMAP_MAYMOVE*/, 0);
+#if 1
+            length=addrsize[n].size+16*PAGE_SIZE;
+#endif
+            newblk=userpage_realloc(addrsize[n].addr, addrsize[n].size, length, MREMAP_MAYMOVE, 0);
             //printf("newblk=%p length=%p\n", newblk, length);
-            if(MFAIL!=newblk)
+            if(MFAIL==newblk)
+            {
+              goto mfail;
+            }
+            else
             {
               addrsize[n].addr=newblk;
               if(*(size_t *)addrsize[n].addr!=addrsize[n].size)
@@ -201,6 +208,7 @@ int main(void)
             opcount++;
           }
 #else
+          else if(r&4)
           { // 50% Free
             userpage_free(addrsize[n].addr, addrsize[n].size);
             bytesallocated-=addrsize[n].size;
@@ -216,6 +224,7 @@ int main(void)
       if(!(m & 63))
       printf("%d allocations (%uMb) takes %lf ms (%lf ops/sec)\n", m, bytesallocated/1024/1024, times[m]/1000000000.0, opcounts[m]/(times[m]/1000000000000.0));
     }
+mfail:
     opcount=0;
     start=GetUsCount();
     // Free anything remaining
