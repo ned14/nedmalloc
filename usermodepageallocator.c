@@ -1096,11 +1096,101 @@ static AddressSpaceReservation_t *RESTRICT AddressSpaceFromMem(int *RESTRICT fro
   }
   return 0;
 }
-/* Return 0 for used, 1 for free and 2 for empty. */
+/* Returns 0 for used, 1 for free and 2 for empty. */
 static int IsPageFreeOrEmpty(AddressSpaceReservation_t *RESTRICT addr, void *mem)
 {
   PageMapping *RESTRICT pagemappings=addr->pagemapping+((size_t)mem-(size_t)addr)/PAGE_SIZE;
   return !pagemappings->pageframe ? 2 : (ISPAGEFREE(*pagemappings) ? 1 : 0);
+}
+static size_t TrimFreePagesFromAddr(AddressSpaceReservation_t *RESTRICT addr, size_t pagestofree, size_t pagesmustfree)
+{
+  size_t pagesfreed=0;
+  int done=0;
+  FreePageNode *RESTRICT fpn;
+  RemapMemoryPagesBlock memtodecommit;
+  memtodecommit.idx=0;
+  /* Try to cull dirty before clean pages if poss */
+  for(fpn=addr->oldestdirty; !done; fpn=addr->oldestdirty, pagesfreed++, pagestofree--, pagesmustfree=pagesmustfree ? pagesmustfree-1 : 0)
+  {
+    size_t freepagepfidx;
+    if(!fpn || !pagestofree || (!pagesmustfree && addr->opcount-fpn->age<USERMODEPAGEALLOCATOR_FREEPAGECACHEAGE(addr->usedpages, addr->freepages)))
+    {
+      done=1;
+#ifdef DEBUG
+      /*printf("FREEING %u pages\n", pagesfreed);*/
+#endif
+      goto decommitpages;
+    }
+    assert(!fpn->older);
+    addr->oldestdirty=fpn->newer;
+    if(addr->oldestdirty)
+      addr->oldestdirty->older=0;
+    else
+      addr->newestdirty=0;
+    assert(!addr->oldestclean); /* clean pages not implemented yet */
+    addr->freepages--;
+    freepagepfidx=((size_t)fpn->freepage-(size_t)addr)/PAGE_SIZE;
+    memtodecommit.addrs[memtodecommit.idx]=fpn->freepage;
+    memtodecommit.pageframes[memtodecommit.idx]=fpn->pageframe;
+    SETPAGEUSED(addr->pagemapping[freepagepfidx], 0);
+    memtodecommit.idx++;
+    FreeFPN(fpn);
+    ValidateFreePageLists(addr);
+
+    if(REMAPMEMORYPAGESBLOCKSIZE==memtodecommit.idx)
+    { /* Not actually needed, and it interferes with physical page emulation.
+      OSRemapMemoryPagesOntoAddrs(memtodecommit.addrs, memtodecommitidx, memtodecommit.pageframes, &addr->OSreservedata);*/
+decommitpages:
+      if(memtodecommit.idx)
+      {
+        if(memtodecommit.idx==OSReleaseMemoryPages(memtodecommit.pageframes, memtodecommit.idx, &addr->OSreservedata))
+        {
+          memtodecommit.idx=0;
+          ValidatePageMappings(addr);
+        }
+        else
+        {
+          size_t n;
+          for(n=0; n<memtodecommit.idx; n++)
+          {
+            fpn=AllocateFPN();
+            fpn->freepage=memtodecommit.addrs[n];
+            freepagepfidx=((size_t)fpn->freepage-(size_t)addr)/PAGE_SIZE;
+            fpn->pageframe=memtodecommit.pageframes[n];
+            SETPAGEFREE(addr->pagemapping[freepagepfidx], fpn);
+            fpn->older=0;
+            fpn->newer=addr->oldestdirty;
+            if(addr->oldestdirty)
+              addr->oldestdirty->older=fpn;
+            else
+              addr->newestdirty=fpn;
+            addr->oldestdirty=fpn;
+            addr->freepages++;
+            ValidateFreePageLists(addr);
+          }
+          pagestofree+=memtodecommit.idx;
+          done=1;
+        }
+      }
+    }
+  }
+  return pagesfreed;
+}
+static size_t TrimFreePages(size_t pagestofree, size_t pagesmustfree)
+{
+  AddressSpaceReservation_t *RESTRICT addr;
+  size_t totalpagesfreed=0;
+  for(addr=addressspacereservation; addr && pagestofree; addr=addr->next)
+  {
+    size_t pagesfreed=TrimFreePagesFromAddr(addr, pagestofree, pagesmustfree);
+    if(pagesfreed>pagesmustfree)
+      pagesmustfree=0;
+    else
+      pagesmustfree-=pagesfreed;
+    pagestofree-=pagesfreed;
+    totalpagesfreed+=pagesfreed;
+  }
+  return totalpagesfreed;
 }
 static double mypow8(double v)
 {
@@ -1149,7 +1239,6 @@ static int ReleasePages(void *mem, size_t size, int dontfreeVA)
         ValidateFreePageLists(addr);
       }
     }
-#if 1
     /* Do I need to return memory to the system? */
     if((dofreesystemmemorycheck=!(addr->opcount++ & (USERMODEPAGEALLOCATOR_SYSTEMFREEMEMORYCHECKRATE-1))) || addr->freepages>USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(addr->usedpages, addr->freepages))
     {
@@ -1160,82 +1249,12 @@ static int ReleasePages(void *mem, size_t size, int dontfreeVA)
       pagestofree=pagestofree>addr->usedpages ? 0 : addr->usedpages-pagestofree;
       pagesmustfree=(size_t)(addr->freepages*memorypressurescale);
       pagestofree+=pagesmustfree;
+#if 1
       /* Don't bother with the overhead of freeing memory unless you have a sizeable chunk to do at once */
       if(pagestofree>=REMAPMEMORYPAGESBLOCKSIZE)
-      {
-        int done=0;
-        FreePageNode *RESTRICT fpn;
-        size_t pagestofreeorig=pagestofree;
-        RemapMemoryPagesBlock memtodecommit;
-        memtodecommit.idx=0;
-        /* Try to cull dirty before clean pages if poss */
-        for(fpn=addr->oldestdirty; !done; fpn=addr->oldestdirty, pagestofree--, pagesmustfree=pagesmustfree ? pagesmustfree-1 : 0)
-        {
-          size_t freepagepfidx;
-          if(!fpn || !pagestofree || (!pagesmustfree && addr->opcount-fpn->age<USERMODEPAGEALLOCATOR_FREEPAGECACHEAGE(addr->usedpages, addr->freepages)))
-          {
-            done=1;
-#ifdef DEBUG
-            /*printf("FREEING %u pages\n", pagestofreeorig-pagestofree);*/
+        TrimFreePagesFromAddr(addr, pagestofree, pagesmustfree);
 #endif
-            goto decommitpages;
-          }
-          assert(!fpn->older);
-          addr->oldestdirty=fpn->newer;
-          if(addr->oldestdirty)
-            addr->oldestdirty->older=0;
-          else
-            addr->newestdirty=0;
-          assert(!addr->oldestclean); /* clean pages not implemented yet */
-          addr->freepages--;
-          freepagepfidx=((size_t)fpn->freepage-(size_t)addr)/PAGE_SIZE;
-          memtodecommit.addrs[memtodecommit.idx]=fpn->freepage;
-          memtodecommit.pageframes[memtodecommit.idx]=fpn->pageframe;
-          SETPAGEUSED(addr->pagemapping[freepagepfidx], 0);
-          memtodecommit.idx++;
-          FreeFPN(fpn);
-          ValidateFreePageLists(addr);
-
-          if(REMAPMEMORYPAGESBLOCKSIZE==memtodecommit.idx)
-          { /* Not actually needed, and it interferes with physical page emulation.
-            OSRemapMemoryPagesOntoAddrs(memtodecommit.addrs, memtodecommitidx, memtodecommit.pageframes, &addr->OSreservedata);*/
-decommitpages:
-            if(memtodecommit.idx)
-            {
-              if(memtodecommit.idx==OSReleaseMemoryPages(memtodecommit.pageframes, memtodecommit.idx, &addr->OSreservedata))
-              {
-                memtodecommit.idx=0;
-                ValidatePageMappings(addr);
-              }
-              else
-              {
-                size_t n;
-                for(n=0; n<memtodecommit.idx; n++)
-                {
-                  fpn=AllocateFPN();
-                  fpn->freepage=memtodecommit.addrs[n];
-                  freepagepfidx=((size_t)fpn->freepage-(size_t)addr)/PAGE_SIZE;
-                  fpn->pageframe=memtodecommit.pageframes[n];
-                  SETPAGEFREE(addr->pagemapping[freepagepfidx], fpn);
-                  fpn->older=0;
-                  fpn->newer=addr->oldestdirty;
-                  if(addr->oldestdirty)
-                    addr->oldestdirty->older=fpn;
-                  else
-                    addr->newestdirty=fpn;
-                  addr->oldestdirty=fpn;
-                  addr->freepages++;
-                  ValidateFreePageLists(addr);
-                }
-                pagestofree+=memtodecommit.idx;
-              }
-            }
-            break;
-          }
-        }
-      }
     }
-#endif
     if(!dontfreeVA)
     {
       if((size_t) addr->frontptr-size==(size_t) mem || (size_t) addr->backptr==(size_t) mem)
@@ -1976,7 +1995,6 @@ fail:
   return -1;
 }
 
-#if 0
 static void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2)
 {
   void *ret=0;
@@ -2083,6 +2101,5 @@ mfail:
 #endif
   return MFAIL;
 }
-#endif
 
 #endif
