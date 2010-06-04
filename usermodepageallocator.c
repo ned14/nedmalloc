@@ -860,7 +860,7 @@ static size_t FillWithFreePages(AddressSpaceReservation_t *RESTRICT addr, RemapM
   PageMapping *RESTRICT pf=start;
   for(n=0; n<pages && addr->freepages; n++, pf++, freespaceaddr=(void *)((size_t) freespaceaddr + PAGE_SIZE))
   {
-    FreePageNode *RESTRICT fpn, *RESTRICT *RESTRICT fpnaddr=0, *RESTRICT *RESTRICT fpnnaddr=0;
+    FreePageNode *RESTRICT fpn=0, *RESTRICT *RESTRICT fpnaddr=0, *RESTRICT *RESTRICT fpnnaddr=0;
     PageFrameType freepageframe;
     size_t freepagepfidx;
     assert(!pf->pageframe);
@@ -1060,7 +1060,7 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
               PageMapping *RESTRICT emptyframestart=pagemappings;
               size_t filled;
               for(; n<sizeinpages && !pagemappings->pageframe; n++, pagemappings++, retptr=(void *)((size_t)retptr + PAGE_SIZE));
-              if(pagemappings-emptyframestart!=(filled=FillWithFreePages(addr, &memtodecommit, &memtocommit, emptyaddrstart, emptyframestart, pagemappings, fromback)))
+              if((size_t)(pagemappings-emptyframestart)!=(filled=FillWithFreePages(addr, &memtodecommit, &memtocommit, emptyaddrstart, emptyframestart, pagemappings, fromback)))
               { /* We failed to allocate everything, so release */
                 assert(0);
                 ReleasePages(ret, size, 0);
@@ -1298,7 +1298,7 @@ static int SwapPages(void *dest, void *start, void *end)
 {
   int destfromback;
   AddressSpaceReservation_t *destaddr=AddressSpaceFromMem(&destfromback, dest), *srcaddr=AddressSpaceFromMem(0, start);
-  size_t pages, n, freepages=0, usedpages=0, destpfidx=((size_t)dest-(size_t)destaddr)/PAGE_SIZE, srcpfidx=((size_t)start-(size_t)srcaddr)/PAGE_SIZE, endpfidx=((size_t)end-(size_t)srcaddr)/PAGE_SIZE;
+  size_t pages, n, freepages=0, usedpages=0, destpfidx=((size_t)dest-(size_t)destaddr)/PAGE_SIZE, srcpfidx=((size_t)start-(size_t)srcaddr)/PAGE_SIZE;
   PageMapping *RESTRICT destpf, *RESTRICT srcpf;
   void *destptr, *srcptr;
   RemapMemoryPagesBlock memtodecommit, memtocommit;
@@ -1402,7 +1402,7 @@ static struct FreePageNodeStorage_s
 static FreePageNodeStorage_t *FindFreePageNodeStorage(void)
 {
   int n;
-  FreePageNodeStorage_t *RESTRICT fpns, *RESTRICT ofpns;
+  FreePageNodeStorage_t *RESTRICT fpns, *RESTRICT ofpns=0;
   if(!fpnstorage.magic)
   {
     fpns=&fpnstorage;
@@ -1510,7 +1510,7 @@ static struct RegionStorage_s
 static RegionStorage_t *FindFreeRegionNodeStorage(void)
 {
   int n;
-  RegionStorage_t *RESTRICT fpns, *RESTRICT ofpns;
+  RegionStorage_t *RESTRICT fpns, *RESTRICT ofpns=0;
   if(!regionstorage.magic)
   {
     fpns=&regionstorage;

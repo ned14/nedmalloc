@@ -1927,7 +1927,7 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem,
 	LogOperation(tc, p, LOGENTRY_REALLOC, mymspace, size, mem, alignment, flags, ret);
 	return ret;
 }
-void   nedpfree2(nedpool *p, void *mem, unsigned flags) THROWSPEC
+NEDMALLOCNOALIASATTR void   nedpfree2(nedpool *p, void *mem, unsigned flags) THROWSPEC
 {	/* Frees always happen in the mspace they happened in, so skip
 	locking the preferred mspace for this thread */
 	threadcache *tc;
@@ -1991,7 +1991,7 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t ali
 	unsigned flags=NEDMALLOC_FORCERESERVE(p, 0, bytes);
 	return nedpmalloc2(p, bytes, alignment, flags);
 }
-void   nedpfree(nedpool *p, void *mem) THROWSPEC
+NEDMALLOCNOALIASATTR void   nedpfree(nedpool *p, void *mem) THROWSPEC
 {
   nedpfree2(p, mem, 0);
 }

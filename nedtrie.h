@@ -853,7 +853,7 @@ namespace nedtries {
 namespace nedtries {
   template<class trietype, class type, size_t fieldoffset, size_t (*keyfunct)(const type *RESTRICT)> DEBUGINLINE type *trieprev(trietype *RESTRICT head, type *RESTRICT r)
   {
-    type *RESTRICT node, *RESTRICT child;
+    type *RESTRICT node=0, *RESTRICT child;
     TrieLink_t<type> *RESTRICT nodelink, *RESTRICT rlink;
     unsigned bitidx;
 
@@ -906,7 +906,7 @@ namespace nedtries {
 #define NEDTRIE_GENERATE_PREV(proto, name, type, field, keyfunct) \
   proto INLINE struct type * name##_NEDTRIE_PREV(struct name *RESTRICT head, struct type *RESTRICT r)		\
   { \
-    struct type *RESTRICT node, *RESTRICT child; \
+    struct type *RESTRICT node=0, *RESTRICT child; \
     unsigned bitidx; \
 \
     /* Am I a leaf off the tree? */ \
