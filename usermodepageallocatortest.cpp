@@ -10,7 +10,7 @@ Does some unit testing of the user mode page allocator internal functions
 
 #define LOOPS 1
 #define ALLOCATIONS 4096
-#define NEDTRIEDEBUG 0
+//#define NEDTRIEDEBUG 0
 
 #ifdef _MSC_VER
 //#pragma optimize("g", off)	/* Useful for debugging */
@@ -159,11 +159,12 @@ int main(void)
           void *newblk;
           if(!addrsize[n].addr)
           { // Allocate
-            size_t length=(r<<10) & 0xffff;
+            size_t length=(r<<10) & 0xffff00;
             length&=~(PAGE_SIZE-1);
             if(length<PAGE_SIZE) length=PAGE_SIZE;
             if(MFAIL==(newblk=userpage_malloc(length, USERPAGE_TOPDOWN)))
             {
+              fprintf(stderr, "No more memory!\n");
               goto mfail;
             }
             addrsize[n].addr=newblk;
@@ -188,6 +189,7 @@ int main(void)
             //printf("newblk=%p length=%p\n", newblk, length);
             if(MFAIL==newblk)
             {
+              fprintf(stderr, "No more memory!\n");
               goto mfail;
             }
             else
