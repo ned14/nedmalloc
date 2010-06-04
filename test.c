@@ -9,7 +9,7 @@ An example of how to use nedalloc in C
 #include "nedmalloc.h"
 
 /**** TEST CONFIGURATION ****/
-#if 1 /* Test patterns typical of C++ code */
+#if 0 /* Test patterns typical of C++ code */
 #define THREADS 4					/* How many threads to run */
 #define TESTCPLUSPLUS 1				/* =1 to make 50% of ops have blocksize<=512. This is typical for C++ allocator usage. */
 #define BLOCKSIZE 16384				/* Test will be with blocks up to BLOCKSIZE. Try 8-16Kb for typical app usage, 1Mb if you use large arrays etc. */
@@ -20,10 +20,10 @@ An example of how to use nedalloc in C
 #define MAXMEMORY2 (MAXMEMORY/THREADS)
 #endif
 
-#if 0 /* Test avrg. 2Mb block realloc() speed */
+#if 1 /* Test avrg. 2Mb block realloc() speed */
 #define THREADS 1
-#define TESTCPLUSPLUS 0
-#define BLOCKSIZE (4*1024*1024)
+#define TESTCPLUSPLUS 1
+#define BLOCKSIZE (2*1024*1024)
 #define TESTTYPE 2
 #define TOUCH 1
 #define MAXMEMORY (768*1024*1024)
@@ -181,7 +181,8 @@ static void threadcode(int threadidx)
 	/* A randomised malloc/realloc/free test (torture test) */
 	for(n=0; n<RECORDS*100; n++)
 	{
-		unsigned int i, dorealloc=1;
+		static int reallocflip;
+		unsigned int i, dorealloc=(reallocflip=!reallocflip);
 		r=myrandom(&seed);
 		i=(int)(r % RECORDS);
 #if TESTCPLUSPLUS

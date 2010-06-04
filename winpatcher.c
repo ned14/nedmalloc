@@ -529,7 +529,7 @@ static void *nedmalloc_dbg(size_t size, int type, const char *filename, int line
 static void *nedcalloc_dbg(size_t no, size_t size, int type, const char *filename, int lineno)  { return nedcalloc(no, size); }
 static void *nedrealloc_dbg(void *ptr, size_t size, int type, const char *filename, int lineno) { return nedrealloc(ptr, size); }
 static void nedfree_dbg(void *ptr, int type)                                                    { nedfree(ptr); }
-static size_t nedblksize_dbg(void *ptr, int type)                                               { return nedblksize(0, ptr); }
+static size_t nedblksize_dbg(void *ptr, int type)                                               { return nedmemsize(ptr); }
 /* The patch table: replace the specified symbols in the specified modules with the
    specified replacements. Format is:
 
@@ -572,7 +572,7 @@ static SymbolListItem nedmallocpatchtable[]={
 	{ { "calloc",           0, "", 0/*(PROC) calloc */ },           modules, { "nedcalloc",      (PROC) nedcalloc      } },
 	{ { "realloc",          0, "", 0/*(PROC) realloc*/ },           modules, { "nedrealloc",     (PROC) nedrealloc     } },
 	{ { "free",             0, "", 0/*(PROC) free   */ },           modules, { "nedfree",        (PROC) nedfree        } },
-	{ { "_msize",           0, "", 0/*(PROC) _msize */ },           modules, { "nedblksize",     (PROC) nedblksize     } },
+	{ { "_msize",           0, "", 0/*(PROC) _msize */ },           modules, { "nedblksize",     (PROC) nedmemsize     } },
 
 #if 0 /* Usually it's best to leave these off */
 	{ { "_malloc_dbg",  0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc_dbg",  (PROC) nedmalloc_dbg  } },

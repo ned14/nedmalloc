@@ -647,7 +647,7 @@ static struct AddressSpaceReservation_s
 static void ValidateFreePageLists(AddressSpaceReservation_t *RESTRICT addr)
 {
 #ifndef NDEBUG
-#if 0
+#if 1
   FreePageNode *RESTRICT fpn;
   size_t count=0;
   PageMapping *RESTRICT pf;
@@ -1485,8 +1485,8 @@ static INLINE void FreeFPN(FreePageNode *node)
   node->older=fpns->freefpns;
   fpns->freefpns=node;
   /* If I'm empty and there is another storage after me, check if we need to free storage */
-  if(FREEPAGENODESPERSTORAGE==++fpns->freeitems && fpns->next && FREEPAGENODESPERSTORAGE==fpns->next->freeitems)
-    CheckFreeFPNs(&fpnstorage);
+  /*if(FREEPAGENODESPERSTORAGE==++fpns->freeitems && fpns->next && FREEPAGENODESPERSTORAGE==fpns->next->freeitems)
+    CheckFreeFPNs(&fpnstorage);*/
 }
 
 
@@ -1624,8 +1624,8 @@ static INLINE void FreeRegionNode(region_node_t *node)
   fpns->freeitems++;
   assert(fpns->freeitems<=REGIONSPERSTORAGE);
   /* If I'm empty and there is another storage after me, check if we need to free storage */
-  if(REGIONSPERSTORAGE==fpns->freeitems && fpns->next && REGIONSPERSTORAGE==fpns->next->freeitems)
-    CheckFreeRegionNodeStorages(&regionstorage);
+  /*if(REGIONSPERSTORAGE==fpns->freeitems && fpns->next && REGIONSPERSTORAGE==fpns->next->freeitems)
+    CheckFreeRegionNodeStorages(&regionstorage);*/
 }
 
 
@@ -1834,12 +1834,12 @@ static int HandleVANonContiguity(MemorySource *source, region_node_t *RESTRICT r
   VA HEAD. We handle this by either inserting or removing dummy region
   nodes which pretend that the unexpected gap is an allocated region. */
   AddressSpaceReservation_t *RESTRICT lastregionaddr, *RESTRICT raddr;
-  assert(fromback);
-  assert(source->lastregion);
   lastregionaddr=AddressSpaceFromMem(NULL, source->lastregion->start);
   raddr=AddressSpaceFromMem(NULL, r->start);
+  assert(source->lastregion);
   if(raddr==lastregionaddr)
   {
+    assert(fromback);
     if(r->end<source->lastregion->start)
     { /* Storage extension, so insert a dummy allocated block. */
       region_node_t *RESTRICT dummy;
@@ -1926,7 +1926,7 @@ static void *userpage_malloc(size_t toallocate, unsigned flags)
     {
       newnode->start=ret;
       newnode->end=(void *)((size_t) ret + size);
-      if(source->lastregion && source->lastregion->start!=newnode->end)
+      if(source->lastregion && ((flags & USERPAGE_TOPDOWN) ? source->lastregion->start!=newnode->end : source->lastregion->end!=newnode->start))
       {
         if(!HandleVANonContiguity(source, newnode, flags & USERPAGE_TOPDOWN))
           goto mfail;
@@ -2067,7 +2067,7 @@ static int userpage_free(void *mem, size_t size)
   }
   else
   { /* We did shrink VA, so remove newly freed region from allocated list */
-    if(source->lastregion && source->lastregion->end==r->start)
+    if(source->lastregion && (fromback ? source->lastregion->end==r->start : source->lastregion->start==r->end))
       HandleVANonContiguity(source, r, fromback);
     RemoveRegionNode(source, r, fromback);
     FreeRegionNode(r);
@@ -2130,6 +2130,7 @@ static void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int fla
     else
       goto relocate;
   }
+  assert((size_t)r->end-(size_t)r->start>=newsize);
   if(newsize>oldsize)
   { /* Ensure there are pages up to newsize, but you need to be careful if you're extending VA */
     void *newmemaddr=(void *)((size_t) mem + oldsize);

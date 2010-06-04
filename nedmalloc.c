@@ -131,11 +131,10 @@ static void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int fla
 #define DIRECT_MMAP(h, s, f)               (!OSHavePhysicalPageSupport() ? DIRECT_MMAP_DEFAULT((h), (s), (f)) : userpage_malloc((s), (f)|USERPAGE_TOPDOWN))
 #define DIRECT_MREMAP(h, a, os, ns, f, f2) (!OSHavePhysicalPageSupport() ? DIRECT_MREMAP_DEFAULT((h), (a), (os), (ns), (f), (f2)) : userpage_realloc((a), (os), (ns), (f), (f2)|USERPAGE_TOPDOWN))
 
-/* User mode page allocator currently doesn't correctly implement mremap() */
-#undef MREMAP
-#undef DIRECT_MREMAP
-#define MREMAP(addr, osz, nsz, mv)         (!OSHavePhysicalPageSupport() ? MREMAP_DEFAULT((addr), (osz), (nsz), (mv)) : MFAIL)
-#define DIRECT_MREMAP(h, a, os, ns, f, f2) (!OSHavePhysicalPageSupport() ? DIRECT_MREMAP_DEFAULT((h), (a), (os), (ns), (f), (f2)) : MFAIL)
+/*#undef MREMAP
+#define MREMAP(addr, osz, nsz, mv)         (!OSHavePhysicalPageSupport() ? MREMAP_DEFAULT((addr), (osz), (nsz), (mv)) : MFAIL)*/
+/*#undef DIRECT_MREMAP
+#define DIRECT_MREMAP(h, a, os, ns, f, f2) (!OSHavePhysicalPageSupport() ? DIRECT_MREMAP_DEFAULT((h), (a), (os), (ns), (f), (f2)) : MFAIL)*/
 
 #endif
 #include "malloc.c.h"
@@ -718,7 +717,7 @@ struct threadcacheblk_t
 	int isforeign;
 	unsigned int lastUsed;
 	size_t size;
-	threadcacheblk *next, *prev;
+	threadcacheblk *RESTRICT next, *RESTRICT prev;
 };
 typedef struct threadcache_t
 {
@@ -732,7 +731,7 @@ typedef struct threadcache_t
 	logentry *logentries, *logentriesptr, *logentriesend;
 #endif
 	size_t freeInCache;					/* How much free space is stored in this cache */
-	threadcacheblk *bins[(THREADCACHEMAXBINS+1)*2];
+	threadcacheblk *RESTRICT bins[(THREADCACHEMAXBINS+1)*2];
 #ifdef FULLSANITYCHECKS
 	unsigned int magic2;
 #endif
@@ -744,7 +743,7 @@ struct nedpool_t
 #endif
 	void *uservalue;
 	int threads;						/* Max entries in m to use */
-	threadcache *caches[THREADCACHEMAXCACHES];
+	threadcache *RESTRICT caches[THREADCACHEMAXCACHES];
 	TLSVAR mycache;						/* Thread cache for this thread. 0 for unset, negative for use mspace-1 directly, otherwise is cache-1 */
 	mstate m[MAXTHREADSINPOOL+1];		/* mspace entries for this pool */
 };
@@ -1061,7 +1060,7 @@ static FORCEINLINE NEDMALLOCNOALIASATTR unsigned int size2binidx(size_t _size) T
 
 
 #ifdef FULLSANITYCHECKS
-static void tcsanitycheck(threadcacheblk **ptr) THROWSPEC
+static void tcsanitycheck(threadcacheblk *RESTRICT *RESTRICT ptr) THROWSPEC
 {
 	assert((ptr[0] && ptr[1]) || (!ptr[0] && !ptr[1]));
 	if(ptr[0] && ptr[1])
@@ -1083,11 +1082,11 @@ static void tcsanitycheck(threadcacheblk **ptr) THROWSPEC
 }
 static void tcfullsanitycheck(threadcache *tc) THROWSPEC
 {
-	threadcacheblk **tcbptr=tc->bins;
+	threadcacheblk *RESTRICT *RESTRICT tcbptr=tc->bins;
 	int n;
 	for(n=0; n<=THREADCACHEMAXBINS; n++, tcbptr+=2)
 	{
-		threadcacheblk *b, *ob=0;
+		threadcacheblk *RESTRICT b, *RESTRICT ob=0;
 		tcsanitycheck(tcbptr);
 		for(b=tcbptr[0]; b; ob=b, b=b->next)
 		{
@@ -1109,15 +1108,15 @@ static NOINLINE void RemoveCacheEntries(nedpool *RESTRICT p, threadcache *RESTRI
 #endif
 	if(tc->freeInCache)
 	{
-		threadcacheblk **tcbptr=tc->bins;
+		threadcacheblk *RESTRICT *RESTRICT tcbptr=tc->bins;
 		int n;
 		for(n=0; n<=THREADCACHEMAXBINS; n++, tcbptr+=2)
 		{
-			threadcacheblk **tcb=tcbptr+1;		/* come from oldest end of list */
+			threadcacheblk *RESTRICT *RESTRICT tcb=tcbptr+1;		/* come from oldest end of list */
 			/*tcsanitycheck(tcbptr);*/
 			for(; *tcb && tc->frees-(*tcb)->lastUsed>=age; )
 			{
-				threadcacheblk *f=*tcb;
+				threadcacheblk *RESTRICT f=*tcb;
 				size_t blksize=f->size; /*nedblksize(f);*/
 				assert(blksize<=nedblksize(0, f, 0));
 				assert(blksize);
@@ -1310,7 +1309,7 @@ static void *threadcache_malloc(nedpool *RESTRICT p, threadcache *RESTRICT tc, s
 	size_t size=*_size, blksize=0;
 	unsigned int bestsize;
 	unsigned int idx=size2binidx(size);
-	threadcacheblk *RESTRICT blk, **RESTRICT binsptr;
+	threadcacheblk *RESTRICT blk, *RESTRICT *RESTRICT binsptr;
 #ifdef FULLSANITYCHECKS
 	tcfullsanitycheck(tc);
 #endif
@@ -1411,7 +1410,7 @@ static void threadcache_free(nedpool *RESTRICT p, threadcache *RESTRICT tc, int 
 {
 	unsigned int bestsize;
 	unsigned int idx=size2binidx(size);
-	threadcacheblk **RESTRICT binsptr, *RESTRICT tck=(threadcacheblk *) mem;
+	threadcacheblk *RESTRICT *RESTRICT binsptr, *RESTRICT tck=(threadcacheblk *RESTRICT) mem;
 	assert(size>=sizeof(threadcacheblk) && size<=THREADCACHEMAX+CHUNK_OVERHEAD);
 #ifdef DEBUG
 	/* Make sure this is a valid memory block */
@@ -1976,9 +1975,15 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, s
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC
 {
 	unsigned flags=NEDMALLOC_FORCERESERVE(p, mem, size);
-	/* If he reallocs even once, it's probably wise to turn on address space reservation.
-	If the size is larger than mmap_threshold then it'll set the reserve. */
-	if(!(flags & M2_RESERVE_MASK)) flags=M2_RESERVE_MULT(8);
+#ifdef ENABLE_USERMODEPAGEALLOCATOR
+	/* If the user mode page allocator is turned on in a 32 bit process,
+	don't automatically reserve eight times the address space. */
+	if(8==sizeof(size_t) || !OSHavePhysicalPageSupport())
+#endif
+	{	/* If he reallocs even once, it's probably wise to turn on address space reservation.
+		If the size is larger than mmap_threshold then it'll set the reserve. */
+		if(!(flags & M2_RESERVE_MASK)) flags=M2_RESERVE_MULT(8);
+	}
 	return nedprealloc2(p, mem, size, 0, flags);
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes) THROWSPEC
