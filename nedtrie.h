@@ -179,7 +179,7 @@ static INLINE unsigned nedtriebitscanr(size_t value)
 } /* Anonymous namespace */
 #endif
 
-/*! \def NEDNEDTRIE_INDEXBINS
+/*! \def NEDTRIE_INDEXBINS
 \brief Defines the number of top level bit bins to use. The default based on size_t is usually fine.
 */
 #define NEDTRIE_INDEXBINS (8*sizeof(void *))
@@ -189,7 +189,7 @@ static INLINE unsigned nedtriebitscanr(size_t value)
 #define NEDTRIE_HEAD(name, type) \
 struct name {                    \
   size_t count;                  \
-  struct type *triebins[NEDTRIE_INDEXBINS]; /* each containing (1<<x)<bitscanrev(x)<(1<<(x+1)) */ \
+  struct type *triebins[NEDTRIE_INDEXBINS]; /* each containing (1<<x)<=bitscanrev(x)<(1<<(x+1)) */ \
   int nobbledir;                 \
 }
 /*! \def NEDTRIE_ENTRY
@@ -626,6 +626,51 @@ namespace nedtries {
 
 #ifdef __cplusplus
 namespace nedtries {
+  template<class trietype, class type, size_t fieldoffset, size_t (*keyfunct)(const type *RESTRICT)> DEBUGINLINE int trieexactfind(trietype *RESTRICT head, type *RESTRICT r)
+  {
+    type *RESTRICT node;
+    TrieLink_t<type> *RESTRICT nodelink;
+
+    if(!head->count) return 0;
+    if(!(node=triefind<trietype, type, fieldoffset, keyfunct>(head, r))) return 0;
+    nodelink=(TrieLink_t<type> *RESTRICT)((size_t) node + fieldoffset);
+    if(nodelink->trie_prev) node=nodelink->trie_prev;
+    do
+    {
+      if(node==r) return 1;
+      nodelink=(TrieLink_t<type> *RESTRICT)((size_t) node + fieldoffset);
+      node=nodelink->trie_next;
+    } while(node);
+    return 0;
+  }
+}
+#endif /* __cplusplus */
+#if NEDTRIEUSEMACROS
+#define NEDTRIE_GENERATE_EXACTFIND(proto, name, type, field, keyfunct) \
+  proto INLINE int name##_NEDTRIE_EXACTFIND(struct name *RESTRICT head, struct type *RESTRICT r)		\
+  { \
+    struct type *RESTRICT node; \
+\
+    if(!head->count) return 0; \
+    if(!(node=name##_NEDTRIE_FIND(head, r))) return 0; \
+    if(node->field.trie_prev) node=node->field.trie_prev; \
+    do \
+    { \
+      if(node==r) return 1; \
+      node=node->field.trie_next; \
+    } while(node); \
+    return 0; \
+  }
+#else /* NEDTRIEUSEMACROS */
+#define NEDTRIE_GENERATE_EXACTFIND(proto, name, type, field, keyfunct) \
+  proto INLINE int name##_NEDTRIE_EXACTFIND(struct name *RESTRICT head, struct type *RESTRICT r)		\
+{ \
+  return nedtries::trieexactfind<struct name, struct type, NEDTRIEFIELDOFFSET(type, field), keyfunct>(head, r); \
+}
+#endif /* NEDTRIEUSEMACROS */
+
+#ifdef __cplusplus
+namespace nedtries {
   template<class trietype, class type, size_t fieldoffset, size_t (*keyfunct)(const type *RESTRICT)> DEBUGINLINE type *trieNfind(trietype *RESTRICT head, type *RESTRICT r)
   {
     type *RESTRICT node=0, *RESTRICT childnode, *RESTRICT ret=0;
@@ -1007,14 +1052,15 @@ namespace nedtries {
 \brief Substitutes a set of nedtrie implementation function definitions specialised according to type.
 */
 #define NEDTRIE_GENERATE(proto, name, type, field, keyfunct, nobblefunct) \
-  NEDTRIE_GENERATE_NOBBLES(proto, name, type, field, keyfunct) \
-  NEDTRIE_GENERATE_INSERT (proto, name, type, field, keyfunct) \
-  NEDTRIE_GENERATE_REMOVE (proto, name, type, field, keyfunct, nobblefunct) \
-  NEDTRIE_GENERATE_FIND   (proto, name, type, field, keyfunct) \
-  NEDTRIE_GENERATE_NFIND  (proto, name, type, field, keyfunct) \
-  NEDTRIE_GENERATE_MINMAX (proto, name, type, field, keyfunct) \
-  NEDTRIE_GENERATE_PREV   (proto, name, type, field, keyfunct) \
-  NEDTRIE_GENERATE_NEXT   (proto, name, type, field, keyfunct) \
+  NEDTRIE_GENERATE_NOBBLES  (proto, name, type, field, keyfunct) \
+  NEDTRIE_GENERATE_INSERT   (proto, name, type, field, keyfunct) \
+  NEDTRIE_GENERATE_REMOVE   (proto, name, type, field, keyfunct, nobblefunct) \
+  NEDTRIE_GENERATE_FIND     (proto, name, type, field, keyfunct) \
+  NEDTRIE_GENERATE_EXACTFIND(proto, name, type, field, keyfunct) \
+  NEDTRIE_GENERATE_NFIND    (proto, name, type, field, keyfunct) \
+  NEDTRIE_GENERATE_MINMAX   (proto, name, type, field, keyfunct) \
+  NEDTRIE_GENERATE_PREV     (proto, name, type, field, keyfunct) \
+  NEDTRIE_GENERATE_NEXT     (proto, name, type, field, keyfunct) \
   proto INLINE struct type * name##_NEDTRIE_PREVLEAF(struct type *r) { return (r)->field.trie_prev; } \
   proto INLINE struct type * name##_NEDTRIE_NEXTLEAF(struct type *r) { return (r)->field.trie_next; }
 
@@ -1030,6 +1076,10 @@ namespace nedtries {
 \brief Finds the item with the same key as y in nedtrie x.
 */
 #define NEDTRIE_FIND(name, x, y)         name##_NEDTRIE_FIND(x, y)
+/*! \def NEDTRIE_EXACTFIND
+\brief Returns true if there is an item with the same key and address as y in nedtrie x.
+*/
+#define NEDTRIE_EXACTFIND(name, x, y)    name##_NEDTRIE_EXACTFIND(x, y)
 /*! \def NEDTRIE_NFIND
 \brief Finds the item with the nearest key to y in nedtrie x.
 */
