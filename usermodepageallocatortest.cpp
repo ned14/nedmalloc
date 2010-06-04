@@ -145,10 +145,71 @@ int main(void)
       end=GetUsCount();
       printf("Releasing %uMb (%u pages) takes %lf ms\n", regionsize/1024/1024, pagesinregion, (end-start)/1000000000.0);
     }
-    // Second test: allocate and randomly free lots of varying lengths
+    // Second test: find out how realloc() scales
+    if(0)
+    {
+      size_t length;
+#if 0
+      printf("realloc()\n");
+      for(length=PAGE_SIZE; length<4*1024*1024; length*=2)
+      {
+        bytesallocated=0;
+        start=GetUsCount();
+        for(n=1; n<1048; n++)
+        {
+          void *newblk;
+          if(!addrsize[n].addr)
+            newblk=userpage_malloc(length, 0);
+          else
+            newblk=userpage_realloc(addrsize[n].addr, length/2, length, MREMAP_MAYMOVE, 0);
+          addrsize[n].addr=newblk;
+          bytesallocated+=length;
+        }
+        end=GetUsCount();
+        //printf("Length=%u: %d allocations (%uMb) takes %lf ms (%lf ops/sec)\n", length, n, bytesallocated/1024/1024, (end-start)/1000000000.0, n/((end-start)/1000000000000.0));
+        printf("%u,%lf\n", length, n/((end-start)/1000000000000.0));
+      }
+      getchar();
+      for(n=1; n<ALLOCATIONS; n++)
+      {
+        if(addrsize[n].addr)
+          userpage_free(addrsize[n].addr, length/2);
+      }
+#else
+      printf("malloc() + memcpy() + free()\n");
+      for(length=PAGE_SIZE; length<4*1024*1024; length*=2)
+      {
+        bytesallocated=0;
+        start=GetUsCount();
+        for(n=1; n<1048; n++)
+        {
+          void *newblk=userpage_malloc(length, 0);
+          if(addrsize[n].addr)
+          {
+            memcpy(newblk, addrsize[n].addr, length/2);
+            userpage_free(addrsize[n].addr, length/2);
+          }
+          addrsize[n].addr=newblk;
+          bytesallocated+=length;
+        }
+        end=GetUsCount();
+        //printf("Length=%u: %d allocations (%uMb) takes %lf ms (%lf ops/sec)\n", length, n, bytesallocated/1024/1024, (end-start)/1000000000.0, n/((end-start)/1000000000000.0));
+        printf("%u,%lf\n", length, n/((end-start)/1000000000000.0));
+      }
+      getchar();
+      for(n=1; n<ALLOCATIONS; n++)
+      {
+        if(addrsize[n].addr)
+          userpage_free(addrsize[n].addr, length/2);
+      }
+#endif
+      getchar();
+    }
+    // Third test: allocate and randomly free lots of varying lengths
     for(m=1; m<ALLOCATIONS; m++)
     {
       opcount=0;
+      bytesallocated=0;
       start=GetUsCount();
       // Allocate and free
       for(i=0; i<LOOPS; i++)

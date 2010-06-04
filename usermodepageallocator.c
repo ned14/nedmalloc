@@ -758,7 +758,7 @@ static void ValidatePageMappings(AddressSpaceReservation_t *RESTRICT addr)
 
 static AddressSpaceReservation_t *ReserveSpace(size_t space)
 {
-  const size_t RESERVEALWAYSLEAVEFREE=128*1024*1024; /* Windows goes seriously screwy if you take away all address space */
+  const size_t RESERVEALWAYSLEAVEFREE=64*1024*1024; /* Windows goes seriously screwy if you take away all address space */
   OSAddressSpaceReservationData addrR={0};
   AddressSpaceReservation_t *RESTRICT addr=0;
   size_t pagemappingsize, n, pagesallocated;

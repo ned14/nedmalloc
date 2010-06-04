@@ -141,7 +141,7 @@ static INLINE unsigned nedtriebitscanr(size_t value)
 #endif
   return (unsigned) bitpos;
 #elif defined(__GNUC__)
-  return (unsigned) __builtin_clzl(value);
+  return sizeof(value)*__CHAR_BIT__ - 1 - (unsigned) __builtin_clz(value);
 #else
   /* The following code is illegal C, but it almost certainly will work.
   If not use the legal implementation below */
