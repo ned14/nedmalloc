@@ -222,6 +222,7 @@ Always turns on ENABLE_TOLERANT_NEDMALLOC.
   #define nedrealloc              realloc
   #define nedrealloc2             realloc2
   #define nedfree                 free
+  #define nedfree2                free2
   #define nedmemalign             memalign
   #define nedmallinfo             mallinfo
   #define nedmallopt              mallopt
@@ -417,9 +418,16 @@ n * original size) avoids memory copying and hence is much faster.
 #define M2_CUSTOM_FLAGS_BEGIN   (1<<16)
 #define M2_CUSTOM_FLAGS_MASK    0xffff0000
 
+/*! \def NM_SKIP_TOLERANCE_CHECKS
+\ingroup v2malloc
+\brief Causes nedmalloc to not inspect the block being passed to see if it belongs
+to the system allocator. Can improve speed by up to 10%.
+*/
+#define NM_SKIP_TOLERANCE_CHECKS (1<<31)
 #endif /* M2_FLAGS_DEFINED */
 
 
+#if defined(__cplusplus)
 /*! \brief Gets the usable size of an allocated block.
 
 Note this will always be bigger than what was
@@ -427,7 +435,10 @@ asked for due to rounding etc. Optionally returns 1 in isforeign if the block ca
 system allocator - note that there is a small (>0.01%) but real chance of segfault on non-Windows
 systems when passing non-nedmalloc blocks if you don't use USE_MAGIC_HEADERS.
 */
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT mem) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT mem, unsigned flags=0) THROWSPEC;
+#else
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT mem, unsigned flags) THROWSPEC;
+#endif
 /*! \brief Identical to nedblksize() except without the isforeign */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR size_t nedmemsize(void *RESTRICT mem) THROWSPEC;
 
@@ -438,9 +449,9 @@ NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void nedsetvalue(void *v) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc(size_t size) THROWSPEC;
 /*! \brief Equivalent to nedpmalloc2((nedpool *) 0, no*size, 0, M2_ZERO_MEMORY) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedcalloc(size_t no, size_t size) THROWSPEC;
-/*! \brief Equivalent to nedprealloc2((nedpool *) 0, size, mem, size, 0, 0) */
+/*! \brief Equivalent to nedprealloc2((nedpool *) 0, size, mem, size, 0, M2_RESERVE_MULT(8)) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc(void *mem, size_t size) THROWSPEC;
-/*! \brief Equivalent to nedpfree((nedpool *) 0, mem) */
+/*! \brief Equivalent to nedpfree2((nedpool *) 0, mem, 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedfree(void *mem) THROWSPEC;
 /*! \brief Equivalent to nedpmalloc2((nedpool *) 0, size, alignment, 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC;
@@ -452,9 +463,13 @@ NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t 
 /*! \ingroup v2malloc
 \brief Equivalent to nedprealloc2((nedpool *) 0, mem, size, alignment, flags) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
+/*! \ingroup v2malloc
+\brief Equivalent to nedpfree2((nedpool *) 0, mem, flags) */
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void nedfree2(void *mem, unsigned flags=0) THROWSPEC;
 #else
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment, unsigned flags) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void nedfree2(void *mem, unsigned flags) THROWSPEC;
 #endif
 
 /*! \brief Equivalent to nedpmallinfo((nedpool *) 0) */
@@ -553,10 +568,10 @@ NEDMALLOCEXTSPEC size_t nedflushlogs(nedpool *p, char *filepath) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size) THROWSPEC;
 /*! \brief Equivalent to nedpmalloc2(p, no*size, 0, M2_ZERO_MEMORY) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC;
-/*! \brief Equivalent to nedprealloc2(p, mem, size, 0, 0) */
+/*! \brief Equivalent to nedprealloc2(p, mem, size, 0, M2_RESERVE_MULT(8)) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC;
-/*! \brief Frees the block mem from the pool p. */
-NEDMALLOCEXTSPEC void   nedpfree(nedpool *p, void *mem) THROWSPEC;
+/*! \brief Equivalent to nedpfree2(p, mem, 0) */
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedpfree(nedpool *p, void *mem) THROWSPEC;
 /*! \brief Equivalent to nedpmalloc2(p, bytes, alignment, 0) */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t alignment, size_t bytes) THROWSPEC;
 #if defined(__cplusplus)
@@ -568,9 +583,12 @@ NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpoo
 \brief Resizes the block of memory at \em mem in pool \em p to size \em size, aligned to \em alignment and according to the flags \em flags.
 */
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
+/*! \brief Frees the block \em mem from the pool \em p according to flags \em flags. */
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedpfree2(nedpool *p, void *mem, unsigned flags=0) THROWSPEC;
 #else
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpool *p, size_t size, size_t alignment, unsigned flags) THROWSPEC;
 NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC;
+NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedpfree2(nedpool *p, void *mem, unsigned flags) THROWSPEC;
 #endif
 /*! \brief Returns information about the memory pool */
 NEDMALLOCEXTSPEC struct nedmallinfo nedpmallinfo(nedpool *p) THROWSPEC;
@@ -1330,10 +1348,6 @@ namespace nedallocatorI {
 		T *operator *() { return mem; }
 		const T *operator *() const { return mem; }
 	};
-	// Lazy arrayed new implementation
-	template<typename T, class allocator> class NewedObjectArray
-	{
-	};
 }
 /*! \brief Allocates the memory for an instance of object \em T and constructs it.
 
@@ -1438,46 +1452,6 @@ template<class allocator, typename T> inline void Delete(const T *_obj)
 	a.deallocate(obj, sizeof(T));
 }
 template<typename T> inline void Delete(const T *obj) { Delete<nedallocator<T> >(obj); }
-
-/*! \brief Allocates the memory for \em no instances of object \em T and constructs an
-array of them.
-
-If an exception is thrown during construction, the already constructed
-objects are destructed and the memory is freed before rethrowing the exception.
-*/
-#ifdef HAVE_CPP0XVARIADICTEMPLATES
-template<typename T, class allocator=nedallocator<T>, typename... Parameters> inline nedallocatorI::NewedObjectArray<T, allocator> NewA(const Parameters&... parameters)
-#else
-template<typename T, class allocator> inline nedallocatorI::NewedObjectArray<T, allocator> NewA()
-#endif
-{
-	allocator &a=nedallocatorI::StaticAllocator<allocator>::get();
-	//size_t toallocate=no*sizeof(T);
-	// To be finished later
-}
-
-/*! \brief Resizes the previously constructed array of objects \em T.
-
-If \em newsize is larger than its existing size, the memory allocation is extended
-and new object instances are constructed. If an exception is thrown during one of
-the constructions, the newly constructed objects are destructed and the memory
-allocation is returned to its previous value.
-
-If on the other hand \em newsize is smaller than its existing size, the surplus
-object instances are destructed and the memory allocation is reduced. If an exception
-is thrown during one of the destructions, the memory allocation is reduced only as
-far as the object whose destructor threw an exception.
-*/
-#ifdef HAVE_CPP0XVARIADICTEMPLATES
-template<typename T, class allocator=nedallocator<T>, typename... Parameters> inline nedallocatorI::NewedObjectArray<T, allocator> ResizeA(T *array, size_t newsize, const Parameters&... parameters)
-#else
-template<typename T, class allocator> inline nedallocatorI::NewedObjectArray<T, allocator> ResizeA(T *array, size_t newsize)
-#endif
-{
-	allocator &a=nedallocatorI::StaticAllocator<allocator>::get();
-	//size_t toallocate=no*sizeof(T);
-	// To be finished later
-}
 
 /*! \class nedallocatorise
 \ingroup C++

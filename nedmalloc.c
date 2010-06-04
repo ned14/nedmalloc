@@ -559,7 +559,7 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 	}
 	return 0;
 }
-NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT mem) THROWSPEC
+NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT mem, unsigned flags) THROWSPEC
 {
 	if(mem)
 	{
@@ -576,7 +576,7 @@ NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT m
 			}
 		}
 #elif USE_ALLOCATOR==1
-		if(nedblkmstate(mem))
+		if((flags & NM_SKIP_TOLERANCE_CHECKS) || nedblkmstate(mem))
 		{
 			mchunkptr p=mem2chunk(mem);
 			if(isforeign) *isforeign=0;
@@ -595,16 +595,17 @@ NEDMALLOCNOALIASATTR size_t nedblksize(int *RESTRICT isforeign, void *RESTRICT m
 	}
 	return 0;
 }
-NEDMALLOCNOALIASATTR size_t nedmemsize(void *RESTRICT mem) THROWSPEC { return nedblksize(0, mem); }
+NEDMALLOCNOALIASATTR size_t nedmemsize(void *RESTRICT mem) THROWSPEC { return nedblksize(0, mem, 0); }
 
 NEDMALLOCNOALIASATTR void nedsetvalue(void *v) THROWSPEC																		{ nedpsetvalue((nedpool *) 0, v); }
-NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc(size_t size) THROWSPEC													{ return nedpmalloc2((nedpool *) 0, size, 0, 0); }
-NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedcalloc(size_t no, size_t size) THROWSPEC										{ return nedpmalloc2((nedpool *) 0, no*size, 0, M2_ZERO_MEMORY); }
-NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc(void *mem, size_t size) THROWSPEC										{ return nedprealloc2((nedpool *) 0, mem, size, 0, 0); }
+NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc(size_t size) THROWSPEC													{ return nedpmalloc((nedpool *) 0, size); }
+NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedcalloc(size_t no, size_t size) THROWSPEC										{ return nedpcalloc((nedpool *) 0, no, size); }
+NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc(void *mem, size_t size) THROWSPEC										{ return nedprealloc((nedpool *) 0, mem, size); }
 NEDMALLOCNOALIASATTR void   nedfree(void *mem) THROWSPEC																		{ nedpfree((nedpool *) 0, mem); }
-NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC								{ return nedpmalloc2((nedpool *) 0, bytes, alignment, 0); }
+NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmemalign(size_t alignment, size_t bytes) THROWSPEC								{ return nedpmemalign((nedpool *) 0, alignment, bytes); }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment, unsigned flags) THROWSPEC				{ return nedpmalloc2((nedpool *) 0, size, alignment, flags); }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC	{ return nedprealloc2((nedpool *) 0, mem, size, alignment, flags); }
+NEDMALLOCNOALIASATTR void   nedfree2(void *mem, unsigned flags) THROWSPEC														{ nedpfree2((nedpool *) 0, mem, flags); }
 NEDMALLOCNOALIASATTR struct nedmallinfo nedmallinfo(void) THROWSPEC																{ return nedpmallinfo((nedpool *) 0); }
 NEDMALLOCNOALIASATTR int    nedmallopt(int parno, int value) THROWSPEC															{ return nedpmallopt((nedpool *) 0, parno, value); }
 NEDMALLOCNOALIASATTR int    nedmalloc_trim(size_t pad) THROWSPEC																{ return nedpmalloc_trim((nedpool *) 0, pad); }
@@ -1067,8 +1068,8 @@ static void tcsanitycheck(threadcacheblk **ptr) THROWSPEC
 	{
 		assert(ptr[0]->isforeign || nedblkmstate(ptr[0]));
 		assert(ptr[1]->isforeign || nedblkmstate(ptr[1]));
-		assert(nedblksize(0, ptr[0])>=sizeof(threadcacheblk));
-		assert(nedblksize(0, ptr[1])>=sizeof(threadcacheblk));
+		assert(nedblksize(0, ptr[0], 0)>=sizeof(threadcacheblk));
+		assert(nedblksize(0, ptr[1], 0)>=sizeof(threadcacheblk));
 		assert(*(unsigned int *) "NEDN"==ptr[0]->magic);
 		assert(*(unsigned int *) "NEDN"==ptr[1]->magic);
 		assert(!ptr[0]->prev);
@@ -1091,7 +1092,7 @@ static void tcfullsanitycheck(threadcache *tc) THROWSPEC
 		for(b=tcbptr[0]; b; ob=b, b=b->next)
 		{
 			assert(b->isforeign || nedblkmstate(b));
-			assert(nedblksize(0, b)>=sizeof(threadcacheblk));
+			assert(nedblksize(0, b, 0)>=sizeof(threadcacheblk));
 			assert(*(unsigned int *) "NEDN"==b->magic);
 			assert(!ob || ob->next==b);
 			assert(!ob || b->prev==ob);
@@ -1118,7 +1119,7 @@ static NOINLINE void RemoveCacheEntries(nedpool *RESTRICT p, threadcache *RESTRI
 			{
 				threadcacheblk *f=*tcb;
 				size_t blksize=f->size; /*nedblksize(f);*/
-				assert(blksize<=nedblksize(0, f));
+				assert(blksize<=nedblksize(0, f, 0));
 				assert(blksize);
 #ifdef FULLSANITYCHECKS
 				assert(*(unsigned int *) "NEDN"==(*tcb)->magic);
@@ -1354,7 +1355,7 @@ static void *threadcache_malloc(nedpool *RESTRICT p, threadcache *RESTRICT tc, s
 	if(blk)
 	{
 		blksize=blk->size; /*nedblksize(blk);*/
-		assert(nedblksize(0, blk)>=blksize);
+		assert(nedblksize(0, blk, 0)>=blksize);
 		assert(blksize>=size);
 		if(blk->next)
 			blk->next->prev=0;
@@ -1365,7 +1366,7 @@ static void *threadcache_malloc(nedpool *RESTRICT p, threadcache *RESTRICT tc, s
 		blk->magic=0;
 #endif
 		assert(binsptr[0]!=blk && binsptr[1]!=blk);
-		assert(nedblksize(0, blk)>=sizeof(threadcacheblk) && nedblksize(0, blk)<=THREADCACHEMAX+CHUNK_OVERHEAD);
+		assert(nedblksize(0, blk, 0)>=sizeof(threadcacheblk) && nedblksize(0, blk, 0)<=THREADCACHEMAX+CHUNK_OVERHEAD);
 		/*printf("malloc: %p, %p, %p, %lu\n", p, tc, blk, (long) _size);*/
 		ret=(void *) blk;
 	}
@@ -1414,7 +1415,7 @@ static void threadcache_free(nedpool *RESTRICT p, threadcache *RESTRICT tc, int 
 	assert(size>=sizeof(threadcacheblk) && size<=THREADCACHEMAX+CHUNK_OVERHEAD);
 #ifdef DEBUG
 	/* Make sure this is a valid memory block */
-	assert(nedblksize(0, mem));
+	assert(nedblksize(0, mem, 0));
 #endif
 #ifdef FULLSANITYCHECKS
 	tcfullsanitycheck(tc);
@@ -1878,7 +1879,7 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem,
 	int mymspace, isforeign=1;
 	size_t memsize;
 	if(!mem) return nedpmalloc2(p, size, alignment, flags);
-	memsize=nedblksize(&isforeign, mem);
+	memsize=nedblksize(&isforeign, mem, flags);
 	assert(memsize);
 	if(!memsize)
 	{
@@ -1927,7 +1928,7 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem,
 	LogOperation(tc, p, LOGENTRY_REALLOC, mymspace, size, mem, alignment, flags, ret);
 	return ret;
 }
-void   nedpfree(nedpool *p, void *mem) THROWSPEC
+void   nedpfree2(nedpool *p, void *mem, unsigned flags) THROWSPEC
 {	/* Frees always happen in the mspace they happened in, so skip
 	locking the preferred mspace for this thread */
 	threadcache *tc;
@@ -1940,7 +1941,7 @@ void   nedpfree(nedpool *p, void *mem) THROWSPEC
 #endif
 		return;
 	}
-	memsize=nedblksize(&isforeign, mem);
+	memsize=nedblksize(&isforeign, mem, flags);
 	assert(memsize);
 	if(!memsize)
 	{
@@ -1984,6 +1985,10 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmemalign(nedpool *p, size_t ali
 {
 	unsigned flags=NEDMALLOC_FORCERESERVE(p, 0, bytes);
 	return nedpmalloc2(p, bytes, alignment, flags);
+}
+void   nedpfree(nedpool *p, void *mem) THROWSPEC
+{
+  nedpfree2(p, mem, 0);
 }
 
 struct nedmallinfo nedpmallinfo(nedpool *p) THROWSPEC
