@@ -6,6 +6,7 @@ env = Environment()
 #print env['TOOLS']
 AddOption('--postfix', dest='postfix', nargs=1, default='_test', help='appends a string to the DLL name')
 AddOption('--debugbuild', dest='debug', nargs='?', const=True, help='enable debug build')
+AddOption('--pgo', dest='pgo', nargs='?', const=True, help='build PGO instrumentation')
 AddOption('--debugprint', dest='debugprint', nargs='?', const=True, help='enable lots of debug printing (windows only)')
 AddOption('--fullsanitychecks', dest='fullsanitychecks', nargs='?', const=True, help='enable full sanity checking on every memory op')
 AddOption('--force32', dest='force32', help='force 32 bit build on 64 bit machine')
@@ -116,8 +117,10 @@ if sys.platform=='win32':
     if not env.GetOption('debug'):
         env['LINKFLAGS']+=["/OPT:REF", "/OPT:ICF"]  # Eliminate redundants
         env['LINKFLAGS']+=["/PGD:${VARIANT}/"+env['LIBRARYNAME']+".pgd"]
-        #env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
-        env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
+        if env.GetOption('pgo'):
+            env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
+        else:
+            env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
 else:
     env['CPPDEFINES']+=[]
     env['CCFLAGS']+=["-Wall"]

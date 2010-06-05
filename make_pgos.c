@@ -9,25 +9,37 @@ Simply runs through each of the most common code paths for PGO purposes
 #include <assert.h>
 #include "nedmalloc.h"
 
+#define RECORDS 100000
+
 int main(void)
 {
-	void *mem1, *mem2;
+	int n;
+	void *mem[RECORDS];
 	printf("nedmalloc PGO maker\n"
 		   "-=-=-=-=-=-=-=-=-=-\n");
 	printf("Small allocations\n");
-	mem1=nedmalloc(64);
-	mem2=nedrealloc(mem1, 96);
-	nedfree(mem2);
+	for(n=0; n<RECORDS; n++)
+	{
+		mem[n]=nedmalloc(64);
+		if(n>0) mem[n-1]=nedrealloc(mem[n-1], 96);
+		if(n>1) nedfree(mem[n-2]);
+	}
 
 	printf("Medium allocations\n");
-	mem1=nedmalloc(65536);
-	mem2=nedrealloc(mem1, 256*1024);
-	nedfree(mem2);
+	for(n=0; n<RECORDS/100; n++)
+	{
+		mem[n]=nedmalloc(64*1024);
+		if(n>0) mem[n-1]=nedrealloc(mem[n-1], 96*1024);
+		if(n>1) nedfree(mem[n-2]);
+	}
 
 	printf("Large allocations\n");
-	mem1=nedmalloc(4*1024*1024);
-	mem2=nedrealloc(mem1, 8*1024*1024);
-	nedfree(mem2);
+	for(n=0; n<RECORDS/1000; n++)
+	{
+		mem[n]=nedmalloc(4*1024*1024);
+		if(n>0) mem[n-1]=nedrealloc(mem[n-1], 6*1024*1024);
+		if(n>1) nedfree(mem[n-2]);
+	}
 
 	return 0;
 }
