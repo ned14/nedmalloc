@@ -4,6 +4,7 @@ def bitscanrev(x, c=-1):
 
 env = Environment()
 #print env['TOOLS']
+AddOption('--postfix', dest='postfix', nargs=1, default='_test', help='appends a string to the DLL name')
 AddOption('--debugbuild', dest='debug', nargs='?', const=True, help='enable debug build')
 AddOption('--debugprint', dest='debugprint', nargs='?', const=True, help='enable lots of debug printing (windows only)')
 AddOption('--fullsanitychecks', dest='fullsanitychecks', nargs='?', const=True, help='enable full sanity checking on every memory op')
@@ -33,6 +34,8 @@ env['CPPDEFINES']=[]
 env['CCFLAGS']=[]
 env['LIBS']=[]
 env['LINKFLAGS']=[]
+env['CCFLAGSFORNEDMALLOC']=[]
+env['LIBRARYNAME']="nedmalloc"+('_rsa' if env.GetOption('replacesystemallocator') else '')+env.GetOption('postfix')
 if env.GetOption('debugprint'): env['CPPDEFINES']+=["USE_DEBUGGER_OUTPUT"]
 if env.GetOption('fullsanitychecks'): env['CPPDEFINES']+=["FULLSANITYCHECKS"]
 if env.GetOption('replacesystemallocator'): env['CPPDEFINES']+=["REPLACE_SYSTEM_ALLOCATOR"]
@@ -99,7 +102,7 @@ if sys.platform=='win32':
         env['CCFLAGS']+=["/Od", "/MDd"]
     else:
         env['CCFLAGS']+=["/O2", "/MD"]
-        #env['CCFLAGS']+=["/GL"]         # Do link time code generation
+        env['CCFLAGSFORNEDMALLOC']+=["/GL"]         # Do link time code generation
     env['LIBS']+=["psapi", "user32", "advapi32"]
     env['LINKFLAGS']+=["/DEBUG"]                # Output debug symbols
     env['LINKFLAGS']+=["/LARGEADDRESSAWARE"]    # Works past 2Gb
@@ -107,13 +110,13 @@ if sys.platform=='win32':
     env['LINKFLAGS']+=["/NXCOMPAT"]             # Likes no execute
 
     env['LINKFLAGS']+=["/ENTRY:DllPreMainCRTStartup"]
-    env['LINKFLAGS']+=["/VERSION:1.1.0"]        # Version
+    env['LINKFLAGS']+=["/VERSION:1.10.0"]        # Version
     env['LINKFLAGS']+=["/MANIFEST"]             # Be UAC compatible
     
     if not env.GetOption('debug'):
         env['LINKFLAGS']+=["/OPT:REF", "/OPT:ICF"]  # Eliminate redundants
-        #env['LINKFLAGS']+=["/PGD:${VARIANT}/nedmalloc.pgd"]
-        #env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
+        env['LINKFLAGS']+=["/PGD:${VARIANT}/"+env['LIBRARYNAME']+".pgd"]
+        env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
         #env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
 else:
     env['CPPDEFINES']+=[]
