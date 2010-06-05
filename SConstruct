@@ -35,7 +35,7 @@ env['CCFLAGS']=[]
 env['LIBS']=[]
 env['LINKFLAGS']=[]
 env['CCFLAGSFORNEDMALLOC']=[]
-env['LIBRARYNAME']="nedmalloc"+('_rsa' if env.GetOption('replacesystemallocator') else '')+env.GetOption('postfix')
+env['LIBRARYNAME']="nedmalloc"+('_ptchg' if env.GetOption('replacesystemallocator') else '')+env.GetOption('postfix')
 if env.GetOption('debugprint'): env['CPPDEFINES']+=["USE_DEBUGGER_OUTPUT"]
 if env.GetOption('fullsanitychecks'): env['CPPDEFINES']+=["FULLSANITYCHECKS"]
 if env.GetOption('replacesystemallocator'): env['CPPDEFINES']+=["REPLACE_SYSTEM_ALLOCATOR"]
@@ -116,8 +116,8 @@ if sys.platform=='win32':
     if not env.GetOption('debug'):
         env['LINKFLAGS']+=["/OPT:REF", "/OPT:ICF"]  # Eliminate redundants
         env['LINKFLAGS']+=["/PGD:${VARIANT}/"+env['LIBRARYNAME']+".pgd"]
-        env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
-        #env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
+        #env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
+        env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
 else:
     env['CPPDEFINES']+=[]
     env['CCFLAGS']+=["-Wall"]

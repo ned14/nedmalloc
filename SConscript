@@ -18,8 +18,14 @@ if sys.platform=='win32':
 sources = [ "test.c" ]
 objects = env.Object(source = sources) # + [nedmallocliblib]
 testlibs=[nedmallocliblib]
-if sys.platform=='win32': testlibs+=["user32"]
 testprogram = env.Program("test", source = objects, LINKFLAGS=[], LIBS = testlibs)
+
+# PGO program
+sources = [ "make_pgos.c" ]
+objects = env.Object(source = sources) # + [nedmallocliblib]
+testlibs=[nedmallocliblib]
+testprogram = env.Program("make_pgos", source = objects, LINKFLAGS=[], LIBS = testlibs)
+
 
 Default(testprogram)
 Return("nedmalloclib")

@@ -6,7 +6,10 @@ An example of how to use nedalloc in C
 #define _CRT_SECURE_NO_WARNINGS 1	/* Don't care about MSVC warnings on POSIX functions */
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 #include "nedmalloc.h"
+
+#define USE_NEDMALLOC_DLL
 
 /**** TEST CONFIGURATION ****/
 #if 0 /* Test patterns typical of C++ code */
@@ -40,6 +43,7 @@ An example of how to use nedalloc in C
 #elif defined(WIN32)
 #define WIN32_LEAN_AND_MEAN 1
 #include <windows.h>
+#include <malloc.h>
 #else
 #include <pthread.h>
 #endif

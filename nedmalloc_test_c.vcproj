@@ -66,6 +66,7 @@
 				Name="VCLinkerTool"
 				OutputFile="$(OutDir)/test_c.exe"
 				LinkIncremental="1"
+				UACExecutionLevel="2"
 				GenerateDebugInformation="true"
 				ProgramDatabaseFile="$(TargetDir)$(TargetName).pdb"
 				SubSystem="1"
@@ -440,6 +441,10 @@
 					Name="VCCLCompilerTool"
 				/>
 			</FileConfiguration>
+		</File>
+		<File
+			RelativePath=".\x86\Debug\nedmalloc.lib"
+			>
 		</File>
 		<File
 			RelativePath=".\Readme.txt"
