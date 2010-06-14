@@ -307,6 +307,7 @@ and nedrealloc() call into this API:
 	<li><code>void* malloc2(size_t bytes, size_t alignment, unsigned flags)</code></li>
 	<li><code>void* realloc2(void* mem, size_t bytes, size_t alignment, unsigned 
 	flags)</code></li>
+	<li><code>void free2(void* mem, unsigned flags)</code></li>
 </ul>
 
 If nedmalloc.h is being included by C++ code, the alignment and flags parameters 
