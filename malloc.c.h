@@ -560,7 +560,7 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #include <sys/types.h>  /* For size_t */
 #endif  /* LACKS_SYS_TYPES_H */
 
-#if (defined(__GNUC__) && ((defined(__i386__) || defined(__x86_64__)))) || (defined(_MSC_VER) && _MSC_VER>=1310)
+#if (defined(__GNUC__) && ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) > 40100)) || (defined(_MSC_VER) && _MSC_VER>=1310)
 #define SPIN_LOCKS_AVAILABLE 1
 #else
 #define SPIN_LOCKS_AVAILABLE 0
@@ -2046,10 +2046,9 @@ static FORCEINLINE int win32munmap(void *handle, void* ptr, size_t size) {
   in layered extensions, per-mspace locks are reentrant.
 
   Because lock-protected regions generally have bounded times, it is
-  OK to use the supplied simple spinlocks in the custom versions for
-  x86. Spinlocks are likely to improve performance for lightly
-  contended applications, but worsen performance under heavy
-  contention.
+  OK to use the supplied simple spinlocks. Spinlocks are likely to
+  improve performance for lightly contended applications, but worsen
+  performance under heavy contention.
 
   If USE_LOCKS is > 1, the definitions of lock routines here are
   bypassed, in which case you will need to define the type MLOCK_T,
@@ -2098,10 +2097,7 @@ static FORCEINLINE int pthread_acquire_lock (MLOCK_T *sl) {
       int cmp = 0;
       int val = 1;
       int ret;
-      __asm__ __volatile__  ("lock; cmpxchgl %1, %2"
-                             : "=a" (ret)
-                             : "r" (val), "m" (*(lp)), "0"(cmp)
-                             : "memory", "cc");
+      ret = __sync_bool_compare_and_swap(lp, cmp, val);
       if (!ret) {
         assert(!sl->threadid);
         sl->threadid = mythreadid;
@@ -2131,10 +2127,7 @@ static FORCEINLINE void pthread_release_lock (MLOCK_T *sl) {
     sl->threadid = 0;
     int prev = 0;
     int ret;
-    __asm__ __volatile__ ("lock; xchgl %0, %1"
-                          : "=r" (ret)
-                          : "m" (*(lp)), "0"(prev)
-                          : "memory");
+    __sync_lock_release(lp, 0);
   }
 }
 
@@ -2151,10 +2144,7 @@ static FORCEINLINE int pthread_try_lock (MLOCK_T *sl) {
     int cmp = 0;
     int val = 1;
     int ret;
-    __asm__ __volatile__  ("lock; cmpxchgl %1, %2"
-                           : "=a" (ret)
-                           : "r" (val), "m" (*(lp)), "0"(cmp)
-                           : "memory", "cc");
+    __sync_bool_compare_and_swap(lp, cmp, val);
     if (!ret) {
       assert(!sl->threadid);
       sl->threadid = mythreadid;
@@ -3101,8 +3091,7 @@ static size_t traverse_and_check(mstate m);
   else if (X > 0xFFFF)\
     I = NTREEBINS-1;\
   else {\
-    unsigned int K;\
-    __asm__("bsrl\t%1, %0\n\t" : "=r" (K) : "g"  (X));\
+    unsigned int K = (FXuint) sizeof(X)*__CHAR_BIT__ - 1 - (unsigned) __builtin_clz(X); \
     I =  (bindex_t)((K << 1) + ((S >> (K + (TREEBIN_SHIFT-1)) & 1)));\
   }\
 }
@@ -3200,7 +3189,7 @@ static size_t traverse_and_check(mstate m);
 #define compute_bit2idx(X, I)\
 {\
   unsigned int J;\
-  __asm__("bsfl\t%1, %0\n\t" : "=r" (J) : "g" (X));\
+  J = __builtin_ctz(X); \
   I = (bindex_t)J;\
 }
 
