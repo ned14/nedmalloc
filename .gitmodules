@@ -1,3 +1,6 @@
 [submodule "uthash"]
 	path = uthash
 	url = git://github.com/ned14/uthash.git
+[submodule "nedtries"]
+	path = nedtries
+	url = ssh://ned@mediacentre/Repositories/Git/nedtries.git
