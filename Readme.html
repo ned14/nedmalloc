@@ -53,11 +53,25 @@ dt + dd {
 	<hr /></div>
 <p>Enclosed is nedalloc, an alternative malloc implementation for multiple threads 
 without lock contention based on <a href="http://g.oswego.edu/" target="_blank">
-dlmalloc</a> v2.8.4. It is more or less a newer implementation of
-<a href="http://www.malloc.de/en/" target="_blank">ptmalloc2</a>, the standard allocator 
-in Linux (which is based on dlmalloc v2.7.0) but also contains a per-thread cache 
-for maximum CPU scalability, and other enhancements like the ability to patch Windows 
-binaries to modify how the STL and Qt implement their containers.</p>
+dlmalloc</a> v2.8.4 and a specialised user mode page allocator (Windows Vista or 
+later only). It has the following features:</p>
+<ol>
+	<li>A per-thread small block cache 
+for maximum CPU scalability.</li>
+	<li>A per-thread arena to minimise lock contention.</li>
+	<li>The ability to patch Windows binaries to replace the C memory allocation 
+	API malloc, realloc(), free() et al such that by simply inserting 
+	nedmalloc.dll into a process one realises performance improvements without 
+	recompilation.</li>
+	<li>A unique user mode page allocator implementation which delivers O(1) 
+	scaling for blocks of any size, including an O(1) very fast realloc(). 
+	Improves medium sized block (~1Mb) allocation speeds by about 25 times on 
+	current hardware. Requires Windows Vista or later only, and requires 
+	Administrator privileges as well as either UAC disabled or a UAC prompt at 
+	the start of each program run.</li>
+	<li>An enhanced C++ STL allocator implementation to enable super-fast 
+	std::vector&lt;&gt; <strong>[in progress]</strong></li>
+</ol>
 <p>It is licensed under the
 <a href="http://www.boost.org/LICENSE_1_0.txt" target="_blank">Boost Software License</a> 
 which basically means you can do anything you like with it. This does not apply 
@@ -66,11 +80,21 @@ available from <a href="http://www.nedproductions.biz/" target="_blank">ned
 Productions Limited</a>.</p>
 <p>It has been tested on win32 (x86), win64 (x64), Linux (x64), FreeBSD (x64) and 
 Apple Mac OS X (x86). It works very well on all of these and is very significantly 
-faster than the system allocator on Windows and FreeBSD. If you are using a recent 
-Apple Mac OS X then you probably won&#39;t see much improvement without modifying your 
-source to use the v2 malloc API (and kudos to Apple for adopting an excellent allocator).</p>
-<p>By literally dropping in this allocator as a replacement for your system allocator, 
-you can see real world improvements of up to three times in normal code!</p>
+faster than the system allocator on Windows XP and FreeBSD &lt;v7. If you are using 
+&gt;= 10.6 
+Apple Mac OS X or you are on Windows 7 or later then you probably won&#39;t see much improvement without modifying your 
+source to use the v2 malloc API (and kudos to Apple and Microsoft for adopting excellent allocators).</p>
+<p>The user mode page allocator returns jaw dropping real world performance 
+improvements but requires running the process as the superuser. Without, it 
+still offers sizeable gains on all older operating systems and through the v2 
+malloc API modest gains on all very recent operating systems, especially in 
+these situations:</p>
+<ol>
+	<li>If you are repeatedly extending large vector arrays, you will see a 
+	LARGE improvement if you use the address space reservation features.</li>
+	<li>If you do a lot of work with 16 byte aligned vectors e.g. SSE or AVX 
+	vector arrays, you will find the v2 malloc API a godsend.</li>
+</ol>
 <p style="text-decoration: underline"><strong>Table of Contents: </strong></p>
 <ol style="list-style-type: upper-alpha; position: relative; margin-top: -0.5em;">
 	<li><a href="#touse">How to use</a><ul style="list-style-type: none; margin-left: 0; padding-left: 0">
@@ -116,15 +140,18 @@ read this format too). If you don&#39;t want to use the CHM documentation,
 <h3><a name="CPPAPI">A1: The C++ API:</a></h3>
 <p>For the v1.10 release which was generously sponsored by
 <a href="http://www.ara.com/" target="_blank">Applied Research Associates (USA)</a>, 
-a C++ metaprogrammed STL reimplementor was designed which makes use of advanced 
-nedalloc features to remedy many of the long standing problems and 
-inefficiencies caused by C++&#39;s traditional over-fondness for copying things. 
-While its implementation is complex, usage is extremely easy - simply wrap your 
-STL container declarations with nedalloc::nedallocatorise&lt;&gt;.</p>
-<p>For those who are not using STL containers, nedalloc also provides a 
-non-moving realloc variant of operator new which permits the flags provided by 
-the v2 malloc C API below. This allows you to extend arrays in place whilst 
-avoiding costly copy constructions.</p>
+a C++ metaprogrammed STL allocator was designed which makes use of advanced nedalloc 
+features to remedy many of the long standing problems and inefficiencies caused 
+by C++&#39;s traditional over-fondness for copying things. While its implementation 
+is complex, usage is extremely easy - simply supply nedallocator&lt;&gt; as the custom 
+allocator to STL container classes.</p>
+<p>As nedmalloc can do even better for vector extension, nedmalloc.h also 
+contains a nedvector&lt;&gt; implementation which is the standard STL vector&lt;&gt; 
+implementation except that it makes use of the non-relocating facilities of 
+realloc2() (see below). This allows nedvector&lt;&gt; to not need to overallocate 
+memory (most STL vector&lt;&gt; implementations will overallocate by 50%) which saves 
+a lot of memory as well as <strong>completely avoiding array copy construction</strong> which make std::vector&lt;&gt;::resize() so 
+very, very slow.</p>
 <p>Even without nedalloc&#39;s major speed improvements as a simple C style 
 allocator, the improvements to the C++ memory infrastructure alone can generate 
 huge performance gains.</p>
@@ -164,9 +191,9 @@ extended.</p>
 GIT repository at either of (both are identical mirrors):</p>
 <ul>
 	<li>
-	<a href="git://tnfox.git.sourceforge.net/gitroot/tnfox/tnfox/src/nedmalloc">
-	git://tnfox.git.sourceforge.net/gitroot/tnfox/tnfox/src/nedmalloc</a></li>
-	<li><a href="git://github.com/ned14/tnfox.git/src/nedmalloc">git://github.com/ned14/tnfox.git/src/nedmalloc</a></li>
+	<a href="git://nedmalloc.git.sourceforge.net/gitroot/nedmalloc/nedmalloc">
+	git://nedmalloc.git.sourceforge.net/gitroot/nedmalloc/nedmalloc</a></li>
+	<li><a href="git://github.com/ned14/nedmalloc.git">git://github.com/ned14/nedmalloc.git</a></li>
 </ul>
 <p>IF YOU THINK YOU HAVE FOUND A BUG, PLEASE CHECK ONE OF THESE REPOS FIRST BEFORE 
 REPORTING IT!</p>
@@ -275,6 +302,23 @@ thanks to work generously sponsored by
 	program which does one variant of the same thing. It may or may not be useful 
 	to you - it is not intended to be maintained.</p>
 	</dd>
+	<dt>User mode page allocation</dt>
+	<dd>The
+	user mode page allocator is a user space implementation of kernel memory 
+	page allocation made possible by misusing the Address Windowing Extensions 
+	(AWE) provided by newer versions of Microsoft Windows. AWE allows - with a 
+	bit of persuasion - direct control of the Memory Management Unit of the CPU, 
+	thus allowing memory pages to be arbitrarily remapped from one address to 
+	another. The user mode page allocator can therefore allocate memory in 
+	microseconds by simply mapping it into where it needs to be, or it can 
+	realloc() gigabytes of memory from its old location into a new bigger space 
+	in microseconds. This O(1) scaling gives processes running on the user mode 
+	page allocator an <strong>unholy</strong> speed increase which gets 
+	exponentially better the larger the data set.<br />
+	<br />
+	There is an academic paper describing this technique and this implementation 
+	forthcoming at the 2011 International Symposium on Memory Management. A link 
+	to it will be added once the paper has passed peer review.</dd>
 </dl>
 <h2><a name="speedcomparisons">C. Speed comparisons:</a></h2>
 <p>See Benchmarks.xls for details.</p>
@@ -406,6 +450,8 @@ now tends to be worth it in the long run.</p>
 	fast malloc operations logger which outputs a CSV log on process exit.</li>
 	<li><span class="gitcommit">[nedmalloc_fast_realloc d6a8585]</span> Added 
 	stack backtracing to the logger.</li>
+	<li><span class="gitcommit">[master c7ea06d]</span> Finished user mode page
+	allocator, so merged nedmalloc_fast_realloc branch.</li>
 </ul>
 <h3>v1.06 beta 2 21st March 2010:</h3>
 <ul>
