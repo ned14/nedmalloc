@@ -84,7 +84,7 @@ much buffering and caching is disabled as possible in order to best test the cod
 #define USERMODEPAGEALLOCATOR_SYSTEMFREEMEMORYCHECKRATE 1
 #endif
 
-#include "nedtrie.h"
+#include "nedtries/nedtrie.h"
 
 #ifndef PAGE_SIZE
 #define PAGE_SIZE 4096

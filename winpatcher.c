@@ -39,7 +39,7 @@ DEALINGS IN THE SOFTWARE.
 #define _WIN32_WINNT 0x0501		/* Minimum of Windows XP required */
 #include <windows.h>
 #include <psapi.h>
-#include "uthash/src/uthash.h"
+#include "nedtries/uthash/src/uthash.h"
 #include "winpatcher_errorh.h"
 
 #pragma warning(disable: 4100)	/* Unreferenced formal parameter */
@@ -55,7 +55,7 @@ DEALINGS IN THE SOFTWARE.
 #undef uthash_malloc
 #undef uthash_free
 #define uthash_malloc(sz) nedpmalloc(0, sz)
-#define uthash_free(ptr) nedpfree(0, ptr)
+#define uthash_free(ptr, sz) nedpfree(0, ptr)
 #define HASH_FIND_PTR(head,findptr,out)                                         \
     HASH_FIND(hh,head,findptr,sizeof(void *),out)
 #define HASH_ADD_PTR(head,ptrfield,add)                                         \
