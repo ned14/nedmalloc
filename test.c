@@ -138,6 +138,7 @@ static size_t (*const memsizes[])(void *p)={ _msize, nedmemsize, win32memsize };
 static void (*const frees[])(void *mem)={ free, nedfree, win32free };
 #else
 #include <sys/time.h>
+#include <time.h>
 static void *_threadcode(void *a)
 {
 	threadcode((int)(size_t) a);
@@ -151,9 +152,15 @@ static void *_threadcode(void *a)
 typedef unsigned long long usCount;
 static FORCEINLINE usCount GetUsCount()
 {
+#ifdef CLOCK_MONOTONIC
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ((usCount) ts.tv_sec*1000000000000LL)+ts.tv_nsec*1000LL;
+#else
 	struct timeval tv;
 	gettimeofday(&tv, 0);
 	return ((usCount) tv.tv_sec*1000000000000LL)+tv.tv_usec*1000000LL;
+#endif
 }
 
 static void *(*const mallocs[])(size_t size)={ malloc, nedmalloc };
