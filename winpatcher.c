@@ -561,6 +561,8 @@ static ModuleListItem modules[]={
 	{ "MSVCR80.DLL", 0, 0 }, { "MSVCR80D.DLL", 0, 0 },
 	/* Release and Debug MSVC9 CRTs */
 	{ "MSVCR90.DLL", 0, 0 }, { "MSVCR90D.DLL", 0, 0 },
+	/* Release and Debug MSVC10 CRTs */
+	{ "MSVCR100.DLL", 0, 0 }, { "MSVCR100D.DLL", 0, 0 },
 	{ 0, 0, 0 }
 };
 static ModuleListItem kernelmodule[]={
@@ -632,6 +634,21 @@ LONG CALLBACK ProcessExceptionHandler(PEXCEPTION_POINTERS ExceptionInfo)
 }
 
 
+static ModuleListItem *FindNearestMSVCRT(ModuleListItem *module)
+{	
+	int modulediff;
+	for(modulediff=-2; module+modulediff>=modules && (HMODULE)(size_t)-1==(module+modulediff)->intoAddr; modulediff-=2);
+	if(module+modulediff==modules)
+	{
+		for(modulediff=2; (module+modulediff)->into && (HMODULE)(size_t)-1==(module+modulediff)->intoAddr; modulediff+=2);
+		if(!(module+modulediff)->into)
+		{
+			MessageBoxA(NULL, "Fatal Error", "Can't find a valid MSVCRT - perhaps this process was built with too new a MSVC?", MB_OK);
+			abort(); /* There is something seriously wrong if this happens e.g. an unknown MSVCRT */
+		}
+	}
+	return module+modulediff;
+}
 /* The DLL entry function for nedmalloc. This is called by the dynamic linker
 before absolutely everything else - including the CRT */
 BOOL WINAPI
@@ -703,13 +720,16 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 			int moduleidx=0;
 			GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCTSTR)(void *)malloc, &mymsvcrt);
 			for(module=modules; module->into && module->intoAddr!=mymsvcrt; module++, moduleidx++);
-			if(!module->into) abort(); /* There is something serious wrong if this happens */
+			if(!module->into) abort(); /* There is something seriously wrong if this happens */
 #if defined(_DEBUG)
 			DebugPrint("Winpatcher: Determined that the nedmalloc DLL is linked against %s (%p)\n", module->into, module->intoAddr);
 #endif
 			if(UsingReleaseMSVCRT>UsingDebugMSVCRT && (moduleidx & 1))
 			{	/* Need to replace the debug MSVCRT with which nedmalloc was linked with release */
 				module--;
+				/* It can happen that we're linked against something totally different to the host */
+				if((HMODULE)(size_t)-1==module->intoAddr)
+					module=FindNearestMSVCRT(module);
 #if defined(_DEBUG)
 				DebugPrint("Winpatcher: This is not what this process is using, so replacing with %s (%p)\n", module->into, module->intoAddr);
 #endif
@@ -722,6 +742,9 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 			else if(UsingReleaseMSVCRT<UsingDebugMSVCRT && !(moduleidx & 1))
 			{	/* Need to replace the release MSVCRT with which nedmalloc was linked with debug */
 				module++;
+				/* It can happen that we're linked against something totally different to the host */
+				if((HMODULE)(size_t)-1==module->intoAddr)
+					module=FindNearestMSVCRT(module);
 #if defined(_DEBUG)
 				DebugPrint("Winpatcher: This is not what this process is using, so replacing with %s (%p)\n", module->into, module->intoAddr);
 #endif
