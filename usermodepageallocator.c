@@ -32,7 +32,8 @@ DEALINGS IN THE SOFTWARE.
 /* This is how many free pages relative to used pages to keep around before
 returning them to the system. It gets ignored if system free memory is
 perceived to be tight. */
-#define USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(usedpages, freepages) (usedpages)
+/*#define USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(usedpages, freepages) (usedpages)*/
+#define USERMODEPAGEALLOCATOR_FREEPAGECACHESIZE(usedpages, freepages) ((size_t)-1)
 
 /* This is how many subsequent free operations must happen since a page was
 freed before it will be eligible to be returned to the system. It helps prevent
@@ -245,12 +246,14 @@ static int OSDeterminePhysicalPageSupport(void)
     {
       FreeUserPhysicalPages((HANDLE)(size_t)-1, (PULONG_PTR) &no, (PULONG_PTR) &pageframe);
       PhysicalPageSupport=HAVEPHYSICALPAGESUPPORT;
+	  CreateEvent(NULL, FALSE, FALSE, __T("UserModePageAllocatorEnabled"));
     }
     else
     {
       PhysicalPageSupport=NOPHYSICALPAGESUPPORT;
-			fprintf(stderr, "User Mode Page Allocator: Failed to allocate physical memory pages (does the user running this process have the right to lock pages in memory?). User Mode Page Allocator will not be used.\n");
+      /*fprintf(stderr, "User Mode Page Allocator: Failed to allocate physical memory pages (does the user running this process have the right to lock pages in memory?). User Mode Page Allocator will not be used.\n");*/
       OutputDebugStringA("User Mode Page Allocator: Failed to allocate physical memory pages (does the user running this process have the right to lock pages in memory?). User Mode Page Allocator will not be used.\n");
+	  CreateEvent(NULL, FALSE, FALSE, __T("UserModePageAllocatorDisabled"));
     }
     GetSystemInfo(&si);
 #ifdef ENABLE_PHYSICALPAGEEMULATION

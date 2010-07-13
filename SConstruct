@@ -100,9 +100,9 @@ if sys.platform=='win32':
     env['CCFLAGS']+=["/Gy"]             # Seperate COMDATs
     env['CCFLAGS']+=["/Zi"]             # Program database debug info
     if env.GetOption('debug'):
-        env['CCFLAGS']+=["/Od", "/MDd"]
+        env['CCFLAGS']+=["/Od", "/MTd"]
     else:
-        env['CCFLAGS']+=["/O2", "/MD"]
+        env['CCFLAGS']+=["/O2", "/MT"]
         env['CCFLAGSFORNEDMALLOC']+=["/GL"]         # Do link time code generation
     env['LIBS']+=["psapi", "user32", "advapi32"]
     env['LINKFLAGS']+=["/DEBUG"]                # Output debug symbols
@@ -116,11 +116,12 @@ if sys.platform=='win32':
     
     if not env.GetOption('debug'):
         env['LINKFLAGS']+=["/OPT:REF", "/OPT:ICF"]  # Eliminate redundants
-        env['LINKFLAGS']+=["/PGD:${VARIANT}/"+env['LIBRARYNAME']+".pgd"]
-        if env.GetOption('pgo'):
-            env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
-        else:
-            env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
+        if env.GetOption('pgo') or os.path.exists(variant+'/'+env['LIBRARYNAME']+".pgd"):
+            env['LINKFLAGS']+=["/PGD:${VARIANT}/"+env['LIBRARYNAME']+".pgd"]
+            if env.GetOption('pgo'):
+                env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
+            else:
+                env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
 else:
     env['CPPDEFINES']+=[]
     env['CCFLAGS']+=["-Wall"]

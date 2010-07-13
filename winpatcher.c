@@ -634,25 +634,15 @@ LONG CALLBACK ProcessExceptionHandler(PEXCEPTION_POINTERS ExceptionInfo)
 }
 
 
-static ModuleListItem *FindNearestMSVCRT(ModuleListItem *module)
-{	
-	int modulediff;
-	for(modulediff=-2; module+modulediff>=modules && (HMODULE)(size_t)-1==(module+modulediff)->intoAddr; modulediff-=2);
-	if(module+modulediff==modules)
-	{
-		for(modulediff=2; (module+modulediff)->into && (HMODULE)(size_t)-1==(module+modulediff)->intoAddr; modulediff+=2);
-		if(!(module+modulediff)->into)
-		{
-			MessageBoxA(NULL, "Fatal Error", "Can't find a valid MSVCRT - perhaps this process was built with too new a MSVC?", MB_OK);
-			abort(); /* There is something seriously wrong if this happens e.g. an unknown MSVCRT */
-		}
-	}
-	return module+modulediff;
-}
 /* The DLL entry function for nedmalloc. This is called by the dynamic linker
 before absolutely everything else - including the CRT */
 BOOL WINAPI
 _DllMainCRTStartup(
+        HANDLE  hDllHandle,
+        DWORD   dwReason,
+        LPVOID  lpreserved
+        );
+BOOL WINAPI _CRT_INIT(
         HANDLE  hDllHandle,
         DWORD   dwReason,
         LPVOID  lpreserved
@@ -715,54 +705,32 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 		if(!PatchInNedmallocDLL())
 			return FALSE;
 		{
-			HMODULE mymsvcrt=0;
 			ModuleListItem *module;
-			int moduleidx=0;
-			GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCTSTR)(void *)malloc, &mymsvcrt);
-			for(module=modules; module->into && module->intoAddr!=mymsvcrt; module++, moduleidx++);
-			if(!module->into) abort(); /* There is something seriously wrong if this happens */
-#if defined(_DEBUG)
-			DebugPrint("Winpatcher: Determined that the nedmalloc DLL is linked against %s (%p)\n", module->into, module->intoAddr);
-#endif
-			if(UsingReleaseMSVCRT>UsingDebugMSVCRT && (moduleidx & 1))
-			{	/* Need to replace the debug MSVCRT with which nedmalloc was linked with release */
-				module--;
-				/* It can happen that we're linked against something totally different to the host */
-				if((HMODULE)(size_t)-1==module->intoAddr)
-					module=FindNearestMSVCRT(module);
-#if defined(_DEBUG)
-				DebugPrint("Winpatcher: This is not what this process is using, so replacing with %s (%p)\n", module->into, module->intoAddr);
-#endif
-				sysmalloc =(void * (*)(size_t))GetProcAddress(module->intoAddr, "malloc");
-				syscalloc =(void * (*)(size_t, size_t))GetProcAddress(module->intoAddr, "calloc");
-				sysrealloc=(void * (*)(void *, size_t))GetProcAddress(module->intoAddr, "realloc");
-				sysfree   =(void   (*)(void *))GetProcAddress(module->intoAddr, "free");
-				sysblksize=(size_t (*)(void *))GetProcAddress(module->intoAddr, "_msize");
+			for(module=modules; module->into && (HMODULE)(size_t)-1==module->intoAddr; module++);
+			if(!module->into)
+			{
+				MessageBox(NULL, __T("Fatal Error"), __T("Can't find a valid MSVCRT - perhaps this process was built with too new a MSVC?"), MB_OK);
+				abort();
 			}
-			else if(UsingReleaseMSVCRT<UsingDebugMSVCRT && !(moduleidx & 1))
-			{	/* Need to replace the release MSVCRT with which nedmalloc was linked with debug */
-				module++;
-				/* It can happen that we're linked against something totally different to the host */
-				if((HMODULE)(size_t)-1==module->intoAddr)
-					module=FindNearestMSVCRT(module);
 #if defined(_DEBUG)
-				DebugPrint("Winpatcher: This is not what this process is using, so replacing with %s (%p)\n", module->into, module->intoAddr);
+			DebugPrint("Winpatcher: Determined that the process is linked against %s (%p)\n", module->into, module->intoAddr);
 #endif
-				sysmalloc =(void * (*)(size_t))GetProcAddress(module->intoAddr, "malloc");
-				syscalloc =(void * (*)(size_t, size_t))GetProcAddress(module->intoAddr, "calloc");
-				sysrealloc=(void * (*)(void *, size_t))GetProcAddress(module->intoAddr, "realloc");
-				sysfree   =(void   (*)(void *))GetProcAddress(module->intoAddr, "free");
-				sysblksize=(size_t (*)(void *))GetProcAddress(module->intoAddr, "_msize");
-			}
+			sysmalloc =(void * (*)(size_t))GetProcAddress(module->intoAddr, "malloc");
+			syscalloc =(void * (*)(size_t, size_t))GetProcAddress(module->intoAddr, "calloc");
+			sysrealloc=(void * (*)(void *, size_t))GetProcAddress(module->intoAddr, "realloc");
+			sysfree   =(void   (*)(void *))GetProcAddress(module->intoAddr, "free");
+			sysblksize=(size_t (*)(void *))GetProcAddress(module->intoAddr, "_msize");
+#ifndef _DEBUG
 			if(UsingReleaseMSVCRT && UsingDebugMSVCRT)
 				MessageBox(NULL, __T("nedmalloc: This process appears to be simultaneously using both the debug and release variants of the\n")
 								 __T("run-time C library which means that there are mutually incompatible CRT heaps in use. This is probably\n")
 								 __T("a bad idea and you should fix it for reliable operation"), __T("Warning:"), MB_OK);
+#endif
 		}
 #endif
 	}
 	/* Invoke the CRT's handler which does atexit() etc */
-	ret=_DllMainCRTStartup(myModuleBase, dllcode, isTheDynamicLinker);
+	ret=_CRT_INIT(myModuleBase, dllcode, isTheDynamicLinker);
 	if(DLL_THREAD_DETACH==dllcode)
 	{	/* Destroy the thread cache for all known pools */
 		nedpool **pools=nedpoollist();

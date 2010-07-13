@@ -29,6 +29,7 @@ DEALINGS IN THE SOFTWARE.
 #ifdef _MSC_VER
 /* Enable full aliasing on MSVC */
 /*#pragma optimize("a", on)*/
+/*#pragma optimize("g", off)*/
 
 #pragma warning(push)
 #pragma warning(disable:4100)	/* unreferenced formal parameter */
@@ -273,6 +274,7 @@ extern void *(*sysrealloc)(void *, size_t);
 extern void (*sysfree)(void *);
 extern size_t (*sysblksize)(void *);
 
+#if !defined(REPLACE_SYSTEM_ALLOCATOR) || (!defined(_MSC_VER) && !defined(__MINGW32__))
 void *(*sysmalloc)(size_t)=malloc;
 void *(*syscalloc)(size_t, size_t)=calloc;
 void *(*sysrealloc)(void *, size_t)=realloc;
@@ -289,6 +291,14 @@ size_t (*sysblksize)(void *)=
 	malloc_size;
 #else
 #error Cannot tolerate the memory allocator of an unknown system!
+#endif
+#else
+/* Remove the MSVCRT dependency on the memory functions */
+void *(*sysmalloc)(size_t);
+void *(*syscalloc)(size_t, size_t);
+void *(*sysrealloc)(void *, size_t);
+void (*sysfree)(void *);
+size_t (*sysblksize)(void *);
 #endif
 
 static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallMalloc(void *RESTRICT mspace, size_t size, size_t alignment, unsigned flags) THROWSPEC
@@ -1878,6 +1888,13 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem,
 	int mymspace, isforeign=1;
 	size_t memsize;
 	if(!mem) return nedpmalloc2(p, size, alignment, flags);
+#if REALLOC_ZERO_BYTES_FREES
+	if(!size)
+	{
+		nedpfree2(p, mem, flags);
+		return 0;
+	}
+#endif
 	memsize=nedblksize(&isforeign, mem, flags);
 	assert(memsize);
 	if(!memsize)
