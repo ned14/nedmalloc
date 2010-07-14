@@ -12,6 +12,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_test_c", "nedmall
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nedmalloc_test_cpp", "nedmalloc_test_cpp.vcproj", "{889F56B1-6231-458A-84BB-F2AAF302FF7D}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "scalingtest", "scalingtest.vcproj", "{C18CA5F2-FCAA-4D28-8FAB-5DF60E78AE9E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -52,6 +54,12 @@ Global
 		{889F56B1-6231-458A-84BB-F2AAF302FF7D}.Release|Win32.Build.0 = Release|Win32
 		{889F56B1-6231-458A-84BB-F2AAF302FF7D}.Release|x64.ActiveCfg = Release|x64
 		{889F56B1-6231-458A-84BB-F2AAF302FF7D}.Release|x64.Build.0 = Release|x64
+		{C18CA5F2-FCAA-4D28-8FAB-5DF60E78AE9E}.Debug|Win32.ActiveCfg = Debug|Win32
+		{C18CA5F2-FCAA-4D28-8FAB-5DF60E78AE9E}.Debug|Win32.Build.0 = Debug|Win32
+		{C18CA5F2-FCAA-4D28-8FAB-5DF60E78AE9E}.Debug|x64.ActiveCfg = Debug|Win32
+		{C18CA5F2-FCAA-4D28-8FAB-5DF60E78AE9E}.Release|Win32.ActiveCfg = Release|Win32
+		{C18CA5F2-FCAA-4D28-8FAB-5DF60E78AE9E}.Release|Win32.Build.0 = Release|Win32
+		{C18CA5F2-FCAA-4D28-8FAB-5DF60E78AE9E}.Release|x64.ActiveCfg = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

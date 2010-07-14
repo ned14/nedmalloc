@@ -1829,7 +1829,9 @@ static NOINLINE void GetThreadCache_cold2(nedpool *RESTRICT *RESTRICT p, threadc
 static FORCEINLINE void GetThreadCache(nedpool *RESTRICT *RESTRICT p, threadcache *RESTRICT *RESTRICT tc, int *RESTRICT mymspace, size_t *RESTRICT size) THROWSPEC
 {
 	int mycache;
+#if THREADCACHEMAX
 	if(size && *size<sizeof(threadcacheblk)) *size=sizeof(threadcacheblk);
+#endif
 	if(!*p)
 		GetThreadCache_cold1(p);
 	mycache=(int)(size_t) TLSGET((*p)->mycache);
