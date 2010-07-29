@@ -12,7 +12,7 @@ Tests how various allocators scale according to block size using a monte-carlo a
 #include <math.h>
 #include <vector>
 
-#define LOOPS 25000
+#define LOOPS 100000
 #define MAXBLOCKSIZE (8*1024*1024)
 
 #ifdef WIN32
@@ -60,7 +60,7 @@ static void *mmap_wrapper(size_t size)
 #ifdef WIN32
 	return VirtualAlloc(NULL, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
 #else
-	return mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+	return mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
 #endif
 }
 static void munmap_wrapper(void *mem, size_t size)
@@ -73,10 +73,12 @@ static void munmap_wrapper(void *mem, size_t size)
 }
 static void *userpagemalloc_wrapper(size_t size)
 {
+	assert(!(size & (PAGE_SIZE-1)));
 	return userpage_malloc(size, 0);
 }
 static void userpagefree_wrapper(void *mem, size_t size)
 {
+	assert(!(size & (PAGE_SIZE-1)));
 	userpage_free(mem, size);
 }
 static mspace mymspace = create_mspace(0,0);
@@ -87,6 +89,13 @@ static void *dlmalloc(size_t size)
 static void dlfree(void *mem, size_t size)
 {
 	mspace_free(mymspace, mem);
+}
+static void *nothing_malloc(size_t size)
+{
+	return 0;
+}
+static void nothing_free(void *mem, size_t size)
+{
 }
 
 struct Allocator
@@ -105,7 +114,8 @@ static Allocator allocators[]={
 #else
 	{ "System VirtualAlloc()", "sysmmap", PAGE_SIZE, 0, &mmap_wrapper, &munmap_wrapper },
 #endif
-	{ "User mode page allocator", "usermodemmap", PAGE_SIZE, 0, &userpagemalloc_wrapper, &userpagefree_wrapper }
+	{ "User mode page allocator", "usermodemmap", PAGE_SIZE, 0, &userpagemalloc_wrapper, &userpagefree_wrapper },
+	{ "Nothing", "nothing", 0, 0, &nothing_malloc, &nothing_free }
 };
 
 int main(void)
@@ -121,6 +131,11 @@ int main(void)
 	Allocator &allocator=allocators[allocatoridx];
 	allocator.minsizeshift=allocator.minsize ? nedtriebitscanr(allocator.minsize) : (allocator.minsize=1<<3, 3);
 	printf("\nYou chose allocator %d (%s) with minsizeshift=%u\n", allocatoridx+1, allocator.name, allocator.minsizeshift);
+	//if(allocator.malloc==&userpagemalloc_wrapper)
+	{
+		//printf("Preallocating user mode page allocator memory ... \n");
+		//userpage_free(userpage_malloc(3ULL*1024*1024*1024, 0), 3ULL*1024*1024*1024);
+	}
 	for(usCount s=GetUsCount(); GetUsCount()-s<3000000000000ULL;);
 	printf("Testing ...\n");
 
@@ -147,16 +162,18 @@ int main(void)
 			start=GetUsCount();
 			allocator.free(ptrp->mem, ptrp->size);
 			end=GetUsCount();
-			//pair<usCount, size_t> &v=bins[nedtriebitscanr(ptrp->size)];
-			//v.first+=end-start;
-			//v.second++;
+			pair<usCount, size_t> &v=bins[nedtriebitscanr(ptrp->size)];
+			v.first+=end-start;
 			ptrp->mem=0; ptrp->size=0;
 		}
 		start=GetUsCount();
 		ptrp->mem=allocator.malloc(blksize);
 		ptrp->size=blksize;
-		for(volatile char *p=(volatile char *)ptrp->mem, *pend=(volatile char *)ptrp->mem+blksize; p<pend; p+=PAGE_SIZE)
-			*p;
+		//if(allocator.malloc!=&userpagemalloc_wrapper)
+		{
+			//for(volatile char *p=(volatile char *)ptrp->mem, *pend=(volatile char *)ptrp->mem+blksize; p<pend; p+=PAGE_SIZE)
+			//	*p;
+		}
 		end=GetUsCount();
 		if(++ptrp==ptrs+512) ptrp=ptrs;
 		pair<usCount, size_t> &v=bins[blksize ? nedtriebitscanr(blksize) : 0];
