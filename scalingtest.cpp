@@ -5,6 +5,8 @@ Tests how various allocators scale according to block size using a monte-carlo a
 
 #define FORCEINLINE
 #define NOINLINE
+#define ENABLE_USERMODEPAGEALLOCATOR 1
+
 //#define THREADCACHEMAX 0
 //#pragma optimize("g", off)
 
@@ -12,7 +14,7 @@ Tests how various allocators scale according to block size using a monte-carlo a
 #include <math.h>
 #include <vector>
 
-#define LOOPS 100000
+#define LOOPS 25000
 #define MAXBLOCKSIZE (8*1024*1024)
 
 #ifdef WIN32
@@ -59,6 +61,13 @@ static void *mmap_wrapper(size_t size)
 {
 #ifdef WIN32
 	return VirtualAlloc(NULL, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+#else
+	return mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+#endif
+}
+static void *mmappop_wrapper(size_t size)
+{
+#ifdef WIN32
 #else
 	return mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
 #endif
@@ -111,6 +120,7 @@ static Allocator allocators[]={
 	{ "dlmalloc", "dlmalloc", 0, 0, &dlmalloc, &dlfree },
 #ifndef WIN32
 	{ "System mmap()", "sysmmap", PAGE_SIZE, 0, &mmap_wrapper, &munmap_wrapper },
+	{ "System mmap(MAP_POPULATE)", "sysmmappop", PAGE_SIZE, 0, &mmappop_wrapper, &munmap_wrapper },
 #else
 	{ "System VirtualAlloc()", "sysmmap", PAGE_SIZE, 0, &mmap_wrapper, &munmap_wrapper },
 #endif
@@ -130,7 +140,7 @@ int main(void)
 	if(allocatoridx<0 || allocatoridx>sizeof(allocators)/sizeof(Allocator)) return 1;
 	Allocator &allocator=allocators[allocatoridx];
 	allocator.minsizeshift=allocator.minsize ? nedtriebitscanr(allocator.minsize) : (allocator.minsize=1<<3, 3);
-	printf("\nYou chose allocator %d (%s) with minsizeshift=%u\n", allocatoridx+1, allocator.name, allocator.minsizeshift);
+	printf("\nYou chose allocator %d (%s) with minsizeshift=%lu\n", allocatoridx+1, allocator.name, (unsigned long) allocator.minsizeshift);
 	//if(allocator.malloc==&userpagemalloc_wrapper)
 	{
 		//printf("Preallocating user mode page allocator memory ... \n");
@@ -171,8 +181,11 @@ int main(void)
 		ptrp->size=blksize;
 		//if(allocator.malloc!=&userpagemalloc_wrapper)
 		{
-			//for(volatile char *p=(volatile char *)ptrp->mem, *pend=(volatile char *)ptrp->mem+blksize; p<pend; p+=PAGE_SIZE)
-			//	*p;
+			if(ptrp->mem)
+			{
+				for(volatile char *p=(volatile char *)ptrp->mem, *pend=(volatile char *)ptrp->mem+blksize; p<pend; p+=PAGE_SIZE)
+					*p=1;
+			}
 		}
 		end=GetUsCount();
 		if(++ptrp==ptrs+512) ptrp=ptrs;
@@ -181,14 +194,20 @@ int main(void)
 		v.second++;
 	}
 	char filename[256];
-	sprintf(filename, "scalingtest_%s.csv", allocator.shortname);
+	sprintf(filename, "scalingtest%s_%s.csv",
+#ifdef WIN32
+		"_win32",
+#else
+		"_posix",
+#endif
+		allocator.shortname);
 	printf("\nWriting results to %s ...\n", filename);
 	FILE *oh=fopen(filename, "w");
 	fprintf(oh, "Bin,Latency,Count\n");
 	int n=0;
 	for(vector<pair<usCount, size_t> >::const_iterator it=bins.begin(); it!=bins.end(); ++it, n++)
 	{
-		fprintf(oh, "%u,%f,%u\n", 1<<n, (double) it->first/it->second, it->second);
+		fprintf(oh, "%u,%f,%lu\n", 1<<n, (double) it->first/it->second, (unsigned long) it->second);
 	}
 	fclose(oh);
 	printf("Done!\n");

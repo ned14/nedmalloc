@@ -2098,7 +2098,7 @@ static FORCEINLINE int pthread_acquire_lock (MLOCK_T *sl) {
       int val = 1;
       int ret;
       ret = __sync_bool_compare_and_swap(lp, cmp, val);
-      if (!ret) {
+      if (ret) {
         assert(!sl->threadid);
         sl->threadid = mythreadid;
         sl->c = 1;
@@ -2125,8 +2125,6 @@ static FORCEINLINE void pthread_release_lock (MLOCK_T *sl) {
   assert(sl->threadid == CURRENT_THREAD);
   if (--sl->c == 0) {
     sl->threadid = 0;
-    int prev = 0;
-    int ret;
     __sync_lock_release(lp, 0);
   }
 }
@@ -2144,8 +2142,8 @@ static FORCEINLINE int pthread_try_lock (MLOCK_T *sl) {
     int cmp = 0;
     int val = 1;
     int ret;
-    __sync_bool_compare_and_swap(lp, cmp, val);
-    if (!ret) {
+    ret=__sync_bool_compare_and_swap(lp, cmp, val);
+    if (ret) {
       assert(!sl->threadid);
       sl->threadid = mythreadid;
       sl->c = 1;
@@ -3091,7 +3089,7 @@ static size_t traverse_and_check(mstate m);
   else if (X > 0xFFFF)\
     I = NTREEBINS-1;\
   else {\
-    unsigned int K = (FXuint) sizeof(X)*__CHAR_BIT__ - 1 - (unsigned) __builtin_clz(X); \
+    unsigned int K = (unsigned) sizeof(X)*__CHAR_BIT__ - 1 - (unsigned) __builtin_clz(X); \
     I =  (bindex_t)((K << 1) + ((S >> (K + (TREEBIN_SHIFT-1)) & 1)));\
   }\
 }

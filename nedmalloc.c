@@ -51,10 +51,14 @@ DEALINGS IN THE SOFTWARE.
 #define NEDMALLOC_STACKBACKTRACEDEPTH 16*/
 /*#define NEDMALLOC_FORCERESERVE(p, mem, size) (((size)>=(256*1024)) ? M2_RESERVE_MULT(8) : 0)*/
 /*#define WIN32_DIRECT_USE_FILE_MAPPINGS 0*/
-#define ENABLE_USERMODEPAGEALLOCATOR
-
 
 /*#define FULLSANITYCHECKS*/
+
+/* There is only support for the user mode page allocator on Windows at present */
+#if !defined(ENABLE_USERMODEPAGEALLOCATOR) && defined(WIN32)
+#define ENABLE_USERMODEPAGEALLOCATOR 1
+#endif
+
 /* If link time code generation is on, don't force or prevent inlining */
 #if defined(_MSC_VER) && defined(NEDMALLOC_DLL_EXPORTS)
 #define FORCEINLINE
@@ -113,7 +117,7 @@ size_t malloc_usable_size(void *);
 #endif
 /*#define USE_SPIN_LOCKS 0*/
 
-#ifdef ENABLE_USERMODEPAGEALLOCATOR
+#if ENABLE_USERMODEPAGEALLOCATOR
 static int OSHavePhysicalPageSupport(void);
 static void *userpage_malloc(size_t size, unsigned flags);
 static int userpage_free(void *mem, size_t size);
@@ -242,7 +246,7 @@ static LPVOID ChkedTlsGetValue(DWORD idx)
  #define TLSSET(k, a)	(k=a, 0)
 #endif
 
-#ifdef ENABLE_USERMODEPAGEALLOCATOR
+#if ENABLE_USERMODEPAGEALLOCATOR
 #include "usermodepageallocator.c"
 #endif
 
@@ -649,13 +653,19 @@ static timeCount GetTimestamp()
 #include <sys/time.h>
 
 typedef unsigned long long timeCount;
-static usCount GetTimestamp()
+static timeCount GetTimestamp()
 {
 	static timeCount baseCount;
-	struct timeval tv;
 	timeCount ret;
+#ifdef CLOCK_MONOTONIC
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	ret=((timeCount) ts.tv_sec*1000000000000LL)+ts.tv_nsec*1000LL;
+#else
+	struct timeval tv;
 	gettimeofday(&tv, 0);
 	ret=((timeCount) tv.tv_sec*1000000000000LL)+tv.tv_usec*1000000LL;
+#endif
 	if(!baseCount) baseCount=ret;
 	return ret-baseCount;
 }
@@ -1994,7 +2004,7 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, s
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC
 {
 	unsigned flags=NEDMALLOC_FORCERESERVE(p, mem, size);
-#ifdef ENABLE_USERMODEPAGEALLOCATOR
+#if ENABLE_USERMODEPAGEALLOCATOR
 	/* If the user mode page allocator is turned on in a 32 bit process,
 	don't automatically reserve eight times the address space. */
 	if(8==sizeof(size_t) || !OSHavePhysicalPageSupport())

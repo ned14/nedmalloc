@@ -122,11 +122,11 @@ REGION_HEAD(regionA_tree_s, region_node_s);
 typedef struct regionL_tree_s regionL_tree_t;
 REGION_HEAD(regionL_tree_s, region_node_s);
 
-static size_t regionkeyA(const region_node_t *RESTRICT r)
+size_t regionkeyA(const region_node_t *RESTRICT r)
 {
   return (size_t) r->start;
 }
-static size_t regionkeyL(const region_node_t *RESTRICT r)
+size_t regionkeyL(const region_node_t *RESTRICT r)
 {
   return (size_t) r->end - (size_t) r->start;
 }
@@ -151,38 +151,38 @@ typedef size_t PageFrameType;
 
 /* This function determines whether the host OS allows user mode physical memory
 page mapping. */
-static int OSDeterminePhysicalPageSupport(void);
+static int OSDeterminePhysicalPageSupport(void) { return 0; }
 
 /* This function returns a simple true or false if the host OS allows user mode
 physical page mapping */
-static int OSHavePhysicalPageSupport(void);
+static int OSHavePhysicalPageSupport(void) { return 0; }
 
 /* This function determines whether the host OS is currently short of memory.
 The value is LINEAR between 0.0 (no pressure) and 1.0 (terrible pressure). */
-static double OSSystemMemoryPressure(void);
+static double OSSystemMemoryPressure(void) { return 0; }
 
 /* This function could ask the host OS for address space, or on embedded systems
 it could simply parcel out space via moving a pointer. The second two void *
 are some arbitrary extra data to be later passed to OSReleaseAddrSpace(). */
-static OSAddressSpaceReservationData OSReserveAddrSpace(size_t space);
+static OSAddressSpaceReservationData OSReserveAddrSpace(size_t space) { OSAddressSpaceReservationData asrd={0}; return asrd; }
 
 /* This function returns address space previously allocated using
 OSReserveAddrSpace(). It is guaranteed to exactly match what was previously
 returned by that function. */
-static int OSReleaseAddrSpace(OSAddressSpaceReservationData *data, size_t space);
+static int OSReleaseAddrSpace(OSAddressSpaceReservationData *data, size_t space) { return 0; }
 
 /* This function obtains physical memory pages, either by asking the host OS
 or on embedded systems by simply pulling them from a free page ring list. */
-static size_t OSObtainMemoryPages(PageFrameType *buffer, size_t number, OSAddressSpaceReservationData *data);
+static size_t OSObtainMemoryPages(PageFrameType *buffer, size_t number, OSAddressSpaceReservationData *data) { return 0; }
 
 /* This function returns previously obtained physical memory pages. */
-static size_t OSReleaseMemoryPages(PageFrameType *buffer, size_t number, OSAddressSpaceReservationData *data);
+static size_t OSReleaseMemoryPages(PageFrameType *buffer, size_t number, OSAddressSpaceReservationData *data) { return 0; }
 
 /* This function causes the specified set of physical memory pages to be
 mapped at the specified address. On an embedded system this would simply
 modify the MMU and flush the appropriate TLB entries.
 */
-static size_t OSRemapMemoryPagesOntoAddr(void *addr, size_t entries, PageFrameType *pageframes, OSAddressSpaceReservationData *data);
+static size_t OSRemapMemoryPagesOntoAddr(void *addr, size_t entries, PageFrameType *pageframes, OSAddressSpaceReservationData *data) { return 0; }
 
 /* This function causes the specified set of physical memory pages to be
 mapped at the specified set of addresses. On an embedded system this would
@@ -195,7 +195,7 @@ for(size_t n=0; n<entries; n++, addrs++, pageframes++) {
     Unmap(*addr);
 }
 */
-static size_t OSRemapMemoryPagesOntoAddrs(void **addrs, size_t entries, PageFrameType *pageframes, OSAddressSpaceReservationData *data);
+static size_t OSRemapMemoryPagesOntoAddrs(void **addrs, size_t entries, PageFrameType *pageframes, OSAddressSpaceReservationData *data) { return 0; }
 #else
 static enum {
   DISABLEEVERYTHING=1,
@@ -804,7 +804,7 @@ static AddressSpaceReservation_t *ReserveSpace(size_t space)
   }
   ValidatePageMappings(addr);
 #ifdef DEBUG
-   printf("*** Reserved address space from %p to %p (%uMb)\n", addr, addr->back, ((size_t)addr->back - (size_t) addr)/1024/1024);
+   printf("*** Reserved address space from %p to %p (%luMb)\n", addr, addr->back, (unsigned long)((size_t)addr->back - (size_t) addr)/1024/1024);
 #endif
   return addr;
 badexit:
@@ -1007,8 +1007,8 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
   for(addr=addressspacereservation; addr; addr=addr->next)
   {
     int fromback=(flags & USERPAGE_TOPDOWN);
-    if((mem && ((mem>=addr->front && mem<addr->frontptr && !(fromback=0)) || (mem>=addr->backptr && mem<addr->back && (fromback=1)))
-      || (!mem && (size_t) addr->backptr - (size_t) addr->frontptr>=size)))
+    if((mem && ((mem>=addr->front && mem<addr->frontptr && !(fromback=0)) || (mem>=addr->backptr && mem<addr->back && (fromback=1))))
+      || (!mem && ((size_t) addr->backptr - (size_t) addr->frontptr>=size)))
     {
       RemapMemoryPagesBlock memtodecommit, memtocommit;
       size_t n, sizeinpages=size/PAGE_SIZE;
@@ -1419,7 +1419,7 @@ static FreePageNodeStorage_t *FindFreePageNodeStorage(void)
   }
   /* Need to extend */
   assert(sizeof(FreePageNodeStorage_t)<=FREEPAGENODESTORAGESIZE);
-  if(ofpns->next=fpns=(FreePageNodeStorage_t *) AllocatePages(0, FREEPAGENODESTORAGESIZE, USERPAGE_TOPDOWN))
+  if((ofpns->next=fpns=(FreePageNodeStorage_t *) AllocatePages(0, FREEPAGENODESTORAGESIZE, USERPAGE_TOPDOWN)))
   {
 #ifdef DEBUG
     /*printf("FreePageNodeStorage extends %p to %p\n", fpns, ((size_t)fpns+FREEPAGENODESTORAGESIZE));*/
@@ -1590,7 +1590,7 @@ static int CheckFreeRegionNodeStorages(RegionStorage_t *fpns)
     {
       assert(!fpns->next->next);
 #ifdef DEBUG
-      printf("RegionNodeStorage releases %p to %p\n", fpns->next, ((size_t)(fpns->next)+REGIONSTORAGESIZE));
+      printf("RegionNodeStorage releases %p to %p\n", fpns->next, (void *)((size_t)(fpns->next)+REGIONSTORAGESIZE));
 #endif
       ReleasePages(fpns->next, REGIONSTORAGESIZE, 0);
       fpns->next=0;
