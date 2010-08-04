@@ -111,21 +111,24 @@ struct Allocator
 {
 	const char *name, *shortname;
 	size_t minsize, minsizeshift;
+	bool traverse;
 	void *(*malloc)(size_t);
 	void (*free)(void *, size_t);
 };
 static Allocator allocators[]={
-	{ "System allocator", "sysalloc", 0, 0, &malloc, &wrapfree<free> },
-	{ "nedmalloc", "nedmalloc", 0, 0, &nedalloc::nedmalloc, &wrapfree<nedalloc::nedfree> },
-	{ "dlmalloc", "dlmalloc", 0, 0, &dlmalloc, &dlfree },
+	{ "System allocator", "sysalloc", 0, 0, true, &malloc, &wrapfree<free> },
+	{ "nedmalloc", "nedmalloc", 0, 0, true, &nedalloc::nedmalloc, &wrapfree<nedalloc::nedfree> },
+	{ "dlmalloc", "dlmalloc", 0, 0, true, &dlmalloc, &dlfree },
 #ifndef WIN32
-	{ "System mmap()", "sysmmap", PAGE_SIZE, 0, &mmap_wrapper, &munmap_wrapper },
-	{ "System mmap(MAP_POPULATE)", "sysmmappop", PAGE_SIZE, 0, &mmappop_wrapper, &munmap_wrapper },
+	{ "System mmap()", "sysmmap", PAGE_SIZE, 0, true, &mmap_wrapper, &munmap_wrapper },
+	{ "System mmap(MAP_POPULATE)", "sysmmappop", PAGE_SIZE, 0, true, &mmappop_wrapper, &munmap_wrapper },
+	{ "System mmap(MAP_POPULATE, notraverse)", "sysmmappop_notraverse", PAGE_SIZE, 0, false, &mmappop_wrapper, &munmap_wrapper },
 #else
-	{ "System VirtualAlloc()", "sysmmap", PAGE_SIZE, 0, &mmap_wrapper, &munmap_wrapper },
+	{ "System VirtualAlloc()", "sysmmap", PAGE_SIZE, 0, true, &mmap_wrapper, &munmap_wrapper },
 #endif
-	{ "User mode page allocator", "usermodemmap", PAGE_SIZE, 0, &userpagemalloc_wrapper, &userpagefree_wrapper },
-	{ "Nothing", "nothing", 0, 0, &nothing_malloc, &nothing_free }
+	{ "User mode page allocator", "usermodemmap", PAGE_SIZE, 0, true, &userpagemalloc_wrapper, &userpagefree_wrapper },
+	{ "User mode page allocator (notraverse)", "usermodemmap_notraverse", PAGE_SIZE, 0, true, &userpagemalloc_wrapper, &userpagefree_wrapper },
+	{ "Nothing", "nothing", 0, 0, false, &nothing_malloc, &nothing_free }
 };
 
 int main(void)
@@ -181,7 +184,7 @@ int main(void)
 		ptrp->size=blksize;
 		//if(allocator.malloc!=&userpagemalloc_wrapper)
 		{
-			if(ptrp->mem)
+			if(ptrp->mem && allocator.traverse)
 			{
 				for(volatile char *p=(volatile char *)ptrp->mem, *pend=(volatile char *)ptrp->mem+blksize; p<pend; p+=PAGE_SIZE)
 					*p=1;
