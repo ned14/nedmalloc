@@ -1,6 +1,6 @@
 /* Generic Windows Process Patcher. Intended for patching nedmalloc in to
 replace the MSVCRT allocator but could be used for anything.
-(C) 2009 Niall Douglas
+(C) 2009-2010 Niall Douglas
 
 Boost Software License - Version 1.0 - August 17th, 2003
 
@@ -27,7 +27,30 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 */
 
+#define USE_DEBUGGER_OUTPUT
+
+#ifdef NEDMALLOC_DLL_EXPORTS
 #include "nedmalloc.h"
+#else
+#ifndef NEDMALLOCEXTSPEC
+ #if defined(NEDMALLOC_DLL_EXPORTS) || defined(USERMODEPAGEALLOCATOR_DLL_EXPORTS)
+  #ifdef WIN32
+   #define NEDMALLOCEXTSPEC extern __declspec(dllexport)
+  #elif defined(__GNUC__)
+   #define NEDMALLOCEXTSPEC extern __attribute__ ((visibility("default")))
+  #endif
+  #ifndef ENABLE_TOLERANT_NEDMALLOC
+   #define ENABLE_TOLERANT_NEDMALLOC 1
+  #endif
+ #else
+  #define NEDMALLOCEXTSPEC extern
+ #endif
+#endif
+#define nedpmalloc(a, v) HeapAlloc(GetProcessHeap(), 0, (v))
+#define nedpcalloc(a, v, s) HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (v)*(s))
+#define nedprealloc(a, p, v) HeapReAlloc(GetProcessHeap(), 0, (p), (v))
+#define nedpfree(a, p) HeapFree(GetProcessHeap(), 0, (p))
+#endif
 #include "embedded_printf.h"
 #include <stdlib.h>
 #include <assert.h>
@@ -35,9 +58,18 @@ DEALINGS IN THE SOFTWARE.
 #include <tchar.h>
 #include <process.h>
 #include <malloc.h>
+#ifdef USERMODEPAGEALLOCATOR_DLL_EXPORTS
+#define ENABLE_USERMODEPAGEALLOCATOR 1
+#define THROWSPEC
+#define ONLY_MSPACES 1
+#define MMAP_CLEARS 0
+#include "malloc.c.h"
+#include "usermodepageallocator.c"
+#else
 #define WIN32_LEAN_AND_MEAN 1
 #define _WIN32_WINNT 0x0501		/* Minimum of Windows XP required */
 #include <windows.h>
+#endif
 #include <psapi.h>
 #include "nedtries/uthash/src/uthash.h"
 #include "winpatcher_errorh.h"
@@ -181,7 +213,7 @@ seeing as fprintf et al are completely unavailable to us */
 #if defined(_DEBUG) && defined(USE_DEBUGGER_OUTPUT)
 #include "embedded_printf.c"
 #endif
-static void putc(void *p, char c) THROWSPEC { *(*((char **)p))++ = c; }
+static void putc_(void *p, char c) THROWSPEC { *(*((char **)p))++ = c; }
 static HANDLE debugfile=INVALID_HANDLE_VALUE;
 extern void DebugPrint(const char *fmt, ...) THROWSPEC
 {
@@ -194,14 +226,14 @@ extern void DebugPrint(const char *fmt, ...) THROWSPEC
 
 	va_list va;
 	va_start(va,fmt);
-	tfp_format(&s,putc,fmt,va);
-	putc(&s,0);
+	tfp_format(&s,putc_,fmt,va);
+	putc_(&s,0);
 	va_end(va);
 	len=(DWORD)(strchr(buffer, 0)-buffer);
 	OutputDebugStringA(buffer);
 	if(stdouth && stdouth!=INVALID_HANDLE_VALUE)
 		WriteFile(stdouth, buffer, len, &written, NULL);
-#if 0	/* Enable this if you want it to write the log to C:\nedmalloc.log */
+#if 1	/* Enable this if you want it to write the log to C:\nedmalloc.log */
 	if(INVALID_HANDLE_VALUE==debugfile)
 	{
 		debugfile=CreateFile(__T("C:\\nedmalloc.log"), GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ, 
@@ -370,7 +402,7 @@ static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli
 				}
 				if((ret=ModifyModuleImportTableForI(moduleBase, module->into, sli, patchin), ret.code)<0)
 					return ret;
-				if(ret.code)
+				if(ret.code && !strncmp(module->into, "MSVCR", 5))
 				{
 					if(usingdebugMSVCRT && (moduleidx & 1)) (*usingdebugMSVCRT)++;
 					else (*usingreleaseMSVCRT)++;
@@ -524,12 +556,74 @@ static HMODULE WINAPI LoadLibraryW_winpatcher(LPCWSTR lpLibFileName)
 #endif
 	return ret;
 }
+#define M2_CUSTOM_FLAGS_BEGIN   (1<<16)
+#define USERPAGE_TOPDOWN                   (M2_CUSTOM_FLAGS_BEGIN<<0)
+#define USERPAGE_NOCOMMIT                  (M2_CUSTOM_FLAGS_BEGIN<<1)
+extern void *userpage_malloc(size_t toallocate, unsigned flags);
+extern int userpage_free(void *mem, size_t size);
+extern void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2);
+extern void *userpage_commit(void *mem, size_t size);
+extern int userpage_release(void *mem, size_t size);
+static LPVOID WINAPI VirtualAlloc_winpatcher(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
+{
+	LPVOID ret=0;
+#if defined(_DEBUG)
+	DebugPrint("Winpatcher: VirtualAlloc(%p, %u, %x, %x) intercepted\n", lpAddress, dwSize, flAllocationType, flProtect);
+#endif
+	if(!lpAddress && flAllocationType&MEM_RESERVE)
+	{
+		ret=userpage_malloc(dwSize, (flAllocationType&MEM_COMMIT) ? 0 : USERPAGE_NOCOMMIT);
+#if defined(_DEBUG)
+		DebugPrint("Winpatcher: userpage_malloc returns %p\n", ret);
+#endif
+	}
+	else if(lpAddress && (flAllocationType&(MEM_COMMIT|MEM_RESERVE))==(MEM_COMMIT))
+	{
+		ret=userpage_commit(lpAddress, dwSize);
+#if defined(_DEBUG)
+		DebugPrint("Winpatcher: userpage_commit returns %p\n", ret);
+#endif
+	}
+	if(!ret || (void *)-1==ret)
+	{
+		ret=VirtualAlloc(lpAddress, dwSize, flAllocationType, flProtect);
+#if defined(_DEBUG)
+		DebugPrint("Winpatcher: VirtualAlloc returns %p\n", ret);
+#endif
+	}
+	return (void *)-1==ret ? 0 : ret;
+}
+static BOOL WINAPI VirtualFree_winpatcher(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType)
+{
+#if defined(_DEBUG)
+	DebugPrint("Winpatcher: VirtualFree(%p, %u, %x) intercepted\n", lpAddress, dwSize, dwFreeType);
+#endif
+	if(dwFreeType==MEM_DECOMMIT)
+	{
+		if(-1!=userpage_release(lpAddress, dwSize)) return 1;
+	}
+	else if(dwFreeType==MEM_RELEASE)
+	{
+		if(-1!=userpage_free(lpAddress, dwSize)) return 1;
+	}
+	return VirtualFree(lpAddress, dwSize, dwFreeType);
+}
+static SIZE_T WINAPI VirtualQuery_winpatcher(LPVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, SIZE_T dwSize)
+{
+#if defined(_DEBUG)
+	DebugPrint("Winpatcher: VirtualQuery(%p, %p, %u) intercepted\n", lpAddress, lpBuffer, dwSize);
+#endif
+	return VirtualQuery(lpAddress, lpBuffer, dwSize);
+}
 
+/* Thunks for nedmalloc */
+#ifdef NEDMALLOC_H
 static void *nedmalloc_dbg(size_t size, int type, const char *filename, int lineno)             { return nedmalloc(size); }
 static void *nedcalloc_dbg(size_t no, size_t size, int type, const char *filename, int lineno)  { return nedcalloc(no, size); }
 static void *nedrealloc_dbg(void *ptr, size_t size, int type, const char *filename, int lineno) { return nedrealloc(ptr, size); }
 static void nedfree_dbg(void *ptr, int type)                                                    { nedfree(ptr); }
 static size_t nedblksize_dbg(void *ptr, int type)                                               { return nedmemsize(ptr); }
+#endif
 /* The patch table: replace the specified symbols in the specified modules with the
    specified replacements. Format is:
 
@@ -552,7 +646,7 @@ static size_t nedblksize_dbg(void *ptr, int type)                               
 static ModuleListItem modules[]={
 	/* NOTE: Keep these release/debug format as this is used above! */
 	/* Release and Debug MSVC6 CRTs */
-	/*{ "MSVCRT.DLL", 0, 0 }, { "MSVCRTD.DLL", 0, 0 },*/
+	{ "MSVCRT.DLL", 0, 0 }, { "MSVCRTD.DLL", 0, 0 },
 	/* Release and Debug MSVC7.0 CRTs */
 	{ "MSVCR70.DLL", 0, 0 }, { "MSVCR70D.DLL", 0, 0 },
 	/* Release and Debug MSVC7.1 CRTs */
@@ -570,12 +664,13 @@ static ModuleListItem kernelmodule[]={
 	{ 0, 0, 0 }
 };
 static SymbolListItem nedmallocpatchtable[]={
+#ifdef NEDMALLOC_H
 	{ { "malloc",           0, "", 0/*(PROC) malloc */ },           modules, { "nedmalloc",      (PROC) nedmalloc      } },
 	{ { "calloc",           0, "", 0/*(PROC) calloc */ },           modules, { "nedcalloc",      (PROC) nedcalloc      } },
 	{ { "realloc",          0, "", 0/*(PROC) realloc*/ },           modules, { "nedrealloc",     (PROC) nedrealloc     } },
 	{ { "free",             0, "", 0/*(PROC) free   */ },           modules, { "nedfree",        (PROC) nedfree        } },
 	{ { "_msize",           0, "", 0/*(PROC) _msize */ },           modules, { "nedblksize",     (PROC) nedmemsize     } },
-
+#endif
 #if 0 /* Usually it's best to leave these off */
 	{ { "_malloc_dbg",  0, "", 0/*(PROC) malloc */ }, modules, { "nedmalloc_dbg",  (PROC) nedmalloc_dbg  } },
 	{ { "_calloc_dbg",  0, "", 0/*(PROC) calloc */ }, modules, { "nedcalloc_dbg",  (PROC) nedcalloc_dbg  } },
@@ -586,6 +681,11 @@ static SymbolListItem nedmallocpatchtable[]={
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 	{ { "LoadLibraryA", 0, "", 0 }, kernelmodule, { "LoadLibraryA_winpatcher", (PROC) LoadLibraryA_winpatcher } },
 	{ { "LoadLibraryW", 0, "", 0 }, kernelmodule, { "LoadLibraryW_winpatcher", (PROC) LoadLibraryW_winpatcher } },
+#if 1
+	{ { "VirtualAlloc", 0, "", 0 }, kernelmodule, { "VirtualAlloc_winpatcher", (PROC) VirtualAlloc_winpatcher } },
+	{ { "VirtualFree",  0, "", 0 }, kernelmodule, { "VirtualFree_winpatcher",  (PROC) VirtualFree_winpatcher  } },
+	{ { "VirtualQuery", 0, "", 0 }, kernelmodule, { "VirtualQuery_winpatcher", (PROC) VirtualQuery_winpatcher } },
+#endif
 #endif
 	{ { 0, 0, "", 0 }, 0, { 0, 0 } }
 };
@@ -652,11 +752,13 @@ BOOL WINAPI _CRT_INIT(
 whereby it inserts a security cookie check before we've initialised support for it, thus
 provoking a failure */
 static PVOID ProcessExceptionHandlerH;
+#ifdef NEDMALLOC_H
 extern void *(*sysmalloc)(size_t);
 extern void *(*syscalloc)(size_t, size_t);
 extern void *(*sysrealloc)(void *, size_t);
 extern void (*sysfree)(void *);
 extern size_t (*sysblksize)(void *);
+#endif
 static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWORD dllcode, LPVOID *isTheDynamicLinker)
 {
 	BOOL ret=TRUE;
@@ -704,17 +806,19 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 		if(!PatchInNedmallocDLL())
 			return FALSE;
+		if(UsingReleaseMSVCRT || UsingDebugMSVCRT)
 		{
 			ModuleListItem *module;
 			for(module=modules; module->into && (HMODULE)(size_t)-1==module->intoAddr; module++);
 			if(!module->into)
 			{
-				MessageBox(NULL, __T("Fatal Error"), __T("Can't find a valid MSVCRT - perhaps this process was built with too new a MSVC?"), MB_OK);
+				MessageBox(NULL, __T("Can't find a valid MSVCRT - perhaps this process was built with too new a MSVC?"), __T("Fatal Error"), MB_OK);
 				abort();
 			}
 #if defined(_DEBUG)
 			DebugPrint("Winpatcher: Determined that the process is linked against %s (%p)\n", module->into, module->intoAddr);
 #endif
+#ifdef NEDMALLOC_H
 			sysmalloc =(void * (*)(size_t))GetProcAddress(module->intoAddr, "malloc");
 			syscalloc =(void * (*)(size_t, size_t))GetProcAddress(module->intoAddr, "calloc");
 			sysrealloc=(void * (*)(void *, size_t))GetProcAddress(module->intoAddr, "realloc");
@@ -726,6 +830,7 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 								 __T("run-time C library which means that there are mutually incompatible CRT heaps in use. This is probably\n")
 								 __T("a bad idea and you should fix it for reliable operation"), __T("Warning:"), MB_OK);
 #endif
+#endif
 		}
 #endif
 	}
@@ -733,6 +838,7 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 	ret=_CRT_INIT(myModuleBase, dllcode, isTheDynamicLinker);
 	if(DLL_THREAD_DETACH==dllcode)
 	{	/* Destroy the thread cache for all known pools */
+#ifdef NEDMALLOC_H
 		nedpool **pools=nedpoollist();
 		if(pools)
 		{
@@ -742,10 +848,12 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 			nedfree(pools);
 		}
 		neddisablethreadcache(0);
+#endif
 	}
 	else if(DLL_PROCESS_DETACH==dllcode)
 	{
 #ifdef REPLACE_SYSTEM_ALLOCATOR
+#ifdef NEDMALLOC_H
 		nedpool **pools=nedpoollist();
 #if defined(_DEBUG)
 		DebugPrint("Winpatcher: patcher DLL being kicked out from %p\n", myModuleBase);
@@ -758,6 +866,7 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 			nedfree(pools);
 		}
 		nedflushlogs(0, 0);
+#endif
 		/* You can enable the below if you want, but you probably don't */
 		/*if(!DepatchInNedmallocDLL())
 			return FALSE;*/

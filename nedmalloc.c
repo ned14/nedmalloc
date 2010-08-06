@@ -26,6 +26,12 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 */
 
+#if 0 /* Effectively makes nedmalloc = dlmalloc */
+#define THREADCACHEMAX 0
+#define DEFAULT_GRANULARITY 65536
+#define DEFAULTMAXTHREADSINPOOL 1
+#endif
+
 #ifdef _MSC_VER
 /* Enable full aliasing on MSVC */
 /*#pragma optimize("a", on)*/
@@ -119,9 +125,9 @@ size_t malloc_usable_size(void *);
 
 #if ENABLE_USERMODEPAGEALLOCATOR
 static int OSHavePhysicalPageSupport(void);
-static void *userpage_malloc(size_t size, unsigned flags);
-static int userpage_free(void *mem, size_t size);
-static void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2);
+extern void *userpage_malloc(size_t toallocate, unsigned flags);
+extern int userpage_free(void *mem, size_t size);
+extern void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2);
 
 #define USERPAGE_TOPDOWN                   (M2_CUSTOM_FLAGS_BEGIN<<0)
 #define USERPAGE_NOCOMMIT                  (M2_CUSTOM_FLAGS_BEGIN<<1)

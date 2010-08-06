@@ -33,10 +33,12 @@ env['SHCXXCOM']= env['SHCXXCOM'].replace('$CHANGED_SOURCES','$SOURCES.abspath')
 architecture="generic"
 env['CPPDEFINES']=[]
 env['CCFLAGS']=[]
+env['CXXFLAGS']=[]
 env['LIBS']=[]
 env['LINKFLAGS']=[]
 env['CCFLAGSFORNEDMALLOC']=[]
-env['LIBRARYNAME']="nedmalloc"+('_ptchg' if env.GetOption('replacesystemallocator') else '')+env.GetOption('postfix')
+env['NEDMALLOCLIBRARYNAME']="nedmalloc"+('_ptchg' if env.GetOption('replacesystemallocator') else '')+env.GetOption('postfix')
+env['UMPALIBRARYNAME']="nedumpa"+('_ptchg' if env.GetOption('replacesystemallocator') else '')+env.GetOption('postfix')
 if env.GetOption('debugprint'): env['CPPDEFINES']+=["USE_DEBUGGER_OUTPUT"]
 if env.GetOption('fullsanitychecks'): env['CPPDEFINES']+=["FULLSANITYCHECKS"]
 if env.GetOption('replacesystemallocator'): env['CPPDEFINES']+=["REPLACE_SYSTEM_ALLOCATOR"]
@@ -96,6 +98,7 @@ else:
 # Am I building for Windows or POSIX?
 if sys.platform=='win32':
     env['CPPDEFINES']+=["WIN32", "_WINDOWS", "UNICODE", "_UNICODE"]
+    env['CXXFLAGS']+=["/EHsc"]
     env['CCFLAGS']+=["/GF"]             # Eliminate duplicate strings
     env['CCFLAGS']+=["/Gy"]             # Seperate COMDATs
     env['CCFLAGS']+=["/Zi"]             # Program database debug info
@@ -116,7 +119,7 @@ if sys.platform=='win32':
     
     if not env.GetOption('debug'):
         env['LINKFLAGS']+=["/OPT:REF", "/OPT:ICF"]  # Eliminate redundants
-        if env.GetOption('pgo') or os.path.exists(variant+'/'+env['LIBRARYNAME']+".pgd"):
+        if env.GetOption('pgo') or os.path.exists(variant+'/'+env['NEDMALLOCLIBRARYNAME']+".pgd"):
             env['LINKFLAGS']+=["/PGD:${VARIANT}/"+env['LIBRARYNAME']+".pgd"]
             if env.GetOption('pgo'):
                 env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]

@@ -50,7 +50,7 @@ will halve the page table memory requirements. As on x86/x64 page frames start f
 one going upwards sequentially and will never use the top bit, this ought to always
 be safe. */
 #if (defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))) || (defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64)))
-//#define USERMODEPAGEALLOCATOR_USECOMPACTFREEPAGEINDICATOR
+/*#define USERMODEPAGEALLOCATOR_USECOMPACTFREEPAGEINDICATOR*/
 #endif
 
 /* This puts the user mode page allocator into debug config which means that as
@@ -86,9 +86,21 @@ much buffering and caching is disabled as possible in order to best test the cod
 #endif
 
 #include "nedtries/nedtrie.h"
+extern void *userpage_malloc(size_t toallocate, unsigned flags);
+extern int userpage_free(void *mem, size_t size);
+extern void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2);
+#if defined(WIN32) && defined(NEDMALLOC_DLL_EXPORTS)
+extern void DebugPrint(const char *fmt, ...) THROWSPEC;
+#else
+#define DebugPrint printf
+#endif
 
 #ifndef PAGE_SIZE
 #define PAGE_SIZE 4096
+#endif
+#ifndef USERPAGE_TOPDOWN
+#define USERPAGE_TOPDOWN                   (M2_CUSTOM_FLAGS_BEGIN<<0)
+#define USERPAGE_NOCOMMIT                  (M2_CUSTOM_FLAGS_BEGIN<<1)
 #endif
 
 #define REGION_ENTRY(type)                        NEDTRIE_ENTRY(type)
@@ -523,6 +535,7 @@ size_t OSRemapMemoryPagesOntoAddrs(void *RESTRICT *addrs, size_t entries, PageFr
   for(addr=addrs, pf=pageframes, n=0; n<entries; n++, addr++, pf++)
   {
     assert(*addr);
+    /*DebugPrint("Mapping page frame %p to %p\n", *pf, *addr);*/
   }
 #endif
   if(!data->data[0])
@@ -804,7 +817,7 @@ static AddressSpaceReservation_t *ReserveSpace(size_t space)
   }
   ValidatePageMappings(addr);
 #ifdef DEBUG
-   printf("*** Reserved address space from %p to %p (%luMb)\n", addr, addr->back, (unsigned long)((size_t)addr->back - (size_t) addr)/1024/1024);
+   DebugPrint("*** Reserved address space from %p to %p (%luMb)\n", addr, addr->back, (unsigned long)((size_t)addr->back - (size_t) addr)/1024/1024);
 #endif
   return addr;
 badexit:
@@ -910,7 +923,7 @@ static size_t FillWithFreePages(AddressSpaceReservation_t *RESTRICT addr, RemapM
     addr->freepages--;
     addr->usedpages++;
 #if MMAP_CLEARS
-    if(needclean && freepage->dirty)
+    if(needclean && fpn->dirty)
       memset(fpn->freepage, 0, PAGE_SIZE);
 #endif
     FreeFPN(fpn);
@@ -1001,7 +1014,7 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
   AddressSpaceReservation_t *RESTRICT addr;
   if(!addressspacereservation && !(addressspacereservation=ReserveSpace(0)))
   {
-    fprintf(stderr, "User Mode Page Allocator: Failed to allocate initial address space\n");
+    DebugPrint("User Mode Page Allocator: Failed to allocate initial address space\n");
     abort();
   }
   for(addr=addressspacereservation; addr; addr=addr->next)
@@ -1022,6 +1035,9 @@ static void *AllocatePages(void *mem, size_t size, unsigned flags)
           addr->backptr=(void *)((size_t) addr->backptr - size);
         else
           addr->frontptr=(void *)((size_t) addr->frontptr + size);
+#ifdef DEBUG
+        DebugPrint("VA %s goes to %p within %p-%p\n", fromback ? "backptr" : "frontptr", fromback ? addr->backptr : addr->frontptr, addr->front, addr->back);
+#endif
       }
       if(!(flags & USERPAGE_NOCOMMIT))
       { /* We leave memory still held by the application mapped at the addresses it was mapped at
@@ -1590,7 +1606,7 @@ static int CheckFreeRegionNodeStorages(RegionStorage_t *fpns)
     {
       assert(!fpns->next->next);
 #ifdef DEBUG
-      printf("RegionNodeStorage releases %p to %p\n", fpns->next, (void *)((size_t)(fpns->next)+REGIONSTORAGESIZE));
+      DebugPrint("RegionNodeStorage releases %p to %p\n", fpns->next, (void *)((size_t)(fpns->next)+REGIONSTORAGESIZE));
 #endif
       ReleasePages(fpns->next, REGIONSTORAGESIZE, 0);
       fpns->next=0;
@@ -1850,7 +1866,7 @@ static int HandleVANonContiguity(MemorySource *source, region_node_t *RESTRICT r
       dummy->start=r->end;
       dummy->end=source->lastregion->start;
 #ifdef DEBUG
-      printf("Adding dummy node %p (%p - %p)\n", dummy, dummy->start, dummy->end);
+      DebugPrint("Adding dummy node %p (%p - %p)\n", dummy, dummy->start, dummy->end);
 #endif
       AddRegionNode(source, dummy, fromback);
     }
@@ -1859,7 +1875,7 @@ static int HandleVANonContiguity(MemorySource *source, region_node_t *RESTRICT r
       region_node_t *RESTRICT dummy=source->lastregion;
       /*assert(IsPageFreeOrEmpty(addr, dummy->start));*/
 #ifdef DEBUG
-      printf("Removing dummy node %p (%p - %p)\n", dummy, dummy->start, dummy->end);
+      DebugPrint("Removing dummy node %p (%p - %p)\n", dummy, dummy->start, dummy->end);
 #endif
       RemoveRegionNode(source, dummy, fromback);
       FreeRegionNode(dummy);
@@ -1869,7 +1885,7 @@ static int HandleVANonContiguity(MemorySource *source, region_node_t *RESTRICT r
 }
 /* Special flags: USERPAGE_TOPDOWN causes the allocation to be made from the top down.
 USERPAGE_NOCOMMIT causes no memory to be committed */
-static void *userpage_malloc(size_t toallocate, unsigned flags)
+void *userpage_malloc(size_t toallocate, unsigned flags)
 {
   void *ret=0;
   region_node_t node, *RESTRICT r, *RESTRICT newnode=0;
@@ -1998,7 +2014,8 @@ static void ConsolidateNextIntoRegion(MemorySource *RESTRICT source, region_node
   }
   FreeRegionNode(t);
 }
-static int userpage_free(void *mem, size_t size)
+/* size is actually unusued, and can be zero */
+int userpage_free(void *mem, size_t size)
 {
   region_node_t node, *RESTRICT r=0;
   int fromback, prevIsFree, nextIsFree;
@@ -2087,7 +2104,7 @@ fail:
   return -1;
 }
 
-static void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2)
+void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2)
 {
   void *ret=0;
   region_node_t node, *RESTRICT r=0;
@@ -2190,6 +2207,57 @@ mfail:
   RELEASE_LOCK(&userpagemutex);
 #endif
   return MFAIL;
+}
+
+void *userpage_commit(void *mem, size_t size)
+{
+  void *ret=0;
+#if USE_LOCKS
+  ACQUIRE_LOCK(&userpagemutex);
+#endif
+  if(!AddressSpaceFromMem(0, mem))
+    goto mfail;
+  if(!AllocatePages(mem, size, 0))
+    goto mfail;
+  ret=mem;
+#ifdef DEBUG
+  /*{
+    volatile char *p, *pend=(char *)ret+size;
+    for(p=(char *) ret; p<pend; p+=PAGE_SIZE)
+    {
+      DebugPrint("Testing page %p exists ...", p);
+      *p;
+    }
+  }*/
+#endif
+#if USE_LOCKS
+  RELEASE_LOCK(&userpagemutex);
+#endif
+  return ret;
+mfail:
+#if USE_LOCKS
+  RELEASE_LOCK(&userpagemutex);
+#endif
+  return MFAIL;
+}
+
+int userpage_release(void *mem, size_t size)
+{
+#if USE_LOCKS
+  ACQUIRE_LOCK(&userpagemutex);
+#endif
+  if(!AddressSpaceFromMem(0, mem))
+    goto fail;
+  ReleasePages(mem, size, 1);
+#if USE_LOCKS
+  RELEASE_LOCK(&userpagemutex);
+#endif
+  return 1;
+fail:
+#if USE_LOCKS
+  RELEASE_LOCK(&userpagemutex);
+#endif
+  return 0;
 }
 
 #endif
