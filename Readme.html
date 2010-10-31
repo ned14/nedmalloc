@@ -454,6 +454,9 @@ now tends to be worth it in the long run.</p>
 	allocator, so merged nedmalloc_fast_realloc branch.</li>
 	<li><span class="gitcommit">[master 9a8800f]</span> Fixed small bug which 
 	was preventing the windows patcher from correctly finding the proper MSVCRT.</li>
+	<li><span class="gitcommit">[master xxxxxxx]</span> Fixed leak of mutexes
+	when using pthread or win32 mutexs as locks. Thanks to Gavin Lambert for
+	reporting this.</li>
 </ul>
 <h3>v1.06 beta 2 21st March 2010:</h3>
 <ul>

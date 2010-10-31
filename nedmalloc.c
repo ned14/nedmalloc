@@ -1572,6 +1572,7 @@ static NOINLINE mstate FindMSpace(nedpool *RESTRICT p, threadcache *RESTRICT tc,
 #if USE_ALLOCATOR==1
 			destroy_mspace((mstate) temp);
 #endif
+			DESTROY_LOCK(&p->mutex);
 			goto badexit;
 		}
 		/* We really want to make sure this goes into memory now but we
@@ -1673,6 +1674,7 @@ void neddestroypool(nedpool *p) THROWSPEC
 	}
 #if USE_LOCKS
 	RELEASE_LOCK(&p->mutex);
+	DESTROY_LOCK(&p->mutex);
 #endif
 	if(TLSFREE(p->mycache)) abort();
 	nedpfree(0, p);
@@ -1716,6 +1718,7 @@ void neddestroysyspool() THROWSPEC
 	if(TLSFREE(p->mycache)) abort();
 #if USE_LOCKS
 	RELEASE_LOCK(&p->mutex);
+	DESTROY_LOCK(&p->mutex);
 #endif
 }
 nedpool **nedpoollist() THROWSPEC

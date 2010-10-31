@@ -2052,9 +2052,9 @@ static FORCEINLINE int win32munmap(void *handle, void* ptr, size_t size) {
 
   If USE_LOCKS is > 1, the definitions of lock routines here are
   bypassed, in which case you will need to define the type MLOCK_T,
-  and at least INITIAL_LOCK, ACQUIRE_LOCK, RELEASE_LOCK and possibly
-  TRY_LOCK (which is not used in this malloc, but commonly needed in
-  extensions.)  You must also declare a
+  and at least INITIAL_LOCK, DESTROY_LOCK, ACQUIRE_LOCK, RELEASE_LOCK
+  and possibly TRY_LOCK (which is not used in this malloc, but commonly
+  needed in extensions.)  You must also declare a
     static MLOCK_T malloc_global_mutex = { initialization values };.
 
 */
@@ -2074,6 +2074,7 @@ struct pthread_mlock_t {
 #define MLOCK_T               struct pthread_mlock_t
 #define CURRENT_THREAD        pthread_self()
 #define INITIAL_LOCK(sl)      ((sl)->threadid = 0, (sl)->l = (sl)->c = 0, 0)
+#define DESTROY_LOCK(sl)      (0)
 #define ACQUIRE_LOCK(sl)      pthread_acquire_lock(sl)
 #define RELEASE_LOCK(sl)      pthread_release_lock(sl)
 #define TRY_LOCK(sl)          pthread_try_lock(sl)
@@ -2166,6 +2167,7 @@ struct win32_mlock_t {
 #define MLOCK_T               struct win32_mlock_t
 #define CURRENT_THREAD        ((long)GetCurrentThreadId())
 #define INITIAL_LOCK(sl)      ((sl)->threadid = 0, (sl)->l = (sl)->c = 0, 0)
+#define DESTROY_LOCK(sl)      (0)
 #define ACQUIRE_LOCK(sl)      win32_acquire_lock(sl)
 #define RELEASE_LOCK(sl)      win32_release_lock(sl)
 #define TRY_LOCK(sl)          win32_try_lock(sl)
@@ -2233,6 +2235,7 @@ static FORCEINLINE int win32_try_lock (MLOCK_T *sl) {
 #define MLOCK_T               pthread_mutex_t
 #define CURRENT_THREAD        pthread_self()
 #define INITIAL_LOCK(sl)      pthread_init_lock(sl)
+#define DESTROY_LOCK(sl)      pthread_mutex_destroy(sl)
 #define ACQUIRE_LOCK(sl)      pthread_mutex_lock(sl)
 #define RELEASE_LOCK(sl)      pthread_mutex_unlock(sl)
 #define TRY_LOCK(sl)          (!pthread_mutex_trylock(sl))
@@ -2264,6 +2267,7 @@ static int pthread_init_lock (MLOCK_T *sl) {
 #define MLOCK_T               CRITICAL_SECTION
 #define CURRENT_THREAD        GetCurrentThreadId()
 #define INITIAL_LOCK(sl)      (!InitializeCriticalSectionAndSpinCount((sl), 0x80000000|4000))
+#define DESTROY_LOCK(sl)      (DeleteCriticalSection(sl), 0)
 #define ACQUIRE_LOCK(sl)      (EnterCriticalSection(sl), 0)
 #define RELEASE_LOCK(sl)      LeaveCriticalSection(sl)
 #define TRY_LOCK(sl)          TryEnterCriticalSection(sl)
@@ -2298,6 +2302,7 @@ static void init_malloc_global_mutex() {
 #if USE_LOCKS > 1
 /* Define your own lock implementation here */
 /* #define INITIAL_LOCK(sl)  ... */
+/* #define DESTROY_LOCK(sl)  ... */
 /* #define ACQUIRE_LOCK(sl)  ... */
 /* #define RELEASE_LOCK(sl)  ... */
 /* #define TRY_LOCK(sl) ... */
@@ -2311,6 +2316,7 @@ static void init_malloc_global_mutex() {
 #else  /* USE_LOCKS */
 #define USE_LOCK_BIT               (0U)
 #define INITIAL_LOCK(l)
+#define DESTROY_LOCK(l)
 #endif /* USE_LOCKS */
 
 #if USE_LOCKS
@@ -5471,6 +5477,7 @@ size_t destroy_mspace(mspace msp) {
           CALL_MUNMAP(0/*segment*/, base, size) == 0)
         freed += size;
     }
+    DESTROY_LOCK(&ms->mutex);
   }
   else {
     USAGE_ERROR_ACTION(ms,ms);
