@@ -1176,7 +1176,7 @@ size_t nedflushlogs(nedpool *p, char *filepath) THROWSPEC
 	}
 	if(p->caches)
 	{
-		threadcache *tc;
+		threadcache *tc=0;
 		int n;
 		for(n=0; n<THREADCACHEMAXCACHES; n++)
 		{
@@ -1189,7 +1189,7 @@ size_t nedflushlogs(nedpool *p, char *filepath) THROWSPEC
 			}
 		}
 #if ENABLE_LOGGING
-		if(tc->logentries)
+		if(tc && tc->logentries)
 		{
 			char buffer[MAX_PATH]=NEDMALLOC_LOGFILE;
 			FILE *oh;
