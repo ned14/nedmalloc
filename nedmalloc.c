@@ -1176,8 +1176,11 @@ size_t nedflushlogs(nedpool *p, char *filepath) THROWSPEC
 	}
 	if(p->caches)
 	{
-		threadcache *tc=0;
+		threadcache *tc;
 		int n;
+#if ENABLE_LOGGING
+		int haslogentries=0;
+#endif
 		for(n=0; n<THREADCACHEMAXCACHES; n++)
 		{
 			if((tc=p->caches[n]))
@@ -1186,10 +1189,13 @@ size_t nedflushlogs(nedpool *p, char *filepath) THROWSPEC
 				tc->frees++;
 				RemoveCacheEntries(p, tc, 0);
 				assert(!tc->freeInCache);
+#if ENABLE_LOGGING
+				haslogentries|=!!tc->logentries;
+#endif
 			}
 		}
 #if ENABLE_LOGGING
-		if(tc && tc->logentries)
+		if(haslogentries)
 		{
 			char buffer[MAX_PATH]=NEDMALLOC_LOGFILE;
 			FILE *oh;
