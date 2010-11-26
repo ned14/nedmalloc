@@ -1619,7 +1619,7 @@ static struct malloc_params mparams;
 #endif /* MREMAP_MAYMOVE */
 
 #ifdef ENABLE_LARGE_PAGES
-static int largepagesize = 0;
+static size_t largepagesize = 0;
 #endif /* ENABLE_LARGE_PAGES */
 #ifndef WIN32
 #if !defined(MAP_ANONYMOUS) && defined(MAP_ANON)
@@ -1729,7 +1729,7 @@ static FORCEINLINE void* win32mmap(size_t size) {
   void* ptr = 0;
 #ifdef ENABLE_LARGE_PAGES
   /* Note that large pages are *always* allocated on a large page boundary */
-  if(largepagesize && size >= largepagesize && !(size & (largepagesize-1)) {
+  if(largepagesize && size >= largepagesize && !(size & (largepagesize-1))) {
     ptr = VirtualAlloc(baseaddress, size, MEM_RESERVE|MEM_COMMIT|MEM_LARGE_PAGES, PAGE_READWRITE);
     if(!ptr) {
         if (ERROR_PRIVILEGE_NOT_HELD==GetLastError()) largepagesize=0;
