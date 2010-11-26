@@ -3374,7 +3374,7 @@ static int init_mparams(void) {
       SYSTEM_INFO system_info;
       GetSystemInfo(&system_info);
       psize = system_info.dwPageSize;
-      gsize = ((DEFAULT_GRANULARITY != 0)?
+      gsize = ((DEFAULT_GRANULARITY > system_info.dwAllocationGranularity)?
                DEFAULT_GRANULARITY : system_info.dwAllocationGranularity);
       win32AllocationGranularity = system_info.dwAllocationGranularity;
     }
@@ -3399,7 +3399,7 @@ static int init_mparams(void) {
 #endif /* WIN32 */
     if(largepagesize) {
       psize = largepagesize;
-      gsize = ((DEFAULT_GRANULARITY != 0)?
+      gsize = ((DEFAULT_GRANULARITY > largepagesize)?
               DEFAULT_GRANULARITY : largepagesize);
       if(gsize < largepagesize) gsize = largepagesize;
     }
