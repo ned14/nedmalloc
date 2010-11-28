@@ -29,6 +29,12 @@ DEALINGS IN THE SOFTWARE.
 
 #ifdef ENABLE_USERMODEPAGEALLOCATOR
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4101) /* unreferenced local variable */
+#pragma warning(disable: 4189) /* local variable is initialized but not referenced */
+#endif
+
 /* This is how many free pages relative to used pages to keep around before
 returning them to the system. It gets ignored if system free memory is
 perceived to be tight. */
@@ -89,7 +95,7 @@ much buffering and caching is disabled as possible in order to best test the cod
 extern void *userpage_malloc(size_t toallocate, unsigned flags);
 extern int userpage_free(void *mem, size_t size);
 extern void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2);
-#if defined(WIN32) && defined(NEDMALLOC_DLL_EXPORTS)
+#if defined(WIN32) && defined(USERMODEPAGEALLOCATOR_DLL_EXPORTS)
 extern void DebugPrint(const char *fmt, ...) THROWSPEC;
 #else
 #define DebugPrint printf
@@ -2260,4 +2266,7 @@ fail:
   return 0;
 }
 
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 #endif

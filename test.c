@@ -442,7 +442,7 @@ int main(void)
 {
 	double std=0, ned=0;
 #if defined(WIN32) && defined(USE_NEDMALLOC_DLL)
-	PatchInNedmallocDLL();
+	/*PatchInNedmallocDLL();*/
 #endif
 
 #if 0

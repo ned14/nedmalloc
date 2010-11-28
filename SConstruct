@@ -1,6 +1,8 @@
 import os, sys, platform
 def bitscanrev(x, c=-1):
     return bitscanrev(x/2, c+1) if x else c
+	
+architectures = ["generic", "x86", "x64"]
 
 env = Environment()
 #print env['TOOLS']
@@ -69,74 +71,55 @@ if sys.platform=="win32":
     env['ENV']['INCLUDE']=os.environ['INCLUDE']
     env['ENV']['LIB']=os.environ['LIB']
     env['ENV']['PATH']=os.environ['PATH']
-    if not env.GetOption('force32') and os.environ.has_key('LIBPATH') and -1!=os.environ['LIBPATH'].find("\\amd64"):
-        architecture="x64"
-    else:
-        architecture="x86"
-        if   env.GetOption('sse')==1: env['CCFLAGS']+=[ "/arch:SSE" ]
-        elif env.GetOption('sse')>=2: env['CCFLAGS']+=[ "/arch:SSE2" ]
-        if   env.GetOption('sse')>=3: env['CPPDEFINES']+=[("__SSE3__", 1)]
-        if   env.GetOption('sse')>=4: env['CPPDEFINES']+=[("__SSE4__", 1)]
-else:
-    if not env.GetOption('force32') and ('x64' in platform.machine() or 'x86_64' in platform.machine()):
-        architecture="x64"
-    elif platform.machine() in ['i386', 'i486', 'i586', 'i686']:
-        architecture="x86"
-        if env.GetOption('sse'):
-            env['CCFLAGS']+=["-mfpmath=sse"]
-            if env.GetOption('sse')>1: env['CCFLAGS']+=["-msse%s" % str(env.GetOption('sse'))]
-            else: env['CCFLAGS']+=["-msse"]
-
-# Am I building a debug or release build?
-if env.GetOption('debug'):
-    env['CPPDEFINES']+=["DEBUG", "_DEBUG"]
-    variant=architecture+"/Debug"
-else:
-    env['CPPDEFINES']+=["NDEBUG"]
-    variant=architecture+"/Release"
-
-# Am I building for Windows or POSIX?
-if sys.platform=='win32':
-    env['CPPDEFINES']+=["WIN32", "_WINDOWS", "UNICODE", "_UNICODE"]
-    env['CXXFLAGS']+=["/EHsc"]
-    env['CCFLAGS']+=["/GF"]             # Eliminate duplicate strings
-    env['CCFLAGS']+=["/Gy"]             # Seperate COMDATs
-    env['CCFLAGS']+=["/Zi"]             # Program database debug info
-    if env.GetOption('debug'):
-        env['CCFLAGS']+=["/Od", "/MTd"]
-    else:
-        env['CCFLAGS']+=["/O2", "/MT"]
-        env['CCFLAGSFORNEDMALLOC']+=["/GL"]         # Do link time code generation
-    env['LIBS']+=["psapi", "user32", "advapi32"]
-    env['LINKFLAGS']+=["/DEBUG"]                # Output debug symbols
-    env['LINKFLAGS']+=["/LARGEADDRESSAWARE"]    # Works past 2Gb
-    env['LINKFLAGS']+=["/DYNAMICBASE"]          # Doesn't mind being randomly placed
-    env['LINKFLAGS']+=["/NXCOMPAT"]             # Likes no execute
-
-    env['LINKFLAGS']+=["/ENTRY:DllPreMainCRTStartup"]
-    env['LINKFLAGS']+=["/VERSION:1.10.0"]        # Version
-    env['LINKFLAGS']+=["/MANIFEST"]             # Be UAC compatible
-    
-    if not env.GetOption('debug'):
-        env['LINKFLAGS']+=["/OPT:REF", "/OPT:ICF"]  # Eliminate redundants
-        if env.GetOption('pgo') or os.path.exists(variant+'/'+env['NEDMALLOCLIBRARYNAME']+".pgd"):
-            env['LINKFLAGS']+=["/PGD:${VARIANT}/"+env['LIBRARYNAME']+".pgd"]
-            if env.GetOption('pgo'):
-                env['LINKFLAGS']+=["/LTCG:PGINSTRUMENT"]
-            else:
-                env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
-else:
-    env['CPPDEFINES']+=[]
-    env['CCFLAGS']+=["-Wall"]
-    if env.GetOption('debug'):
-        env['CCFLAGS']+=["-O0", "-g"]
-    else:
-        env['CCFLAGS']+=["-O2", "-g"]
-    if env.GetOption('uselocks'):
-        env['LIBS']+=["pthread"]
-    env['LINKFLAGS']+=[]
 
 # Build
-env['VARIANT']=variant
-nedmalloclib=SConscript("SConscript", variant_dir=variant, duplicate=False, exports="env")
+nedmalloclib=None
+buildvariants={}
+for architecture in architectures:
+    for buildtype in ["Debug", "Release"]:
+        env['VARIANT']=architecture+"/"+buildtype
+        nedmalloclibvariant=SConscript("SConscript", variant_dir=env['VARIANT'], duplicate=False, exports="env")
+        buildvariants[(buildtype, architecture)]=nedmalloclibvariant
+# What architecture am I on?
+architecture="generic"
+if sys.platform=="win32":
+	# We're on windows
+	if not env.GetOption('force32') and os.environ.has_key('LIBPATH') and -1!=os.environ['LIBPATH'].find("\\amd64"):
+		architecture="x64"
+	else:
+		architecture="x86"
+else:
+	# We're on POSIX
+	if not env.GetOption('force32') and ('x64' in platform.machine() or 'x86_64' in platform.machine()):
+		architecture="x64"
+	elif platform.machine() in ['i386', 'i486', 'i586', 'i686']:
+		architecture="x86"
+print "*** Build variant preferred by environment is", "Debug" if env.GetOption("debug") else "Release", architecture
+nedmalloclib=buildvariants[("Debug" if env.GetOption("debug") else "Release", architecture)]
+Default([x[0] for x in nedmalloclib.values()])
+nedmalloclib=nedmalloclib['nedmalloclib'][0]
+
+# Set up the MSVC project files
+if 'win32'==sys.platform:
+    includes = [ "nedmalloc.h", "malloc.c.h", "nedmalloc.c", "usermodepageallocator.c"]
+    variants = []
+    projs = {}
+    for buildvariant, output in buildvariants.items():
+        variant = buildvariant[0]+'|'+("Win32" if buildvariant[1]=="x86" else buildvariant[1])
+        variants+=[variant]
+        for program, builditems in output.items():
+            if not program in projs: projs[program]={}
+            projs[program][variant]=builditems
+    variants.sort()
+    msvsprojs = []
+    for program, items in projs.items():
+        buildtargets = items.items()
+        buildtargets.sort()
+        #print buildtargets
+        #print [str(x[1][0][0]) for x in buildtargets]
+        msvsprojs+=env.MSVSProject(program+env['MSVSPROJECTSUFFIX'], srcs=items.values()[0][1], incs=includes, misc="Readme.html", buildtarget=[str(x[1][0][0]) for x in buildtargets], runfile=[str(x[1][0][0]) for x in buildtargets], variant=[x[0] for x in buildtargets], auto_build_solution=0)
+    msvssolution = env.MSVSSolution("nedmalloc.sln", projects=msvsprojs, variant=variants)
+    Depends(msvssolution, msvsprojs)
+    Alias("msvcproj", msvssolution)
+
 Return("nedmalloclib")

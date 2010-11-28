@@ -1621,6 +1621,7 @@ static struct malloc_params mparams;
 #ifdef ENABLE_LARGE_PAGES
 static size_t largepagesize = 0;
 #endif /* ENABLE_LARGE_PAGES */
+static size_t mmapped_granularity;
 #ifndef WIN32
 #if !defined(MAP_ANONYMOUS) && defined(MAP_ANON)
 #define MAP_ANONYMOUS        MAP_ANON
@@ -1720,7 +1721,6 @@ static FORCEINLINE void* posix_direct_mmap(size_t size) {
 #else /* WIN32 */
 
 /* Win32 MMAP via VirtualAlloc */
-static size_t win32AllocationGranularity;
 #ifdef DEFAULT_GRANULARITY_ALIGNED
 static void* lastWin32mmap; /* Used as a hint */
 #endif /* DEFAULT_GRANULARITY_ALIGNED */
@@ -2930,12 +2930,9 @@ static struct malloc_state _gm_;
    & ~(mparams.granularity - SIZE_T_ONE))
 
 
-/* For mmap, use win32 granularity alignment on windows, else page-align */
-#ifdef WIN32
-#define mmap_align(S) (((S) + (win32AllocationGranularity - SIZE_T_ONE)) & ~(win32AllocationGranularity - SIZE_T_ONE))
-#else
-#define mmap_align(S) page_align(S)
-#endif
+/* For mmapped allocations align the size specially such that large
+page sizes don't cause excessive allocation wastage. */
+#define mmap_align_size(S) (((S) + (mmapped_granularity - SIZE_T_ONE)) & ~(mmapped_granularity - SIZE_T_ONE))
 
 /* For sys_alloc, enough padding to ensure can malloc request on success */
 #define SYS_ALLOC_PADDING (TOP_FOOT_SIZE + MALLOC_ALIGNMENT)
@@ -3369,6 +3366,7 @@ static int init_mparams(void) {
 #ifndef WIN32
     psize = malloc_getpagesize;
     gsize = ((DEFAULT_GRANULARITY != 0)? DEFAULT_GRANULARITY : psize);
+    mmapped_granularity = psize;
 #else /* WIN32 */
     {
       SYSTEM_INFO system_info;
@@ -3376,7 +3374,7 @@ static int init_mparams(void) {
       psize = system_info.dwPageSize;
       gsize = ((DEFAULT_GRANULARITY > system_info.dwAllocationGranularity)?
                DEFAULT_GRANULARITY : system_info.dwAllocationGranularity);
-      win32AllocationGranularity = system_info.dwAllocationGranularity;
+      mmapped_granularity = system_info.dwAllocationGranularity;
     }
 #endif /* WIN32 */
 #ifdef ENABLE_LARGE_PAGES
@@ -3520,7 +3518,7 @@ static void do_check_mmapped_chunk(mstate m, mchunkptr p) {
   assert((is_aligned(chunk2mem(p))) || (p->head == FENCEPOST_HEAD));
   assert(ok_address(m, p));
   assert(!is_small(sz));
-  assert((len & (mparams.page_size-SIZE_T_ONE)) == 0);
+  assert((len & (mmapped_granularity-SIZE_T_ONE)) == 0);
   assert(chunk_plus_offset(p, sz)->head == FENCEPOST_HEAD);
   assert(chunk_plus_offset(p, sz+SIZE_T_SIZE)->head == 0);
 }
@@ -4100,7 +4098,7 @@ static void* mspace_malloc_implementation(mstate ms, size_t bytes, unsigned flag
 
 /* Malloc using mmap */
 static void* mmap_alloc(mstate m, size_t nb, unsigned flags) {
-  size_t mmsize = mmap_align(nb + SEVEN_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
+  size_t mmsize = mmap_align_size(nb + SEVEN_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
   if (mmsize > nb) {     /* Check for wrap around 0 */
     void* mmaph = 0;
     char* mm = (char*)(CALL_DIRECT_MMAP(&mmaph, mmsize, flags));
@@ -4139,7 +4137,7 @@ static mchunkptr mmap_resize(mstate m, mchunkptr oldp, size_t nb, unsigned flags
   else {
     size_t offset = oldp->prev_foot;
     size_t oldmmsize = oldsize + offset + MMAP_FOOT_PAD;
-    size_t newmmsize = mmap_align(nb + SEVEN_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
+    size_t newmmsize = mmap_align_size(nb + SEVEN_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
     char* mm = (char*)oldp - offset;
     void* mmaph = *(void**)mm;
 	char* cp = (char*)CALL_DIRECT_MREMAP(&mmaph, mm, oldmmsize, newmmsize, (flags & M2_PREVENT_MOVE) ? 0 : MREMAP_MAYMOVE, flags);

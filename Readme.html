@@ -128,8 +128,15 @@ and nedalloc and tell you how much faster nedalloc is. They also serve as exampl
 of usage.</p>
 <p>If you&#39;d like nedalloc as a Windows DLL or POSIX ELF shared object, the easiest 
 thing to do is to use <a href="http://www.scons.org/" target="_blank">scons</a> 
-which comes with a myriad of build options listed using scons -h. MSVC project files 
-are enclosed, but you&#39;ll need to manually change the defines as necessary.</p>
+which comes with a myriad of build options listed using scons -h. <b>If you want to
+build some MSVC project files for use with Microsoft Visual Studio</b> then what
+you do is (i) install <a href="http://www.python.org/" target="_blank">python</a>
+(ii) install <a href="http://www.scons.org/" target="_blank">scons</a> (iii)
+open a Visual Studio Command Box for the Visual Studio you wish to use via Start Menu
+=&gt; Programs =&gt; Microsoft Visual Studio XXXX =&gt; Visual Studio Tools =&gt;
+Visual Studio XXXX Command Prompt (iv) change directory to the nedmalloc directory
+(e.g. by dragging in its folder) (v) type "!MakeMSVCProjs" and hit Return. Note that
+for Visual Studio 2008 and later support you need scons v2.1 or later.</p>
 <p>nedalloc comes with two new memory allocator APIs: one is for C++, and the 
 other is for C. <strong>Full documentation</strong> for all nedalloc&#39;s APIs and 
 features is provided in the enclosed <a href="nedalloc.chm">nedalloc.chm</a> 
@@ -457,9 +464,13 @@ now tends to be worth it in the long run.</p>
 	<li><span class="gitcommit">[master 37c58b1]</span> Fixed leak of mutexes
 	when using pthread or win32 mutexs as locks. Thanks to Gavin Lambert for
 	reporting this.</li>
-	<li><span class="gitcommit">[master xxxxxxx]</span> Fixed nedflushlogs()
+	<li><span class="gitcommit">[master f67e284]</span> Fixed nedflushlogs()
 	not actually flushing data and/or causing a segfault. Thanks to Roman Tatkin
 	for reporting this.</li>
+	<li><span class="gitcommit">[master xxxxxxx]</span> Finally got round to
+	retiring the MSVC project files as they were sources of never ending hassle
+	due to being out of sync with the SConstruct config. Rebuilt scons build
+	system to be fully compatible with MSVC instead (long overdue!)</li>
 </ul>
 <h3>v1.06 beta 2 21st March 2010:</h3>
 <ul>

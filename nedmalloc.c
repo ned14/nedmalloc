@@ -58,6 +58,9 @@ DEALINGS IN THE SOFTWARE.
 /*#define NEDMALLOC_FORCERESERVE(p, mem, size) (((size)>=(256*1024)) ? M2_RESERVE_MULT(8) : 0)*/
 /*#define WIN32_DIRECT_USE_FILE_MAPPINGS 0*/
 
+//#define ENABLE_LARGE_PAGES 1
+#define NEDMALLOC_DEBUG 1
+
 /*#define FULLSANITYCHECKS*/
 
 /* There is only support for the user mode page allocator on Windows at present */

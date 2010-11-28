@@ -178,6 +178,7 @@ int main(void)
 #endif
 
 #ifdef WIN32
+#pragma comment(lib, "user32.lib")
 	{	/* Force load of user32.dll so we can debug */
 		BOOL v;
 		SystemParametersInfo(SPI_GETBEEP, 0, &v, 0);
