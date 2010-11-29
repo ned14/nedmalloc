@@ -299,63 +299,64 @@ static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *import
 	PIMAGE_THUNK_DATA thunk = 0;
 	PIMAGE_IMPORT_DESCRIPTOR desc = 0;
 	PROC replaceaddr = patchin ? sli->replace.addr : sli->with.addr, withaddr = patchin ? sli->with.addr : sli->replace.addr;
+	int replaced = 0;
 
 	/* Find the import table of the module loaded at hmodCaller */
 	desc = (PIMAGE_IMPORT_DESCRIPTOR) MyImageDirectoryEntryToData(moduleBase, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &size);
 	if (!desc)
 		return MKSTATUS(ret, SUCCESS);  /* This module has no import section */
 
-	/* Find the import descriptor containing references to the module we want. */
+	/* Find all import descriptors containing references to the module we want. */
 	for (; desc->Name; desc++) {
 		PSTR modname = (PSTR)((PBYTE) moduleBase + desc->Name);
-		if (0==lstrcmpiA(modname, importModuleName)) 
+		int modnamecmp = lstrcmpiA(modname, importModuleName);
+		if (modnamecmp>0) 
 			break;
-	}
-	if (!desc->Name)
-		return MKSTATUS(ret, SUCCESS);	/* Module we want not found */
+		if (0==modnamecmp) {
+			/* Get the import address table (IAT) for the functions imported from our wanted module */
+			thunk = (PIMAGE_THUNK_DATA)((PBYTE) moduleBase + desc->FirstThunk);
 
-	/* Get the import address table (IAT) for the functions imported from our wanted module */
-	thunk = (PIMAGE_THUNK_DATA)((PBYTE) moduleBase + desc->FirstThunk);
+			/* Find and replace current function address with new function address */
+			for (; thunk->u1.Function; thunk++) {
+				/* Get the address of the function address */
+				PROC *fn = (PROC *) &thunk->u1.Function;
 
-	/* Find and replace current function address with new function address */
-	for (; thunk->u1.Function; thunk++) {
-		/* Get the address of the function address */
-		PROC *fn = (PROC *) &thunk->u1.Function;
+				/* Is this the function we're looking for? */
+				BOOL found = (*fn == replaceaddr);
 
-		/* Is this the function we're looking for? */
-		BOOL found = (*fn == replaceaddr);
-
-		if (found) {
-			/* The addresses match; change the import section address. */
-			MEMORY_BASIC_INFORMATION mbi={0};
-#if defined(_DEBUG)
-			{
-				char moduleBaseName[_MAX_PATH+2];
-				GetModuleBaseNameA(GetCurrentProcess(), moduleBase, moduleBaseName, sizeof(moduleBaseName)-1);
-				DebugPrint("Winpatcher: Replacing function pointer %p (%s:%s) with %p (%s) at %p in module %p (%s)\n",
-					*fn, importModuleName, sli->replace.name, withaddr, sli->with.name, fn, moduleBase, moduleBaseName);
+				if (found) {
+					/* The addresses match; change the import section address. */
+					MEMORY_BASIC_INFORMATION mbi={0};
+		#if defined(_DEBUG)
+					{
+						char moduleBaseName[_MAX_PATH+2];
+						GetModuleBaseNameA(GetCurrentProcess(), moduleBase, moduleBaseName, sizeof(moduleBaseName)-1);
+						DebugPrint("Winpatcher: Replacing function pointer %p (%s:%s) with %p (%s) at %p in module %p (%s)\n",
+								*fn, importModuleName, sli->replace.name, withaddr, sli->with.name, fn, moduleBase, moduleBaseName);
+					}
+		#endif
+					/*if(!WriteProcessMemory(GetCurrentProcess(), fn, &withaddr, sizeof(withaddr), NULL))
+					return MKSTATUSWIN(ret);*/
+					if(!VirtualQuery(fn, &mbi, sizeof(mbi)))
+						return MKSTATUSWIN(ret);
+					if(!(mbi.Protect & PAGE_EXECUTE_READWRITE))
+					{
+		#if defined(_DEBUG)
+						DebugPrint("Winpatcher: Setting PAGE_WRITECOPY on module %p, region %p length %u\n", moduleBase, mbi.BaseAddress, mbi.RegionSize);
+		#endif
+						if(!VirtualProtect(mbi.BaseAddress, mbi.RegionSize, PAGE_EXECUTE_WRITECOPY, &mbi.Protect))
+							return MKSTATUSWIN(ret);
+					}
+					*fn=withaddr;
+					FlushInstructionCache(GetCurrentProcess(), mbi.BaseAddress, mbi.RegionSize);
+					if(!VirtualProtect(mbi.BaseAddress, mbi.RegionSize, PAGE_EXECUTE_READ, &mbi.Protect))
+						return MKSTATUSWIN(ret);
+					replaced++;
+				}
 			}
-#endif
-			/*if(!WriteProcessMemory(GetCurrentProcess(), fn, &withaddr, sizeof(withaddr), NULL))
-				return MKSTATUSWIN(ret);*/
-			if(!VirtualQuery(fn, &mbi, sizeof(mbi)))
-				return MKSTATUSWIN(ret);
-			if(!(mbi.Protect & PAGE_EXECUTE_READWRITE))
-			{
-#if defined(_DEBUG)
-				DebugPrint("Winpatcher: Setting PAGE_WRITECOPY on module %p, region %p length %u\n", moduleBase, mbi.BaseAddress, mbi.RegionSize);
-#endif
-				if(!VirtualProtect(mbi.BaseAddress, mbi.RegionSize, PAGE_EXECUTE_WRITECOPY, &mbi.Protect))
-					return MKSTATUSWIN(ret);
-			}
-			*fn=withaddr;
-			FlushInstructionCache(GetCurrentProcess(), mbi.BaseAddress, mbi.RegionSize);
-			if(!VirtualProtect(mbi.BaseAddress, mbi.RegionSize, PAGE_EXECUTE_READ, &mbi.Protect))
-				return MKSTATUSWIN(ret);
-			return MKSTATUS(ret, SUCCESS+1);
 		}
 	}
-	return MKSTATUS(ret, SUCCESS);	/* Function we want not found */
+	return MKSTATUS(ret, SUCCESS+replaced);
 }
 
 /* Modifies all symbols in the import table of a loaded module
@@ -559,6 +560,7 @@ static HMODULE WINAPI LoadLibraryW_winpatcher(LPCWSTR lpLibFileName)
 #define M2_CUSTOM_FLAGS_BEGIN   (1<<16)
 #define USERPAGE_TOPDOWN                   (M2_CUSTOM_FLAGS_BEGIN<<0)
 #define USERPAGE_NOCOMMIT                  (M2_CUSTOM_FLAGS_BEGIN<<1)
+extern int OSHavePhysicalPageSupport(void);
 extern void *userpage_malloc(size_t toallocate, unsigned flags);
 extern int userpage_free(void *mem, size_t size);
 extern void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2);
@@ -567,22 +569,32 @@ extern int userpage_release(void *mem, size_t size);
 static LPVOID WINAPI VirtualAlloc_winpatcher(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
 {
 	LPVOID ret=0;
+	dwSize=(dwSize+4095) & ~4095;
 #if defined(_DEBUG)
 	DebugPrint("Winpatcher: VirtualAlloc(%p, %u, %x, %x) intercepted\n", lpAddress, dwSize, flAllocationType, flProtect);
 #endif
-	if(!lpAddress && flAllocationType&MEM_RESERVE)
+	if(OSHavePhysicalPageSupport())
 	{
-		ret=userpage_malloc(dwSize, (flAllocationType&MEM_COMMIT) ? 0 : USERPAGE_NOCOMMIT);
-#if defined(_DEBUG)
-		DebugPrint("Winpatcher: userpage_malloc returns %p\n", ret);
-#endif
-	}
-	else if(lpAddress && (flAllocationType&(MEM_COMMIT|MEM_RESERVE))==(MEM_COMMIT))
-	{
-		ret=userpage_commit(lpAddress, dwSize);
-#if defined(_DEBUG)
-		DebugPrint("Winpatcher: userpage_commit returns %p\n", ret);
-#endif
+		if(!lpAddress && flAllocationType&MEM_RESERVE)
+		{
+			ret=userpage_malloc(dwSize, (flAllocationType&MEM_COMMIT) ? 0 : USERPAGE_NOCOMMIT);
+	#if defined(_DEBUG)
+			DebugPrint("Winpatcher: userpage_malloc returns %p\n", ret);
+			if(flAllocationType&MEM_COMMIT)
+			{
+				volatile char *p, *pend=(char *) ret + dwSize;
+				for(p=(char *) ret; p<pend; p+=4096)
+					*p;
+			}
+	#endif
+		}
+		else if(lpAddress && (flAllocationType&(MEM_COMMIT|MEM_RESERVE))==(MEM_COMMIT))
+		{
+			ret=userpage_commit(lpAddress, dwSize);
+	#if defined(_DEBUG)
+			DebugPrint("Winpatcher: userpage_commit returns %p\n", ret);
+	#endif
+		}
 	}
 	if(!ret || (void *)-1==ret)
 	{
@@ -595,16 +607,20 @@ static LPVOID WINAPI VirtualAlloc_winpatcher(LPVOID lpAddress, SIZE_T dwSize, DW
 }
 static BOOL WINAPI VirtualFree_winpatcher(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType)
 {
+	dwSize=(dwSize+4095) & ~4095;
 #if defined(_DEBUG)
 	DebugPrint("Winpatcher: VirtualFree(%p, %u, %x) intercepted\n", lpAddress, dwSize, dwFreeType);
 #endif
-	if(dwFreeType==MEM_DECOMMIT)
+	if(OSHavePhysicalPageSupport())
 	{
-		if(-1!=userpage_release(lpAddress, dwSize)) return 1;
-	}
-	else if(dwFreeType==MEM_RELEASE)
-	{
-		if(-1!=userpage_free(lpAddress, dwSize)) return 1;
+		if(dwFreeType==MEM_DECOMMIT)
+		{
+			if(-1!=userpage_release(lpAddress, dwSize)) return 1;
+		}
+		else if(dwFreeType==MEM_RELEASE)
+		{
+			if(-1!=userpage_free(lpAddress, dwSize)) return 1;
+		}
 	}
 	return VirtualFree(lpAddress, dwSize, dwFreeType);
 }
@@ -779,8 +795,8 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 		}
 		DebugPrint("Winpatcher: installed process exception hook with handle %p\n", ProcessExceptionHandlerH);
 #endif
-#endif
-#endif
+#endif /* defined(_DEBUG) */
+#endif /* defined(REPLACE_SYSTEM_ALLOCATOR) */
 #ifdef ENABLE_LARGE_PAGES
 		/* Attempt to enable SeLockMemoryPrivilege */
 		{

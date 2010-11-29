@@ -47,6 +47,12 @@ large amounts of memory getting repeatedly freed and reallocated. It gets ignore
 if system free memory is perceived to be tight. */
 #define USERMODEPAGEALLOCATOR_FREEPAGECACHEAGE(usedpages, freepages) 256
 
+/* This is how many pages to immediately preload the free page cache with on
+process startup. If you set it too high relative to the remaining system free
+memory, it will get given back fairly rapidly. */
+/*#define USERMODEPAGEALLOCATOR_FREEPAGECACHEPRELOAD(systemmemorypressure) ((512*1024*1024/4096))*/
+#define USERMODEPAGEALLOCATOR_FREEPAGECACHEPRELOAD(systemmemorypressure) 0
+
 /* This defines how frequently the system free memory state should be
 checked, and it must be a power of two. */
 #define USERMODEPAGEALLOCATOR_SYSTEMFREEMEMORYCHECKRATE 64
@@ -92,6 +98,7 @@ much buffering and caching is disabled as possible in order to best test the cod
 #endif
 
 #include "nedtries/nedtrie.h"
+extern int OSHavePhysicalPageSupport(void);
 extern void *userpage_malloc(size_t toallocate, unsigned flags);
 extern int userpage_free(void *mem, size_t size);
 extern void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2);
@@ -173,7 +180,7 @@ static int OSDeterminePhysicalPageSupport(void) { return 0; }
 
 /* This function returns a simple true or false if the host OS allows user mode
 physical page mapping */
-static int OSHavePhysicalPageSupport(void) { return 0; }
+int OSHavePhysicalPageSupport(void) { return 0; }
 
 /* This function determines whether the host OS is currently short of memory.
 The value is LINEAR between 0.0 (no pressure) and 1.0 (terrible pressure). */
@@ -264,14 +271,14 @@ static int OSDeterminePhysicalPageSupport(void)
     {
       FreeUserPhysicalPages((HANDLE)(size_t)-1, (PULONG_PTR) &no, (PULONG_PTR) &pageframe);
       PhysicalPageSupport=HAVEPHYSICALPAGESUPPORT;
-	  CreateEvent(NULL, FALSE, FALSE, __T("UserModePageAllocatorEnabled"));
+      CreateEvent(NULL, FALSE, FALSE, __T("UserModePageAllocatorEnabled"));
     }
     else
     {
       PhysicalPageSupport=NOPHYSICALPAGESUPPORT;
       /*fprintf(stderr, "User Mode Page Allocator: Failed to allocate physical memory pages (does the user running this process have the right to lock pages in memory?). User Mode Page Allocator will not be used.\n");*/
       OutputDebugStringA("User Mode Page Allocator: Failed to allocate physical memory pages (does the user running this process have the right to lock pages in memory?). User Mode Page Allocator will not be used.\n");
-	  CreateEvent(NULL, FALSE, FALSE, __T("UserModePageAllocatorDisabled"));
+      CreateEvent(NULL, FALSE, FALSE, __T("UserModePageAllocatorDisabled"));
     }
     GetSystemInfo(&si);
 #ifdef ENABLE_PHYSICALPAGEEMULATION
@@ -298,7 +305,7 @@ static int OSDeterminePhysicalPageSupport(void)
   }
   return PhysicalPageSupport;
 }
-static int OSHavePhysicalPageSupport(void)
+int OSHavePhysicalPageSupport(void)
 {
   if(!PhysicalPageSupport) OSDeterminePhysicalPageSupport();
   return HAVEPHYSICALPAGESUPPORT==PhysicalPageSupport;
@@ -944,6 +951,9 @@ static size_t FillWithFreePages(AddressSpaceReservation_t *RESTRICT addr, RemapM
     }
   }
   /* Allocate more pages if needed */
+#ifdef DEBUG
+	if(pages-n>0) DebugPrint("Requesting %lu new pages from kernel\n", (unsigned long) pages-n);
+#endif
   while(pages-n>0)
   {
     size_t newpagesnow=pages-n, newpagesobtained, m;
@@ -1900,6 +1910,19 @@ void *userpage_malloc(size_t toallocate, unsigned flags)
   size_t size = mremapvalue ? ((flags & M2_RESERVE_ISMULTIPLIER) ? toallocate*mremapvalue : (size_t)1<<mremapvalue) : toallocate;
   if(size < toallocate)
     size = toallocate;
+	if(!addressspacereservation)
+	{
+		size_t topreload=USERMODEPAGEALLOCATOR_FREEPAGECACHEPRELOAD(OSSystemMemoryPressure())*PAGE_SIZE;
+		if(topreload>size)
+		{
+#ifdef DEBUG
+			DebugPrint("Preloading free page cache with %lu bytes ...\n", (unsigned long) topreload);
+#endif
+			ret=AllocatePages(0, topreload, 0);
+			ReleasePages(ret, topreload, 0);
+			ret=0;
+		}
+	}
   /* Firstly find out if there is a free slot of sufficient size and if so use that.
   If there isn't a sufficient free slot, extend the virtual address space */
   node.start=0;
