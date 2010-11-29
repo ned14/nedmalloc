@@ -26,6 +26,7 @@ AddOption('--defaultgranularity', dest='defaultgranularity', nargs=1, type='int'
 AddOption('--threadcachemax', dest='threadcachemax', nargs=1, type='string', help='sets what allocations should use the threadcache')
 AddOption('--threadcachemaxbins', dest='threadcachemaxbins', nargs=1, type='int', help='sets the threadcache binning')
 AddOption('--threadcachemaxfreespace', dest='threadcachemaxfreespace', nargs=1, type='int', help='sets when the threadcache should be garbage collected')
+AddOption('--adminuac', dest='adminuac', nargs='?', const=True, help='Windows only. Link with UAC:requireAdmin to force all test apps to run as Administrator')
 
 # Force scons to always use absolute paths in everything (helps debuggers to find source files)
 env['CCCOM']   =    env['CCCOM'].replace('$CHANGED_SOURCES','$SOURCES.abspath')
@@ -117,7 +118,7 @@ if 'win32'==sys.platform:
         buildtargets.sort()
         #print buildtargets
         #print [str(x[1][0][0]) for x in buildtargets]
-        msvsprojs+=env.MSVSProject(program+env['MSVSPROJECTSUFFIX'], srcs=items.values()[0][1], incs=includes, misc="Readme.html", buildtarget=[str(x[1][0][0]) for x in buildtargets], runfile=[str(x[1][0][0]) for x in buildtargets], variant=[x[0] for x in buildtargets], auto_build_solution=0)
+        msvsprojs+=env.MSVSProject(program+env['MSVSPROJECTSUFFIX'], srcs=items.values()[0][1], incs=includes, misc="Readme.html", buildtarget=[x[1][0][0] for x in buildtargets], runfile=[str(x[1][0][0]) for x in buildtargets], variant=[x[0] for x in buildtargets], auto_build_solution=0)
     msvssolution = env.MSVSSolution("nedmalloc.sln", projects=msvsprojs, variant=variants)
     Depends(msvssolution, msvsprojs)
     Alias("msvcproj", msvssolution)

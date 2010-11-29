@@ -41,11 +41,13 @@ if sys.platform=='win32':
     env['LINKFLAGS']+=["/DYNAMICBASE"]          # Doesn't mind being randomly placed
     env['LINKFLAGS']+=["/NXCOMPAT"]             # Likes no execute
     env['LINKFLAGS']+=["/OPT:REF"]              # Seems to puke on load on WinXP without
+    env['LINKFLAGS']+=["/MANIFEST"]             # Be UAC compatible
     env['LINKFLAGSEXE']=env['LINKFLAGS'][:]
+    if env.GetOption('adminuac'): env['LINKFLAGSEXE']+=["/MANIFESTUAC:level='requireAdministrator'"]
+
 
     env['LINKFLAGS']+=["/ENTRY:DllPreMainCRTStartup"]
     env['LINKFLAGS']+=["/VERSION:1.10.0"]        # Version
-    env['LINKFLAGS']+=["/MANIFEST"]             # Be UAC compatible
 
     if not debugbuild:
         env['LINKFLAGS']+=["/OPT:ICF"]  # Eliminate redundants
