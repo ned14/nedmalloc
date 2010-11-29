@@ -58,14 +58,14 @@ DEALINGS IN THE SOFTWARE.
 /*#define NEDMALLOC_FORCERESERVE(p, mem, size) (((size)>=(256*1024)) ? M2_RESERVE_MULT(8) : 0)*/
 /*#define WIN32_DIRECT_USE_FILE_MAPPINGS 0*/
 
-//#define ENABLE_LARGE_PAGES 1
-#define NEDMALLOC_DEBUG 1
+/*#define NEDMALLOC_DEBUG 1*/
 
 /*#define FULLSANITYCHECKS*/
 
 /* There is only support for the user mode page allocator on Windows at present */
-#if !defined(ENABLE_USERMODEPAGEALLOCATOR) && defined(WIN32)
-#define ENABLE_USERMODEPAGEALLOCATOR 1
+#if !defined(ENABLE_USERMODEPAGEALLOCATOR) || !defined(WIN32)
+#undef ENABLE_USERMODEPAGEALLOCATOR
+#define ENABLE_USERMODEPAGEALLOCATOR 0
 #endif
 
 /* If link time code generation is on, don't force or prevent inlining */
@@ -127,7 +127,7 @@ size_t malloc_usable_size(void *);
 /*#define USE_SPIN_LOCKS 0*/
 
 #if ENABLE_USERMODEPAGEALLOCATOR
-static int OSHavePhysicalPageSupport(void);
+extern int OSHavePhysicalPageSupport(void);
 extern void *userpage_malloc(size_t toallocate, unsigned flags);
 extern int userpage_free(void *mem, size_t size);
 extern void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int flags, unsigned flags2);
@@ -398,6 +398,7 @@ static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallRealloc(void 
 	{
 		mchunkptr p=mem2chunk(ret);
 		size_t truesize=chunksize(p) - overhead_for(p);
+		if(!leastusedaddress || (void *)((mstate) mspace)->least_addr<leastusedaddress) leastusedaddress=(void *)((mstate) mspace)->least_addr;
 		if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);
 	}
 #endif
