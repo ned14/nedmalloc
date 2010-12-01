@@ -63,8 +63,7 @@ DEALINGS IN THE SOFTWARE.
 /*#define FULLSANITYCHECKS*/
 
 /* There is only support for the user mode page allocator on Windows at present */
-#if !defined(ENABLE_USERMODEPAGEALLOCATOR) || !defined(WIN32)
-#undef ENABLE_USERMODEPAGEALLOCATOR
+#if !defined(ENABLE_USERMODEPAGEALLOCATOR)
 #define ENABLE_USERMODEPAGEALLOCATOR 0
 #endif
 

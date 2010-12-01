@@ -8,6 +8,7 @@ env = Environment()
 #print env['TOOLS']
 AddOption('--postfix', dest='postfix', nargs=1, default='_test', help='appends a string to the DLL name')
 AddOption('--debugbuild', dest='debug', nargs='?', const=True, help='enable debug build')
+AddOption('--static', dest='static', nargs='?', const=True, help='build a static library rather than shared library')
 AddOption('--pgo', dest='pgo', nargs='?', const=True, help='build PGO instrumentation')
 AddOption('--debugprint', dest='debugprint', nargs='?', const=True, help='enable lots of debug printing (windows only)')
 AddOption('--fullsanitychecks', dest='fullsanitychecks', nargs='?', const=True, help='enable full sanity checking on every memory op')

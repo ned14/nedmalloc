@@ -6,6 +6,7 @@ An example of how to use nedalloc in C
 #define _CRT_SECURE_NO_WARNINGS 1	/* Don't care about MSVC warnings on POSIX functions */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include "nedmalloc.h"
 
@@ -139,6 +140,8 @@ static void (*const frees[])(void *mem)={ free, nedfree, win32free };
 #else
 #include <sys/time.h>
 #include <time.h>
+#include <unistd.h>
+#include <malloc.h>
 static void *_threadcode(void *a)
 {
 	threadcode((int)(size_t) a);
@@ -165,6 +168,7 @@ static FORCEINLINE usCount GetUsCount()
 
 static void *(*const mallocs[])(size_t size)={ malloc, nedmalloc };
 static void *(*const reallocs[])(void *p, size_t size)={ realloc, nedrealloc };
+static size_t (*const memsizes[])(void *p)={ malloc_usable_size, nedmemsize };
 static void (*const frees[])(void *mem)={ free, nedfree };
 #endif
 static usCount times[THREADS];
