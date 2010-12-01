@@ -557,6 +557,7 @@ static HMODULE WINAPI LoadLibraryW_winpatcher(LPCWSTR lpLibFileName)
 #endif
 	return ret;
 }
+#if ENABLE_USERMODEPAGEALLOCATOR
 #define M2_CUSTOM_FLAGS_BEGIN   (1<<16)
 #define USERPAGE_TOPDOWN                   (M2_CUSTOM_FLAGS_BEGIN<<0)
 #define USERPAGE_NOCOMMIT                  (M2_CUSTOM_FLAGS_BEGIN<<1)
@@ -631,6 +632,7 @@ static SIZE_T WINAPI VirtualQuery_winpatcher(LPVOID lpAddress, PMEMORY_BASIC_INF
 #endif
 	return VirtualQuery(lpAddress, lpBuffer, dwSize);
 }
+#endif /* ENABLE_USERMODEPAGEALLOCATOR */
 
 /* Thunks for nedmalloc */
 #ifdef NEDMALLOC_H
@@ -697,7 +699,7 @@ static SymbolListItem nedmallocpatchtable[]={
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 	{ { "LoadLibraryA", 0, "", 0 }, kernelmodule, { "LoadLibraryA_winpatcher", (PROC) LoadLibraryA_winpatcher } },
 	{ { "LoadLibraryW", 0, "", 0 }, kernelmodule, { "LoadLibraryW_winpatcher", (PROC) LoadLibraryW_winpatcher } },
-#if 1
+#if ENABLE_USERMODEPAGEALLOCATOR
 	{ { "VirtualAlloc", 0, "", 0 }, kernelmodule, { "VirtualAlloc_winpatcher", (PROC) VirtualAlloc_winpatcher } },
 	{ { "VirtualFree",  0, "", 0 }, kernelmodule, { "VirtualFree_winpatcher",  (PROC) VirtualFree_winpatcher  } },
 	{ { "VirtualQuery", 0, "", 0 }, kernelmodule, { "VirtualQuery_winpatcher", (PROC) VirtualQuery_winpatcher } },
