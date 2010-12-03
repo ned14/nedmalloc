@@ -267,7 +267,13 @@ are using the DLL then the DLL attempts to enable the SeLockMemoryPrivilege duri
 initialisation - therefore if you are not using the DLL you will have to do this 
 manually yourself. As with Linux support, if at any stage large pages cannot be 
 allocated, then dlmalloc silently disables support - this allows one binary to function 
-correctly in any environment.</p>
+correctly in any environment. <strong>Note that on Windows</strong> if your 
+process allocates a lot of memory at once when the machine has been running for 
+an extended period, then the whole computer may hang for several seconds as the 
+Windows kernel copies memory around in order to coalesce a large page. This is a 
+problem with the Windows kernel and its VM design, not nedmalloc! If you would 
+like to see how large pages ought to be implemented, research how FreeBSD 
+implemented them.</p>
 <h3><a name="logger">B5: Memory operation logging</a></h3>
 <p>It is often very useful to have a log of the memory operations which an 
 application performs - you would be amazed at the inefficiencies in memory usage 
@@ -294,13 +300,18 @@ thanks to work generously sponsored by
 	<dt>Replacing the system allocator in the whole process</dt>
 	<dd>
 	<p>If you define REPLACE_SYSTEM_ALLOCATOR when building the DLL then the DLL 
-	will replace most usage of the MSVCRT allocator within any process it is loaded 
+	will replace <em>most</em> usage of the MSVCRT allocator (release MSVCRT,<strong> 
+	not</strong> debug MSVCRTD)<strong> </strong>within any process it is loaded 
 	into with nedalloc&#39;s routines instead, whilst remaining able to handle the odd 
-	free() of a MSVCRT allocated block allocated during CRT init - this very conveniently 
+	free() of a MSVCRT allocated block allocated during CRT init. This very conveniently 
 	allows you to simply link with the nedalloc DLL and your application magically 
-	now uses it with no code changes required. The following code is suggested:</p>
+	now uses it with no code changes required, and because the MSVC 
+	implementation of operators new and delete both call malloc() and free() it 
+	also covers all C++ code. The following code is suggested:</p>
 	<code>#pragma comment(lib, &quot;nedmalloc.lib&quot;)</code>
-	<p>This auto-patching feature can also be combined with
+	<p>This asks the linker to link against nedmalloc.lib during linking - 
+	without this pragma the linker will generally leave out nedmalloc as there 
+	are no explicitly imported routines that it understands. This auto-patching feature can also be combined with
 	<a href="http://research.microsoft.com/en-us/projects/detours/" target="_blank">
 	Microsoft&#39;s Detours</a> to run any arbitrary application using nedalloc instead 
 	of the system allocator:</p>
@@ -308,6 +319,15 @@ thanks to work generously sponsored by
 	<p>For those not able to use Microsoft Detours, there is an enclosed nedmalloc_loader 
 	program which does one variant of the same thing. It may or may not be useful 
 	to you - it is not intended to be maintained.</p>
+	<p>The reason that only the release MSVCRT not the debug MSVCRTD is patched 
+	is twofold: (i) usually one <em>wants</em> the debug heap in debug builds so 
+	it does memory corruption checking and reports memory leaks and (ii) the 
+	MSVC CRT actually implements operator new and malloc using a completely 
+	different implementation based on the Windows kernel HeapAlloc() function 
+	and it does a lot of hoop jumping to handle mismatching CRT versions and 
+	lots of other stuff. You can enable patching of the debug memory allocation 
+	functions in winpatcher.c, but you may find all sorts of weird issues if 
+	your process loads a lot of DLLs built by differing versions of MSVC.</p>
 	</dd>
 	<dt>User mode page allocation</dt>
 	<dd>The
