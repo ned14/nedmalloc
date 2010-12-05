@@ -77,7 +77,7 @@ outputs={}
 sources = ["nedmalloc.c"]
 libobjects = env.SharedObject("nedmalloc.c", CPPDEFINES=env['CPPDEFINES']+["NEDMALLOC_DLL_EXPORTS"], CCFLAGS=env['CCFLAGS']+env['CCFLAGSFORNEDMALLOC'])
 if sys.platform=='win32':
-    libobjects+=env.SharedObject("winpatcher_nedmalloc", "winpatcher.c", CPPDEFINES=env['CPPDEFINES']+["NEDMALLOC_DLL_EXPORTS"])
+    if not env.GetOption("static"): libobjects+=env.SharedObject("winpatcher_nedmalloc", "winpatcher.c", CPPDEFINES=env['CPPDEFINES']+["NEDMALLOC_DLL_EXPORTS"])
     libobjects+=env.RES("nedmalloc.res", "nedmalloc_dll.rc")
     sources+=["winpatcher.c", "nedmalloc_dll.rc"]
 if env.GetOption("static"):
@@ -94,7 +94,7 @@ outputs['nedmalloclib']=(nedmalloclib, sources)
 
 if True and sys.platform=='win32':
     # Build the UMPA DLL
-    libobjects=env.SharedObject("winpatcher_umpa", "winpatcher.c", CPPDEFINES=env['CPPDEFINES']+["USERMODEPAGEALLOCATOR_DLL_EXPORTS"], CCFLAGS=env['CCFLAGS']+env['CCFLAGSFORNEDMALLOC'])
+    if not env.GetOption("static"): libobjects=env.SharedObject("winpatcher_umpa", "winpatcher.c", CPPDEFINES=env['CPPDEFINES']+["USERMODEPAGEALLOCATOR_DLL_EXPORTS"], CCFLAGS=env['CCFLAGS']+env['CCFLAGSFORNEDMALLOC'])
     libobjects+=env.RES("nedmalloc.res", "nedmalloc_dll.rc")
     if env.GetOption("static"):
         umpalib = env.StaticLibrary(env['UMPALIBRARYNAME'], source = libobjects)

@@ -795,19 +795,19 @@ static DWORD64 __stdcall GetModBase(HANDLE hProcess, DWORD64 dwAddr) THROWSPEC
 	DWORD64 modulebase;
 	// Try to get the module base if already loaded, otherwise load the module
 	modulebase=SymGetModuleBase64(hProcess, dwAddr);
-    if(modulebase)
-        return modulebase;
-    else
-    {
-        MEMORY_BASIC_INFORMATION stMBI ;
-        if ( 0 != VirtualQueryEx ( hProcess, (LPCVOID)(size_t)dwAddr, &stMBI, sizeof(stMBI)))
-        {
+	if(modulebase)
+		return modulebase;
+	else
+	{
+		MEMORY_BASIC_INFORMATION stMBI ;
+		if ( 0 != VirtualQueryEx ( hProcess, (LPCVOID)(size_t)dwAddr, &stMBI, sizeof(stMBI)))
+		{
 			int n;
-            DWORD dwPathLen=0, dwNameLen=0 ;
-            TCHAR szFile[ MAX_PATH ], szModuleName[ MAX_PATH ] ;
+			DWORD dwPathLen=0, dwNameLen=0 ;
+			TCHAR szFile[ MAX_PATH ], szModuleName[ MAX_PATH ] ;
 			MODULEINFO mi={0};
-            dwPathLen = GetModuleFileName ( (HMODULE) stMBI.AllocationBase , szFile, MAX_PATH );
-            dwNameLen = GetModuleBaseName (hProcess, (HMODULE) stMBI.AllocationBase , szModuleName, MAX_PATH );
+			dwPathLen = GetModuleFileName ( (HMODULE) stMBI.AllocationBase , szFile, MAX_PATH );
+			dwNameLen = GetModuleBaseName (hProcess, (HMODULE) stMBI.AllocationBase , szModuleName, MAX_PATH );
 			for(n=dwNameLen; n>0; n--)
 			{
 				if(szModuleName[n]=='.')
@@ -828,36 +828,27 @@ static DWORD64 __stdcall GetModBase(HANDLE hProcess, DWORD64 dwAddr) THROWSPEC
 			//fxmessage("%s, %p, %x, %x\n", szFile, mi.lpBaseOfDll, mi.SizeOfImage, (DWORD) mi.lpBaseOfDll+mi.SizeOfImage);
 			modulebase=SymGetModuleBase64(hProcess, dwAddr);
 			return modulebase;
-        }
-    }
-    return 0;
-}
-
-static HANDLE myprocess;
-static void DeinitSym(void) THROWSPEC
-{
-	if(myprocess)
-	{
-		SymCleanup(myprocess);
-		CloseHandle(myprocess);
-		myprocess=0;
+		}
 	}
+	return 0;
 }
 
+extern HANDLE sym_myprocess;
+extern VOID (WINAPI *RtlCaptureContextAddr)(PCONTEXT);
+extern void DeinitSym(void) THROWSPEC;
 static void DoStackWalk(logentry *p) THROWSPEC
 {
 	int i,i2;
 	HANDLE mythread=(HANDLE) GetCurrentThread();
 	STACKFRAME64 sf={ 0 };
 	CONTEXT ct={ 0 };
-	static VOID (WINAPI *RtlCaptureContextAddr)(PCONTEXT)=(VOID (WINAPI *)(PCONTEXT)) -1;
-	if(!myprocess)
+	if(!sym_myprocess)
 	{
 		DWORD symopts;
-		DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &myprocess, 0, FALSE, DUPLICATE_SAME_ACCESS);
+		DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &sym_myprocess, 0, FALSE, DUPLICATE_SAME_ACCESS);
 		symopts=SymGetOptions();
 		SymSetOptions(symopts /*| SYMOPT_DEFERRED_LOADS*/ | SYMOPT_LOAD_LINES);
-		SymInitialize(myprocess, NULL, TRUE);
+		SymInitialize(sym_myprocess, NULL, TRUE);
 		atexit(DeinitSym);
 	}
 	ct.ContextFlags=CONTEXT_FULL;
@@ -902,7 +893,7 @@ static void DoStackWalk(logentry *p) THROWSPEC
 #else
 			IMAGE_FILE_MACHINE_AMD64,
 #endif
-			myprocess, mythread, &sf, &ct, NULL, SymFunctionTableAccess64, GetModBase, NULL))
+			sym_myprocess, mythread, &sf, &ct, NULL, SymFunctionTableAccess64, GetModBase, NULL))
 			break;
 		if(0==sf.AddrPC.Offset)
 			break;
@@ -911,7 +902,7 @@ static void DoStackWalk(logentry *p) THROWSPEC
 		{
 			DWORD lineoffset=0;
 			p->stack[i-1].pc=(void *)(size_t) sf.AddrPC.Offset;
-			if(SymGetModuleInfo64(myprocess, sf.AddrPC.Offset, &ihm))
+			if(SymGetModuleInfo64(sym_myprocess, sf.AddrPC.Offset, &ihm))
 			{
 				char *leaf;
 				leaf=strrchr(ihm.ImageName, '\\');
@@ -926,7 +917,7 @@ static void DoStackWalk(logentry *p) THROWSPEC
 			ihs->Address=sf.AddrPC.Offset;
 			ihs->MaxNameLength=MAX_PATH;
 
-			if(SymGetSymFromAddr64(myprocess, sf.AddrPC.Offset, &offset, ihs))
+			if(SymGetSymFromAddr64(sym_myprocess, sf.AddrPC.Offset, &offset, ihs))
 			{
 				COPY_STRING(p->stack[i-1].functname, ihs->Name, sizeof(p->stack[i-1].functname));
 				if(strlen(p->stack[i-1].functname)<sizeof(p->stack[i-1].functname)-8)
@@ -936,7 +927,7 @@ static void DoStackWalk(logentry *p) THROWSPEC
 			}
 			else
 				strcpy(p->stack[i-1].functname, "<unknown>");
-			if(SymGetLineFromAddr64(myprocess, sf.AddrPC.Offset, &lineoffset, &ihl))
+			if(SymGetLineFromAddr64(sym_myprocess, sf.AddrPC.Offset, &lineoffset, &ihl))
 			{
 				char *leaf;
 				p->stack[i-1].lineno=ihl.LineNumber;
@@ -1950,7 +1941,7 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem,
 			if((flags & M2_ZERO_MEMORY) && size>memsize)
 				memset((void *)((size_t)ret+memsize), 0, size-memsize);
 			LogOperation(tc, p, LOGENTRY_THREADCACHE_MALLOC, mymspace, size, mem, alignment, flags, ret);
-			if(memsize>=sizeof(threadcacheblk) && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
+			if(!isforeign && memsize>=sizeof(threadcacheblk) && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
 			{
 				threadcache_free(p, tc, mymspace, mem, memsize, isforeign);
 				LogOperation(tc, p, LOGENTRY_THREADCACHE_FREE, mymspace, memsize, mem, 0, 0, 0);
@@ -1995,7 +1986,7 @@ NEDMALLOCNOALIASATTR void   nedpfree2(nedpool *p, void *mem, unsigned flags) THR
 	}
 	GetThreadCache(&p, &tc, &mymspace, 0);
 #if THREADCACHEMAX
-	if(mem && tc && memsize>=sizeof(threadcacheblk) && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
+	if(mem && tc && !isforeign && memsize>=sizeof(threadcacheblk) && memsize<=(THREADCACHEMAX+CHUNK_OVERHEAD))
 	{
 		threadcache_free(p, tc, mymspace, mem, memsize, isforeign);
 		LogOperation(tc, p, LOGENTRY_THREADCACHE_FREE, mymspace, memsize, mem, 0, 0, 0);

@@ -29,9 +29,14 @@ DEALINGS IN THE SOFTWARE.
 
 #define USE_DEBUGGER_OUTPUT
 
-#ifdef NEDMALLOC_DLL_EXPORTS
+#ifdef NEDMALLOC_DLL_EXPORTS /* Building patcher with nedmalloc */
 #include "nedmalloc.h"
-#else
+extern void *(*sysmalloc)(size_t);
+extern void *(*syscalloc)(size_t, size_t);
+extern void *(*sysrealloc)(void *, size_t);
+extern void (*sysfree)(void *);
+extern size_t (*sysblksize)(void *);
+#else                        /* Else building patcher with dlmalloc */
 #ifndef NEDMALLOCEXTSPEC
  #if defined(NEDMALLOC_DLL_EXPORTS) || defined(USERMODEPAGEALLOCATOR_DLL_EXPORTS)
   #ifdef WIN32
@@ -70,6 +75,8 @@ DEALINGS IN THE SOFTWARE.
 #define _WIN32_WINNT 0x0501		/* Minimum of Windows XP required */
 #include <windows.h>
 #endif
+#include "Dbghelp.h"
+#pragma comment(lib, "dbghelp.lib")
 #include <psapi.h>
 #include "nedtries/uthash/src/uthash.h"
 #include "winpatcher_errorh.h"
@@ -431,7 +438,7 @@ static Status ModifyModuleImportTableFor(HMODULE moduleBase, SymbolListItem *sli
 
 /* ARA are suffering from slow process init times due to the patcher. Let's see what we can
 do through the magic of caching! */
-static HMODULE myModuleBase, lastModuleList[4096];
+static HMODULE MyModuleBase, skipModules[3], lastModuleList[4096];
 static DWORD lastModuleListLen;
 typedef struct PatchedModule_t
 {
@@ -453,7 +460,11 @@ Status WinPatcher(SymbolListItem *symbollist, int patchin, int *usingreleaseMSVC
 		HMODULE *module=0, modulelist[4096];
 		DWORD modulelistlen=sizeof(modulelist), modulelistlenneeded=0;
 
-		if(!myModuleBase) myModuleBase=ModuleFromAddress((void *)(size_t) WinPatcher);
+		if(!skipModules[0])
+		{
+			assert(MyModuleBase);
+			skipModules[0]=ModuleFromAddress((void *)(size_t) StackWalk64); /* Not DbgHelp.dll as it calls malloc during its own operation which causes recursion */
+		}
 		/* This is not a fast call, but sadly there is no choice */
 		if(!EnumProcessModules(GetCurrentProcess(), modulelist, modulelistlen, &modulelistlenneeded))
 			return MKSTATUSWIN(ret);
@@ -462,6 +473,7 @@ Status WinPatcher(SymbolListItem *symbollist, int patchin, int *usingreleaseMSVC
 			for(module=modulelist; module<modulelist+(modulelistlenneeded/sizeof(HMODULE)); module++)
 			{
 				PatchedModule *pm=0;
+				HMODULE *m;
 				HASH_FIND_PTR(patchedmodules, module, pm);
 				if(pm)
 				{	/* Already patched */
@@ -486,7 +498,7 @@ Status WinPatcher(SymbolListItem *symbollist, int patchin, int *usingreleaseMSVC
 #endif
 					HASH_ADD_PTR(patchedmodules, moduleBaseAddr, pm);
 				}
-				if(*module==myModuleBase)
+				if(*module==MyModuleBase || *module==skipModules[0])
 					continue;	/* Not us or we'd break our patch table */
 #if defined(_DEBUG)
 				DebugPrint("Winpatcher: Scanning module %p (%s) for things to %s ...\n", pm->moduleBaseAddr, pm->moduleBaseName, patchin ? "patch" : "depatch");
@@ -634,14 +646,11 @@ static SIZE_T WINAPI VirtualQuery_winpatcher(LPVOID lpAddress, PMEMORY_BASIC_INF
 }
 #endif /* ENABLE_USERMODEPAGEALLOCATOR */
 
-/* Thunks for nedmalloc */
-#ifdef NEDMALLOC_H
-static void *nedmalloc_dbg(size_t size, int type, const char *filename, int lineno)             { return nedmalloc(size); }
-static void *nedcalloc_dbg(size_t no, size_t size, int type, const char *filename, int lineno)  { return nedcalloc(no, size); }
-static void *nedrealloc_dbg(void *ptr, size_t size, int type, const char *filename, int lineno) { return nedrealloc(ptr, size); }
-static void nedfree_dbg(void *ptr, int type)                                                    { nedfree(ptr); }
-static size_t nedblksize_dbg(void *ptr, int type)                                               { return nedmemsize(ptr); }
-#endif
+
+
+
+
+
 /* The patch table: replace the specified symbols in the specified modules with the
    specified replacements. Format is:
 
@@ -663,8 +672,10 @@ static size_t nedblksize_dbg(void *ptr, int type)                               
 */
 static ModuleListItem modules[]={
 	/* NOTE: Keep these release/debug format as this is used above! */
+#if 1
 	/* Release and Debug MSVC6 CRTs */
 	{ "MSVCRT.DLL", 0, 0 }, { "MSVCRTD.DLL", 0, 0 },
+#endif
 	/* Release and Debug MSVC7.0 CRTs */
 	{ "MSVCR70.DLL", 0, 0 }, { "MSVCR70D.DLL", 0, 0 },
 	/* Release and Debug MSVC7.1 CRTs */
@@ -696,9 +707,9 @@ static SymbolListItem nedmallocpatchtable[]={
 	{ { "_free_dbg",    0, "", 0/*(PROC) free   */ }, modules, { "nedfree_dbg",    (PROC) nedfree_dbg    } },
 	{ { "_msize_dbg",   0, "", 0/*(PROC) free   */ }, modules, { "nedblksize_dbg", (PROC) nedblksize_dbg } },
 #endif
-#ifdef REPLACE_SYSTEM_ALLOCATOR
 	{ { "LoadLibraryA", 0, "", 0 }, kernelmodule, { "LoadLibraryA_winpatcher", (PROC) LoadLibraryA_winpatcher } },
 	{ { "LoadLibraryW", 0, "", 0 }, kernelmodule, { "LoadLibraryW_winpatcher", (PROC) LoadLibraryW_winpatcher } },
+#ifdef REPLACE_SYSTEM_ALLOCATOR
 #if ENABLE_USERMODEPAGEALLOCATOR
 	{ { "VirtualAlloc", 0, "", 0 }, kernelmodule, { "VirtualAlloc_winpatcher", (PROC) VirtualAlloc_winpatcher } },
 	{ { "VirtualFree",  0, "", 0 }, kernelmodule, { "VirtualFree_winpatcher",  (PROC) VirtualFree_winpatcher  } },
@@ -707,10 +718,204 @@ static SymbolListItem nedmallocpatchtable[]={
 #endif
 	{ { 0, 0, "", 0 }, 0, { 0, 0 } }
 };
-static int UsingReleaseMSVCRT, UsingDebugMSVCRT;
+#ifdef NEDMALLOC_H
+/* Thunks for nedmalloc */
+static void *nedmalloc_dbg(size_t size, int type, const char *filename, int lineno)             { return nedmalloc(size); }
+static void *nedcalloc_dbg(size_t no, size_t size, int type, const char *filename, int lineno)  { return nedcalloc(no, size); }
+static void *nedrealloc_dbg(void *ptr, size_t size, int type, const char *filename, int lineno) { return nedrealloc(ptr, size); }
+static void nedfree_dbg(void *ptr, int type)                                                    { nedfree(ptr); }
+static size_t nedblksize_dbg(void *ptr, int type)                                               { return nedmemsize(ptr); }
+
+/* Here come some fun! Windows is unusual in that various DLLs loaded by processes may be
+linked to any one of the MSVCRTs listed in the patch table above - which is twelve different
+options. Each MSVCRT runs its own separate CRT heap and is generally incapable of handling
+blocks from a MSVCRT not its own, so we need to figure out specifically which system allocator
+function to call based on what is doing the call. Painful, but not much choice! */
+extern HANDLE sym_myprocess;
+extern VOID (WINAPI *RtlCaptureContextAddr)(PCONTEXT);
+extern void DeinitSym(void) THROWSPEC;
+HANDLE sym_myprocess;
+VOID (WINAPI *RtlCaptureContextAddr)(PCONTEXT)=(VOID (WINAPI *)(PCONTEXT)) -1;
+void DeinitSym(void) THROWSPEC
+{
+	if(sym_myprocess)
+	{
+		SymCleanup(sym_myprocess);
+		CloseHandle(sym_myprocess);
+		sym_myprocess=0;
+	}
+}
+#pragma optimize("g", off)
+static int ExceptionFilter(unsigned int code, struct _EXCEPTION_POINTERS *ep, CONTEXT *ct) THROWSPEC
+{
+	*ct=*ep->ContextRecord;
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+static DWORD64 __stdcall GetModBase(HANDLE hProcess, DWORD64 dwAddr) THROWSPEC
+{
+	DWORD64 modulebase;
+	// Try to get the module base if already loaded, otherwise load the module
+	modulebase=SymGetModuleBase64(hProcess, dwAddr);
+	if(modulebase)
+		return modulebase;
+	else
+	{
+		MEMORY_BASIC_INFORMATION stMBI ;
+		if ( 0 != VirtualQueryEx ( hProcess, (LPCVOID)(size_t)dwAddr, &stMBI, sizeof(stMBI)))
+		{
+			int n;
+			DWORD dwPathLen=0, dwNameLen=0 ;
+			TCHAR szFile[ MAX_PATH ], szModuleName[ MAX_PATH ] ;
+			MODULEINFO mi={0};
+			dwPathLen = GetModuleFileName ( (HMODULE) stMBI.AllocationBase , szFile, MAX_PATH );
+			dwNameLen = GetModuleBaseName (hProcess, (HMODULE) stMBI.AllocationBase , szModuleName, MAX_PATH );
+			for(n=dwNameLen; n>0; n--)
+			{
+				if(szModuleName[n]=='.')
+				{
+					szModuleName[n]=0;
+					break;
+				}
+			}
+			if(!GetModuleInformation(hProcess, (HMODULE) stMBI.AllocationBase, &mi, sizeof(mi)))
+			{
+				//fxmessage("WARNING: GetModuleInformation() returned error code %d\n", GetLastError());
+			}
+			if(!SymLoadModule64 ( hProcess, NULL, (PSTR)( (dwPathLen) ? szFile : 0), (PSTR)( (dwNameLen) ? szModuleName : 0),
+				(DWORD64) mi.lpBaseOfDll, mi.SizeOfImage))
+			{
+				//fxmessage("WARNING: SymLoadModule64() returned error code %d\n", GetLastError());
+			}
+			//fxmessage("%s, %p, %x, %x\n", szFile, mi.lpBaseOfDll, mi.SizeOfImage, (DWORD) mi.lpBaseOfDll+mi.SizeOfImage);
+			modulebase=SymGetModuleBase64(hProcess, dwAddr);
+			return modulebase;
+		}
+	}
+	return 0;
+}
+static HMODULE FindMSVCRTForCaller(void)
+{
+	int i;
+	HANDLE mythread=(HANDLE) GetCurrentThread();
+	STACKFRAME64 sf={ 0 };
+	CONTEXT ct={ 0 };
+	if(!sym_myprocess)
+	{
+		DWORD symopts;
+		DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &sym_myprocess, 0, FALSE, DUPLICATE_SAME_ACCESS);
+		symopts=SymGetOptions();
+		SymSetOptions(symopts /*| SYMOPT_DEFERRED_LOADS*/ | SYMOPT_LOAD_LINES);
+		SymInitialize(sym_myprocess, NULL, TRUE);
+		atexit(DeinitSym);
+	}
+	ct.ContextFlags=CONTEXT_FULL;
+
+	// Use RtlCaptureContext() if we have it as it saves an exception throw
+	if((VOID (WINAPI *)(PCONTEXT)) -1==RtlCaptureContextAddr)
+		RtlCaptureContextAddr=(VOID (WINAPI *)(PCONTEXT)) GetProcAddress(GetModuleHandle(L"kernel32"), "RtlCaptureContext");
+	if(RtlCaptureContextAddr)
+		RtlCaptureContextAddr(&ct);
+	else
+	{	// This is nasty, but it works
+		__try
+		{
+			int *foo=0;
+			*foo=78;
+		}
+		__except (ExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &ct))
+		{
+		}
+	}
+
+	sf.AddrPC.Mode=sf.AddrStack.Mode=sf.AddrFrame.Mode=AddrModeFlat;
+#if !(defined(_M_AMD64) || defined(_M_X64))
+	sf.AddrPC.Offset   =ct.Eip;
+	sf.AddrStack.Offset=ct.Esp;
+	sf.AddrFrame.Offset=ct.Ebp;
+#else
+	sf.AddrPC.Offset   =ct.Rip;
+	sf.AddrStack.Offset=ct.Rsp;
+	sf.AddrFrame.Offset=ct.Rbp; // maybe Rdi?
+#endif
+	for(;;)
+	{
+		IMAGEHLP_MODULE64 ihm={ sizeof(IMAGEHLP_MODULE64) };
+		if(!StackWalk64(
+#if !(defined(_M_AMD64) || defined(_M_X64))
+			IMAGE_FILE_MACHINE_I386,
+#else
+			IMAGE_FILE_MACHINE_AMD64,
+#endif
+			sym_myprocess, mythread, &sf, &ct, NULL, SymFunctionTableAccess64, GetModBase, NULL))
+			break;
+		if(0==sf.AddrPC.Offset)
+			break;
+		if(SymGetModuleInfo64(sym_myprocess, sf.AddrPC.Offset, &ihm))
+		{ // Is this me? If so keep going up the stack until it isn't
+			ModuleListItem *module;
+			if((HMODULE) ihm.BaseOfImage==MyModuleBase)
+				continue;
+			DebugPrint("Found caller of malloc function at %p (%s)\n", ihm.BaseOfImage, ihm.ModuleName);
+			for(module=modules; module->into; module++)
+			{
+				ULONG size;
+				PIMAGE_IMPORT_DESCRIPTOR desc = 0;
+				if((HMODULE)(size_t)-1==module->intoAddr)
+					continue;
+				desc = (PIMAGE_IMPORT_DESCRIPTOR) MyImageDirectoryEntryToData((PVOID) ihm.BaseOfImage, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &size);
+				if(!desc)
+					continue;
+				for (; desc->Name; desc++) {
+					PSTR modname = (PSTR)((PBYTE) ihm.BaseOfImage + desc->Name);
+					int modnamecmp = lstrcmpiA(modname, module->into);
+					if (modnamecmp>0) 
+						break;
+					if (0==modnamecmp) {
+						DebugPrint("Module %p (%s) was originally linked to %s\n", ihm.BaseOfImage, ihm.ModuleName, module->into);
+						return (HMODULE) module->intoAddr;
+					}
+				}
+			}
+		}
+	}
+	DebugPrint("FATAL ERROR: Failed to walk up the stack of the caller!\n");
+	abort();
+	return (HMODULE) 0;
+}
+#pragma optimize("g", on)
+static void *sysmallocX(size_t size)
+{
+	return ((void * (*)(size_t))GetProcAddress(FindMSVCRTForCaller(), "malloc"))(size);
+}
+static void *syscallocX(size_t no, size_t size)
+{
+	return ((void * (*)(size_t, size_t))GetProcAddress(FindMSVCRTForCaller(), "calloc"))(no, size);
+}
+static void *sysreallocX(void *ptr, size_t size)
+{
+	return ((void * (*)(void *, size_t))GetProcAddress(FindMSVCRTForCaller(), "realloc"))(ptr, size);
+}
+static void sysfreeX(void *ptr)
+{
+	((void   (*)(void *))GetProcAddress(FindMSVCRTForCaller(), "free"))(ptr);
+}
+static size_t sysblksizeX(void *ptr)
+{
+	return ((size_t (*)(void *))GetProcAddress(FindMSVCRTForCaller(), "_msize"))(ptr);
+}
+#endif
 int PatchInNedmallocDLL(void) THROWSPEC
 {
+	static int UsingReleaseMSVCRT, UsingDebugMSVCRT;
 	Status ret={SUCCESS};
+	if(!UsingReleaseMSVCRT && !UsingDebugMSVCRT)
+	{
+		sysmalloc=sysmallocX;
+		syscalloc=syscallocX;
+		sysrealloc=sysreallocX;
+		sysfree=sysfreeX;
+		sysblksize=sysblksizeX;
+	}
 	ret=WinPatcher(nedmallocpatchtable, 1, &UsingReleaseMSVCRT, &UsingDebugMSVCRT);
 #if defined(_DEBUG)
 	DebugPrint("Winpatcher: UsingReleaseMSVCRT=%d, UsingDebugMSVCRT=%d\n", UsingReleaseMSVCRT, UsingDebugMSVCRT);
@@ -770,16 +975,10 @@ BOOL WINAPI _CRT_INIT(
 whereby it inserts a security cookie check before we've initialised support for it, thus
 provoking a failure */
 static PVOID ProcessExceptionHandlerH;
-#ifdef NEDMALLOC_H
-extern void *(*sysmalloc)(size_t);
-extern void *(*syscalloc)(size_t, size_t);
-extern void *(*sysrealloc)(void *, size_t);
-extern void (*sysfree)(void *);
-extern size_t (*sysblksize)(void *);
-#endif
 static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWORD dllcode, LPVOID *isTheDynamicLinker)
 {
 	BOOL ret=TRUE;
+	if(!MyModuleBase) MyModuleBase=myModuleBase;
 	if(DLL_PROCESS_ATTACH==dllcode)
 	{
 #ifdef REPLACE_SYSTEM_ALLOCATOR
@@ -824,32 +1023,6 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 #ifdef REPLACE_SYSTEM_ALLOCATOR
 		if(!PatchInNedmallocDLL())
 			return FALSE;
-		if(UsingReleaseMSVCRT || UsingDebugMSVCRT)
-		{
-			ModuleListItem *module;
-			for(module=modules; module->into && (HMODULE)(size_t)-1==module->intoAddr; module++);
-			if(!module->into)
-			{
-				MessageBox(NULL, __T("Can't find a valid MSVCRT - perhaps this process was built with too new a MSVC?"), __T("Fatal Error"), MB_OK);
-				abort();
-			}
-#if defined(_DEBUG)
-			DebugPrint("Winpatcher: Determined that the process is linked against %s (%p)\n", module->into, module->intoAddr);
-#endif
-#ifdef NEDMALLOC_H
-			sysmalloc =(void * (*)(size_t))GetProcAddress(module->intoAddr, "malloc");
-			syscalloc =(void * (*)(size_t, size_t))GetProcAddress(module->intoAddr, "calloc");
-			sysrealloc=(void * (*)(void *, size_t))GetProcAddress(module->intoAddr, "realloc");
-			sysfree   =(void   (*)(void *))GetProcAddress(module->intoAddr, "free");
-			sysblksize=(size_t (*)(void *))GetProcAddress(module->intoAddr, "_msize");
-#ifndef _DEBUG
-			if(UsingReleaseMSVCRT && UsingDebugMSVCRT)
-				MessageBox(NULL, __T("nedmalloc: This process appears to be simultaneously using both the debug and release variants of the\n")
-								 __T("run-time C library which means that there are mutually incompatible CRT heaps in use. This is probably\n")
-								 __T("a bad idea and you should fix it for reliable operation"), __T("Warning:"), MB_OK);
-#endif
-#endif
-		}
 #endif
 	}
 	/* Invoke the CRT's handler which does atexit() etc */
@@ -870,7 +1043,6 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 	}
 	else if(DLL_PROCESS_DETACH==dllcode)
 	{
-#ifdef REPLACE_SYSTEM_ALLOCATOR
 #ifdef NEDMALLOC_H
 		nedpool **pools=nedpoollist();
 #if defined(_DEBUG)
@@ -892,7 +1064,6 @@ static __declspec(noinline) BOOL DllPreMainCRTStartup2(HMODULE myModuleBase, DWO
 #if 0
 		if(!RemoveVectoredExceptionHandler(ProcessExceptionHandlerH))
 			return FALSE;
-#endif
 #endif
 #endif
 	}
