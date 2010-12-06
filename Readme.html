@@ -316,9 +316,10 @@ thanks to work generously sponsored by
 	Microsoft&#39;s Detours</a> to run any arbitrary application using nedalloc instead 
 	of the system allocator:</p>
 	<code>withdll /d:nedmalloc.dll program.exe</code>
-	<p>For those not able to use Microsoft Detours, there is an enclosed nedmalloc_loader 
-	program which does one variant of the same thing. It may or may not be useful 
-	to you - it is not intended to be maintained.</p>
+	<p>For those not able to use Microsoft Detours, there is an enclosed 
+	unsupported/nedmalloc_loader program which does one variant of the same 
+	thing. It may or may not be useful to you - it is not intended to be 
+	maintained, and it probably doesn&#39;t work on newer systems.</p>
 	<p>The reason that only the release MSVCRT not the debug MSVCRTD is patched 
 	is twofold: (i) usually one <em>wants</em> the debug heap in debug builds so 
 	it does memory corruption checking and reports memory leaks and (ii) the 
@@ -326,8 +327,7 @@ thanks to work generously sponsored by
 	different implementation based on the Windows kernel HeapAlloc() function 
 	and it does a lot of hoop jumping to handle mismatching CRT versions and 
 	lots of other stuff. You can enable patching of the debug memory allocation 
-	functions in winpatcher.c, but you may find all sorts of weird issues if 
-	your process loads a lot of DLLs built by differing versions of MSVC.</p>
+	functions in winpatcher.c by uncommenting the relevant lines.</p>
 	</dd>
 	<dt>User mode page allocation</dt>
 	<dd>The

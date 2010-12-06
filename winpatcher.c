@@ -793,7 +793,7 @@ static DWORD64 __stdcall GetModBase(HANDLE hProcess, DWORD64 dwAddr) THROWSPEC
 	}
 	return 0;
 }
-static HMODULE FindMSVCRTForCaller(void)
+static HMODULE DoFindMSVCRTForCaller(void)
 {
 	int i;
 	HANDLE mythread=(HANDLE) GetCurrentThread();
@@ -883,6 +883,26 @@ static HMODULE FindMSVCRTForCaller(void)
 	return (HMODULE) 0;
 }
 #pragma optimize("g", on)
+static HMODULE FindMSVCRTForCaller(void)
+{
+	/* If there is only one MSVCRT in this process, call that directly. Else do a stack backtrace to
+	find the MSVCRT we ought to use. */
+	ModuleListItem *module;
+	HMODULE ret=0;
+	for(module=modules; module->into; module++)
+	{
+		if(module->intoAddr)
+		{
+			if(ret) /* We have more than one MSVCRT, so search */
+				return DoFindMSVCRTForCaller();
+			ret=module->intoAddr;
+		}
+	}
+	if(ret) return ret;
+	DebugPrint("FATAL ERROR: Failed to find any patched MSVCRT at all!\n");
+	abort();
+	return (HMODULE) 0;
+}
 static void *sysmallocX(size_t size)
 {
 	return ((void * (*)(size_t))GetProcAddress(FindMSVCRTForCaller(), "malloc"))(size);
@@ -908,6 +928,7 @@ int PatchInNedmallocDLL(void) THROWSPEC
 {
 	static int UsingReleaseMSVCRT, UsingDebugMSVCRT;
 	Status ret={SUCCESS};
+#ifdef NEDMALLOC_H
 	if(!UsingReleaseMSVCRT && !UsingDebugMSVCRT)
 	{
 		sysmalloc=sysmallocX;
@@ -916,6 +937,7 @@ int PatchInNedmallocDLL(void) THROWSPEC
 		sysfree=sysfreeX;
 		sysblksize=sysblksizeX;
 	}
+#endif
 	ret=WinPatcher(nedmallocpatchtable, 1, &UsingReleaseMSVCRT, &UsingDebugMSVCRT);
 #if defined(_DEBUG)
 	DebugPrint("Winpatcher: UsingReleaseMSVCRT=%d, UsingDebugMSVCRT=%d\n", UsingReleaseMSVCRT, UsingDebugMSVCRT);
