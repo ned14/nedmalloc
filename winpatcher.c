@@ -672,7 +672,7 @@ static SIZE_T WINAPI VirtualQuery_winpatcher(LPVOID lpAddress, PMEMORY_BASIC_INF
 */
 static ModuleListItem modules[]={
 	/* NOTE: Keep these release/debug format as this is used above! */
-#if 1
+#if 0
 	/* Release and Debug MSVC6 CRTs */
 	{ "MSVCRT.DLL", 0, 0 }, { "MSVCRTD.DLL", 0, 0 },
 #endif
