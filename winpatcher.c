@@ -27,7 +27,9 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 */
 
+/*#define _DEBUG
 #define USE_DEBUGGER_OUTPUT
+#pragma optimize("g", off)*/
 
 #ifdef NEDMALLOC_DLL_EXPORTS /* Building patcher with nedmalloc */
 #include "nedmalloc.h"
@@ -317,8 +319,8 @@ static Status ModifyModuleImportTableForI(HMODULE moduleBase, const char *import
 	for (; desc->Name; desc++) {
 		PSTR modname = (PSTR)((PBYTE) moduleBase + desc->Name);
 		int modnamecmp = lstrcmpiA(modname, importModuleName);
-		if (modnamecmp>0) 
-			break;
+		/*if (modnamecmp>0) 
+			break;*/
 		if (0==modnamecmp) {
 			/* Get the import address table (IAT) for the functions imported from our wanted module */
 			thunk = (PIMAGE_THUNK_DATA)((PBYTE) moduleBase + desc->FirstThunk);
@@ -891,7 +893,7 @@ static HMODULE FindMSVCRTForCaller(void)
 	HMODULE ret=0;
 	for(module=modules; module->into; module++)
 	{
-		if(module->intoAddr)
+		if(module->intoAddr && (void *)-1!=module->intoAddr)
 		{
 			if(ret) /* We have more than one MSVCRT, so search */
 				return DoFindMSVCRTForCaller();
