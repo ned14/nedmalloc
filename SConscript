@@ -60,7 +60,8 @@ if sys.platform=='win32':
 else:
     env['LIBS']+=["rt"]
     env['CPPDEFINES']+=[]
-    env['CCFLAGS']+=["-Wall"]
+    env['CCFLAGS']+=["-fstrict-aliasing", "-fargument-noalias", "-Wstrict-aliasing"]
+    env['CCFLAGS']+=["-Wall", "-Wno-unused"]
     env['CXXFLAGS']+=["-std=c++0x"]
     if debugbuild:
         env['CCFLAGS']+=["-O0", "-g"]
@@ -107,21 +108,21 @@ if True and sys.platform=='win32':
 sources = [ "test.c" ]
 objects = env.Object("test_c", source = sources) # + [nedmallocliblib]
 testlibs=[nedmallocliblib]
-testprogram_c = env.Program("test_c", source = objects, LINKFLAGS=env['LINKFLAGSEXE'], LIBS = testlibs)
+testprogram_c = env.Program("test_c", source = objects, LINKFLAGS=env['LINKFLAGSEXE'], LIBS = env['LIBS'] + testlibs)
 outputs['testprogram_c']=(testprogram_c, sources)
 
 # C++ test program
 sources = [ "test.cpp" ]
 objects = env.Object("test_cpp", source = sources) # + [nedmallocliblib]
 testlibs=[nedmallocliblib]
-testprogram_cpp = env.Program("test_cpp", source = objects, LINKFLAGS=env['LINKFLAGSEXE'], LIBS = testlibs)
+testprogram_cpp = env.Program("test_cpp", source = objects, LINKFLAGS=env['LINKFLAGSEXE'], LIBS = env['LIBS'] + testlibs)
 outputs['testprogram_cpp']=(testprogram_cpp, sources)
 
 # PGO program
 sources = [ "make_pgos.c" ]
 objects = env.Object(source = sources) # + [nedmallocliblib]
 testlibs=[nedmallocliblib]
-make_pgos = env.Program("make_pgos", source = objects, LINKFLAGS=env['LINKFLAGSEXE'], LIBS = testlibs)
+make_pgos = env.Program("make_pgos", source = objects, LINKFLAGS=env['LINKFLAGSEXE'], LIBS = env['LIBS'] + testlibs)
 outputs['make_pgos']=(make_pgos, sources)
 
 # Scaling program

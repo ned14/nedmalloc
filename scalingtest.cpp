@@ -135,15 +135,15 @@ int main(void)
 {
 	using namespace std;
 	printf("What would you like to test?\n");
-	for(int n=0; n<sizeof(allocators)/sizeof(Allocator); n++)
+	for(unsigned n=0; n<sizeof(allocators)/sizeof(Allocator); n++)
 	{
-		printf("   %d. %s\n", n+1, allocators[n].name);
+		printf("   %u. %s\n", n+1, allocators[n].name);
 	}
-	int allocatoridx=getchar()-'1';
+	unsigned allocatoridx=getchar()-'1';
 	if(allocatoridx<0 || allocatoridx>sizeof(allocators)/sizeof(Allocator)) return 1;
 	Allocator &allocator=allocators[allocatoridx];
 	allocator.minsizeshift=allocator.minsize ? nedtriebitscanr(allocator.minsize) : (allocator.minsize=1<<3, 3);
-	printf("\nYou chose allocator %d (%s) with minsizeshift=%lu\n", allocatoridx+1, allocator.name, (unsigned long) allocator.minsizeshift);
+	printf("\nYou chose allocator %u (%s) with minsizeshift=%lu\n", allocatoridx+1, allocator.name, (unsigned long) allocator.minsizeshift);
 	//if(allocator.malloc==&userpagemalloc_wrapper)
 	{
 		//printf("Preallocating user mode page allocator memory ... \n");

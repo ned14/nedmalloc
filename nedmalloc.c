@@ -49,6 +49,8 @@ DEALINGS IN THE SOFTWARE.
 #ifndef UNICODE
 #define UNICODE					/* Turn on windows unicode support */
 #endif
+#else
+#include <stdio.h>
 #endif
 
 /*#define NEDMALLOC_DEBUG 1*/
@@ -104,6 +106,13 @@ size_t malloc_usable_size(void *);
  #endif
 #endif
 /* We need to consistently define DEBUG=0|1, _DEBUG and NDEBUG for dlmalloc */
+#if !defined(DEBUG) && !defined(NDEBUG)
+ #ifdef __GNUC__
+  #warning DEBUG may not be defined but without NDEBUG being defined allocator will run with assert checking! Define NDEBUG to run at full speed.
+ #elif defined(_MSC_VER)
+  #pragma message(__FILE__ ": WARNING: DEBUG may not be defined but without NDEBUG being defined allocator will run with assert checking! Define NDEBUG to run at full speed.")
+ #endif
+#endif
 #undef DEBUG
 #undef _DEBUG
 #if NEDMALLOC_DEBUG
@@ -153,12 +162,6 @@ extern void *userpage_realloc(void *mem, size_t oldsize, size_t newsize, int fla
 #include "malloc.c.h"
 #ifdef NDEBUG               /* Disable assert checking on release builds */
  #undef DEBUG
-#elif !NEDMALLOC_DEBUG
- #ifdef __GNUC__
-  #warning DEBUG is defined so allocator will run with assert checking! Define NDEBUG to run at full speed.
- #elif defined(_MSC_VER)
-  #pragma message(__FILE__ ": WARNING: DEBUG is defined so allocator will run with assert checking! Define NDEBUG to run at full speed.")
- #endif
 #endif
 
 /* The default number of threads allowed into a pool at once */
