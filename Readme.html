@@ -487,7 +487,7 @@ now tends to be worth it in the long run.</p>
 	not. Now when nedmalloc passes a foreign block to the system allocator, it runs 
 	a stack backtrace to figure out what MSVCRT in the process it ought to pass 
 	it to. It&#39;s slow, but fixes a very common segfault on process exit on VS2010.</li>
-	<li><span class="gitcommit">[master xxxxxxx]</span> Very embarrassingly, nedmalloc 
+	<li><span class="gitcommit">[master 4cca52c]</span> Very embarrassingly, nedmalloc 
 	has been severely but unpredictably broken on POSIX for over a year now when built with DEBUG defined. 
 	This was turning on DEFAULT_GRANULARITY_ALIGNED whose POSIX implementation 
 	was causing random segfaults so mysterious that neither gdb nor valgrind 
@@ -501,6 +501,14 @@ now tends to be worth it in the long run.</p>
 	do with DEBUG being defined or not, then two hours ago the eureka moment 
 	arrived and I quite literally did a jig around the room in joy. Problem is 
 	now fixed thank the heavens!!!</li>
+	<li><span class="gitcommit">[master 3d55a01]</span> Fixed a problem where the
+	binary patcher was early outing too soon and therefore failing to patch all
+	the binaries properly. It would seem that the Microsoft linker doesn't sort
+	the import table like I had thought it did - I would guess it sorts per DLL
+	location, otherwise is unsorted. Thanks to Roman Tatkin for reporting this bug.</li>
+	<li><span class="gitcommit">[master xxxxxxx]</span> Added override of _GNU_SOURCE
+	for when HAVE_MREMAP is auto-detected. Thanks to Maxim Zakharov for reporting
+	this issue.</li>
 </ul>
 <h3>v1.06 beta 2 21st March 2010:</h3>
 <ul>
