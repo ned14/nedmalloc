@@ -47,7 +47,7 @@ dt + dd {
 <body>
 
 <div style="text-align: center">
-	<h1 style="text-decoration: underline">nedalloc v1.10 ?</h1>
+	<h1 style="text-decoration: underline">nedalloc v1.10 beta 1</h1>
 	<h2 style="text-decoration: none;">by Niall Douglas</h2>
 	<p>Web site: <a href="http://www.nedprod.com/programs/portable/nedmalloc/">http://www.nedprod.com/programs/portable/nedmalloc/</a></p>
 	<hr /></div>
@@ -67,8 +67,15 @@ later only). It has the following features:</p>
 	Requires Windows Vista or later only, and requires Administrator privileges 
 	as well as either UAC disabled or a UAC prompt at the start of each program 
 	run.</li>
+    <li>A malloc v2 API which enables considerable improvements in efficiency by
+    allowing client code to better inform the allocator on what (not) to do. <strong>[Note that
+    due to progress on <a href="http://www.open-std.org/jtc1/sc22/wg14/www/docs/n1527.pdf">developing a new malloc API at the ISO C1X standards committee</a>, this malloc
+    v2 API as well as most of the rest of nedmalloc's API is being completely retired and replaced
+    with the new proposed API for the C programming language. I intend this for v1.10 beta 2. The
+    malloc2/realloc2 APIs are disappearing completely, whereas I'll provide wrappers for the pool
+    APIs]</strong></li>
 	<li>An enhanced C++ STL allocator implementation to enable super-fast std::vector&lt;&gt;
-	<strong>[in progress]</strong></li>
+	<strong>[mostly finished, waiting on ISO C1X standard developments]</strong></li>
 </ol>
 <p>It is licensed under the
 <a href="http://www.boost.org/LICENSE_1_0.txt" target="_blank">Boost Software License</a> 
@@ -159,6 +166,7 @@ very, very slow.</p>
 the improvements to the C++ memory infrastructure alone can generate huge performance 
 gains.</p>
 <h3><a name="v2mallocAPI">A2: The v2 malloc C API:</a></h3>
+<p><strong>[Note: This API will be completely replaced in v1.10 beta 2]</strong></p>
 <p>For the v1.10 release which was generously sponsored by
 <a href="http://www.ara.com/" target="_blank">Applied Research Associates (USA)</a>, 
 a new general purpose allocator API was designed which is intended to remedy many 
@@ -334,9 +342,12 @@ thanks to work generously sponsored by
 	gives processes running on the user mode page allocator an <strong>unholy</strong> 
 	speed increase which gets exponentially better the larger the data set.<br />
 	<br />
-	There is an academic paper describing this technique and this implementation 
-	forthcoming at the 2011 International Symposium on Memory Management. A link 
-	to it will be added once the paper has passed peer review.</dd>
+    Want to know more in lots of detail? Here are two academic papers on the topic:
+    <ol>
+      <li>Douglas, N, (2011-May), '<a href="http://arxiv.org/abs/1105.1815">User Mode Memory Page Management: An old idea applied anew to the memory wall problem</a>', ArXiv e-prints, vol: 1105.1815.</li>
+      <li>Douglas, N, (2011-May), '<a href="http://arxiv.org/abs/1105.1811">User Mode Memory Page Allocation: A Silver Bullet For Memory Allocation?</a>', ArXiv e-prints, vol: 1105.1811.</li>
+    </ol>
+  </dd>
 </dl>
 <h2><a name="speedcomparisons">C. Speed comparisons:</a></h2>
 <p>See Benchmarks.xls for details.</p>
@@ -436,7 +447,7 @@ process improved performance <strong>threefold</strong> which saved an expensive
 hardware upgrade and deployment. The conclusion can only be that fixing memory bugs 
 now tends to be worth it in the long run.</p>
 <h2><a name="changelog">E. ChangeLog:</a></h2>
-<h3>v1.10 beta 1 ?:</h3>
+<h3>v1.10 beta 1 19th May 2011:</h3>
 <ul>
 	<li><span class="gitcommit">[master 89f1806]</span> Moved from SVN to GIT. Bumped 
 	version to v1.10 as new ARA contract will involve significant further improvements 
@@ -506,9 +517,11 @@ now tends to be worth it in the long run.</p>
 	the binaries properly. It would seem that the Microsoft linker doesn't sort
 	the import table like I had thought it did - I would guess it sorts per DLL
 	location, otherwise is unsorted. Thanks to Roman Tatkin for reporting this bug.</li>
-	<li><span class="gitcommit">[master xxxxxxx]</span> Added override of _GNU_SOURCE
+	<li><span class="gitcommit">[master 6c74071]</span> Added override of _GNU_SOURCE
 	for when HAVE_MREMAP is auto-detected. Thanks to Maxim Zakharov for reporting
 	this issue.</li>
+	<li><span class="gitcommit">[master xxxxxxx]</span> Marked off the v2 malloc API
+    as deprecated in preparation for beta release. Updated CHM documentation.</li>
 </ul>
 <h3>v1.06 beta 2 21st March 2010:</h3>
 <ul>

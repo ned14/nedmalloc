@@ -133,6 +133,19 @@ nedmalloc.dll.
  #endif
 #endif
 
+/*! \def NEDMALLOCDEPRECATED
+\brief Defined to mark an API as deprecated */
+#ifndef NEDMALLOCDEPRECATED
+#if defined(_MSC_VER) && !defined(__GCCXML__)
+ #define NEDMALLOCDEPRECATED __declspec(deprecated)
+#elif defined(__GNUC__) && !defined(__GCCXML__)
+ #define NEDMALLOCDEPRECATED __attribute ((deprecated))
+#else
+//! Marks a function as being deprecated
+ #define NEDMALLOCDEPRECATED
+#endif
+#endif
+
 /*! \def RESTRICT
 \brief Defined to the restrict keyword or equivalent if available */
 #ifndef RESTRICT
@@ -295,6 +308,9 @@ extern "C" {
 /* These are the global functions */
 
 /*! \defgroup v2malloc The v2 malloc API
+
+\warning This API is being completely retired in v1.10 beta 2 and replaced with the API
+being developed for inclusion into the C1X programming language standard
 
 For the v1.10 release which was generously sponsored by
 <a href="http://www.ara.com/" target="_blank">Applied Research Associates (USA)</a>, 
@@ -460,17 +476,17 @@ NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmemalign(size_t
 #if defined(__cplusplus)
 /*! \ingroup v2malloc
 \brief Equivalent to nedpmalloc2((nedpool *) 0, size, alignment, flags) */
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
 /*! \ingroup v2malloc
 \brief Equivalent to nedprealloc2((nedpool *) 0, mem, size, alignment, flags) */
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
 /*! \ingroup v2malloc
 \brief Equivalent to nedpfree2((nedpool *) 0, mem, flags) */
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void nedfree2(void *mem, unsigned flags=0) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void nedfree2(void *mem, unsigned flags=0) THROWSPEC;
 #else
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment, unsigned flags) THROWSPEC;
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC;
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void nedfree2(void *mem, unsigned flags) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedmalloc2(size_t size, size_t alignment, unsigned flags) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedrealloc2(void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void nedfree2(void *mem, unsigned flags) THROWSPEC;
 #endif
 
 /*! \brief Equivalent to nedpmallinfo((nedpool *) 0) */
@@ -579,17 +595,17 @@ NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmemalign(nedpo
 /*! \ingroup v2malloc
 \brief Allocates a block of memory sized \em size from pool \em p, aligned to \em alignment and according to the flags \em flags.
 */
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpool *p, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpool *p, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
 /*! \ingroup v2malloc
 \brief Resizes the block of memory at \em mem in pool \em p to size \em size, aligned to \em alignment and according to the flags \em flags.
 */
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
 /*! \brief Frees the block \em mem from the pool \em p according to flags \em flags. */
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedpfree2(nedpool *p, void *mem, unsigned flags=0) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedpfree2(nedpool *p, void *mem, unsigned flags=0) THROWSPEC NEDMALLOCDEPRECATED;
 #else
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpool *p, size_t size, size_t alignment, unsigned flags) THROWSPEC;
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC;
-NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedpfree2(nedpool *p, void *mem, unsigned flags) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpool *p, size_t size, size_t alignment, unsigned flags) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedpfree2(nedpool *p, void *mem, unsigned flags) THROWSPEC;
 #endif
 /*! \brief Returns information about the memory pool */
 NEDMALLOCEXTSPEC struct nedmallinfo nedpmallinfo(nedpool *p) THROWSPEC;
