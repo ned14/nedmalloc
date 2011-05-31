@@ -601,7 +601,7 @@ NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void 
 */
 NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment=0, unsigned flags=0) THROWSPEC;
 /*! \brief Frees the block \em mem from the pool \em p according to flags \em flags. */
-NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedpfree2(nedpool *p, void *mem, unsigned flags=0) THROWSPEC NEDMALLOCDEPRECATED;
+NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR void   nedpfree2(nedpool *p, void *mem, unsigned flags=0) THROWSPEC;
 #else
 NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc2(nedpool *p, size_t size, size_t alignment, unsigned flags) THROWSPEC;
 NEDMALLOCDEPRECATED NEDMALLOCEXTSPEC NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc2(nedpool *p, void *mem, size_t size, size_t alignment, unsigned flags) THROWSPEC;
