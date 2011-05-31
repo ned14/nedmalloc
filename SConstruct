@@ -73,6 +73,47 @@ if sys.platform=="win32":
     env['ENV']['INCLUDE']=os.environ['INCLUDE']
     env['ENV']['LIB']=os.environ['LIB']
     env['ENV']['PATH']=os.environ['PATH']
+else:
+    # Test the build environment
+    def CheckGCCHasVisibility(cc):
+        cc.Message("Checking for GCC global symbol visibility support...")
+        try:
+            temp=cc.env['CPPFLAGS']
+        except:
+            temp=[]
+        cc.env['CPPFLAGS']=temp+["-fvisibility=hidden"]
+        result=cc.TryCompile('struct __attribute__ ((visibility("default"))) Foo { int foo; };\nint main(void) { Foo foo; return 0; }\n', '.cpp')
+        cc.env['CPPFLAGS']=temp
+        cc.Result(result)
+        return result
+    def CheckGCCHasCPP0xFeatures(cc):
+        cc.Message("Checking if GCC can enable C++0x features ...")
+        try:
+            temp=cc.env['CPPFLAGS']
+        except:
+            temp=[]
+        cc.env['CPPFLAGS']=temp+["-std=c++0x"]
+        result=cc.TryCompile('struct Foo { static const int gee=5; Foo(const char *) { } Foo(Foo &&a) { } };\nint main(void) { Foo foo(__func__); static_assert(Foo::gee==5, "Death!"); return 0; }\n', '.cpp')
+        cc.env['CPPFLAGS']=temp
+        cc.Result(result)
+        return result
+    conf=Configure(env, { "CheckGCCHasVisibility" : CheckGCCHasVisibility, "CheckGCCHasCPP0xFeatures" : CheckGCCHasCPP0xFeatures } )
+    assert conf.CheckCHeader("pthread.h")
+    if not conf.CheckLib("rt", "clock_gettime") and not conf.CheckLib("c", "clock_gettime"):
+        print "WARNING: Can't find clock_gettime() in librt or libc, code may not fully compile if your system headers say that this function is available"
+    if conf.CheckGCCHasVisibility():
+        env['CPPFLAGS']+=["-fvisibility=hidden"]        # All symbols are hidden unless marked otherwise
+        env['CXXFLAGS']+=["-fvisibility-inlines-hidden" # All inlines are always hidden
+                             ]
+    else:
+        print "Disabling -fvisibility support"
+
+    if conf.CheckGCCHasCPP0xFeatures():
+        env['CXXFLAGS']+=["-std=c++0x"]
+    else:
+        print "Disabling C++0x support"
+
+    env=conf.Finish()
 
 # Build
 nedmalloclib=None

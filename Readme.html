@@ -447,6 +447,13 @@ process improved performance <strong>threefold</strong> which saved an expensive
 hardware upgrade and deployment. The conclusion can only be that fixing memory bugs 
 now tends to be worth it in the long run.</p>
 <h2><a name="changelog">E. ChangeLog:</a></h2>
+<h3>v1.10 beta 2 ?:</h3>
+<ul>
+	<li><span class="gitcommit">[master xxxxxxx]</span> scons now tests for C++0x
+	support before turning it on and tries multiple libraries for clock_gettime()
+	rather than assuming it lives in librt. This ought to fix miscompilation on
+	Mac OS X. Thanks to Robert D. Blanchet Jr. for reporting this.</li>
+</ul>
 <h3>v1.10 beta 1 19th May 2011:</h3>
 <ul>
 	<li><span class="gitcommit">[master 89f1806]</span> Moved from SVN to GIT. Bumped 

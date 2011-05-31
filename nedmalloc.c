@@ -79,16 +79,22 @@ DEALINGS IN THE SOFTWARE.
 #include <errno.h>
 #if defined(WIN32)
  #include <malloc.h>
-#endif
-#ifdef __linux__
-/* Sadly we can't include <malloc.h> as it causes a redefinition error */
+#else
 #if defined(__cplusplus)
 extern "C"
 #else
 extern
 #endif
+#if defined(__linux__) || defined(__FreeBSD__)
+/* Sadly we can't include <malloc.h> as it causes a redefinition error */
 size_t malloc_usable_size(void *);
+#elif defined(__APPLE__)
+size_t malloc_size(void *ptr);
+#else
+#error Do not know what to do here
 #endif
+#endif
+
 #if USE_ALLOCATOR==1
  #define MSPACES 1
  #define ONLY_MSPACES 1
@@ -298,11 +304,11 @@ size_t (*sysblksize)(void *)=
 #if defined(_MSC_VER) || defined(__MINGW32__)
 	/* This is the MSVCRT equivalent */
 	_msize;
-#elif defined(__linux__)
-	/* This is the glibc/ptmalloc2/dlmalloc equivalent.  */
+#elif defined(__linux__) || defined(__FreeBSD__)
+	/* This is the glibc/ptmalloc2/dlmalloc/BSD equivalent.  */
 	malloc_usable_size;
-#elif defined(__FreeBSD__) || defined(__APPLE__)
-	/* This is the BSD libc equivalent.  */
+#elif defined(__APPLE__)
+	/* This is the Apple BSD libc equivalent.  */
 	malloc_size;
 #else
 #error Cannot tolerate the memory allocator of an unknown system!

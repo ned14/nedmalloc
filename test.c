@@ -141,7 +141,19 @@ static void (*const frees[])(void *mem)={ free, nedfree, win32free };
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
-#include <malloc.h>
+#if defined(__cplusplus)
+extern "C"
+#else
+extern
+#endif
+#if defined(__linux__) || defined(__FreeBSD__)
+/* Sadly we can't include <malloc.h> as it causes a redefinition error */
+size_t malloc_usable_size(void *);
+#elif defined(__APPLE__)
+size_t malloc_size(void *ptr);
+#else
+#error Do not know what to do here
+#endif
 static void *_threadcode(void *a)
 {
 	threadcode((int)(size_t) a);
@@ -168,7 +180,13 @@ static FORCEINLINE usCount GetUsCount()
 
 static void *(*const mallocs[])(size_t size)={ malloc, nedmalloc };
 static void *(*const reallocs[])(void *p, size_t size)={ realloc, nedrealloc };
-static size_t (*const memsizes[])(void *p)={ malloc_usable_size, nedmemsize };
+static size_t (*const memsizes[])(void *p)={
+#if defined(__linux__) || defined(__FreeBSD__)
+malloc_usable_size,
+#elif defined(__APPLE__)
+malloc_size,
+#endif
+nedmemsize };
 static void (*const frees[])(void *mem)={ free, nedfree };
 #endif
 static usCount times[THREADS];
