@@ -150,7 +150,7 @@ extern
 /* Sadly we can't include <malloc.h> as it causes a redefinition error */
 size_t malloc_usable_size(void *);
 #elif defined(__APPLE__)
-size_t malloc_size(void *ptr);
+size_t malloc_size(const void *ptr);
 #else
 #error Do not know what to do here
 #endif
