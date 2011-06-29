@@ -58,11 +58,9 @@ if sys.platform=='win32':
             else:
                 env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
 else:
-    env['LIBS']+=["rt"]
     env['CPPDEFINES']+=[]
     env['CCFLAGS']+=["-fstrict-aliasing", "-fargument-noalias", "-Wstrict-aliasing"]
     env['CCFLAGS']+=["-Wall", "-Wno-unused"]
-    env['CXXFLAGS']+=["-std=c++0x"]
     if debugbuild:
         env['CCFLAGS']+=["-O0", "-g"]
     else:
