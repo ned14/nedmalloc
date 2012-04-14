@@ -328,7 +328,11 @@ static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallMalloc(void *
 #if USE_MAGIC_HEADERS
 	size_t _alignment=alignment;
 	size_t *_ret=0;
-	size+=alignment+3*sizeof(size_t);
+	size_t bytes=size+alignment+3*sizeof(size_t);
+	/* Avoid addition overflow. */
+	if(bytes<size)
+		return 0;
+	size=bytes;
 	_alignment=0;
 #endif
 #if USE_ALLOCATOR==0
