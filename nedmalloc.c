@@ -534,8 +534,6 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 #ifdef WIN32
 #ifdef _MSC_VER
 		__try
-#elif defined(__MINGW32__)
-		__try1
 #endif
 #endif
 		{
@@ -584,9 +582,6 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 #ifdef WIN32
 #ifdef _MSC_VER
 		__except(1) { }
-#elif defined(__MINGW32__)
-		__except1(1) { }
-#endif
 #endif
 #endif
 #endif

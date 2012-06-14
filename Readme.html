@@ -449,10 +449,20 @@ now tends to be worth it in the long run.</p>
 <h2><a name="changelog">E. ChangeLog:</a></h2>
 <h3>v1.10 beta 2 ?:</h3>
 <ul>
-	<li><span class="gitcommit">[master xxxxxxx]</span> scons now tests for C++0x
+	<li><span class="gitcommit">[master 51ab2a2]</span> scons now tests for C++0x
 	support before turning it on and tries multiple libraries for clock_gettime()
 	rather than assuming it lives in librt. This ought to fix miscompilation on
 	Mac OS X. Thanks to Robert D. Blanchet Jr. for reporting this.</li>
+	<li><span class="gitcommit">[master b2c3517]</span> Mac defines malloc_size
+    to be const void *ptr, not void *ptr</li>
+	<li><span class="gitcommit">[master 9333e50]</span> Updated to use the new
+    O(1) Cfind(rounds=1) feature in nedtries</li>
+	<li><span class="gitcommit">[master 54c7e44]</span> Avoid overflowing allocation
+    size. Thanks to Xi Wang for supplying a patch fixing this.</li>
+	<li><span class="gitcommit">[master xxxxxxx]</span> Removed __try1 and __finally1
+    from MinGW support as x64 target no longer supports SEH. Thanks to Geri for
+    reporting this.</li>
+</li>
 </ul>
 <h3>v1.10 beta 1 19th May 2011:</h3>
 <ul>
