@@ -534,7 +534,13 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 #ifdef WIN32
 #ifdef _MSC_VER
 		__try
+#else
+#if ENABLE_TOLERANT_NEDMALLOC
+#error Lack of SEH support makes nedmalloc unreliable with foreign memory blocks. Make sure ENABLE_TOLERANT_NEDMALLOC is turned off!
 #endif
+#endif
+#elif ENABLE_TOLERANT_NEDMALLOC
+#warning nedmalloc is unreliable with foreign memory blocks, so make sure you really want ENABLE_TOLERANT_NEDMALLOC turned on!
 #endif
 		{
 			/* We try to return zero here if it isn't one of our own blocks, however
