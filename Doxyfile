@@ -31,7 +31,7 @@ PROJECT_NAME           = nedalloc
 # This could be handy for archiving the generated documentation or
 # if some version control system is used.
 
-PROJECT_NUMBER         = v1.10
+PROJECT_NUMBER         = v1.10 beta 2 (10th July 2012)
 
 # The OUTPUT_DIRECTORY tag is used to specify the (relative or absolute)
 # base path where the generated documentation will be put.
