@@ -80,19 +80,19 @@ DEALINGS IN THE SOFTWARE.
 #if defined(WIN32)
  #include <malloc.h>
 #else
-#if defined(__cplusplus)
+ #if defined(__cplusplus)
 extern "C"
-#else
+ #else
 extern
-#endif
-#if defined(__linux__) || defined(__FreeBSD__)
+ #endif
+ #if defined(__linux__) || defined(__FreeBSD__)
 /* Sadly we can't include <malloc.h> as it causes a redefinition error */
 size_t malloc_usable_size(void *);
-#elif defined(__APPLE__)
-size_t malloc_size(const void *ptr);
-#else
-#error Do not know what to do here
-#endif
+ #elif defined(__APPLE__)
+  #include <malloc.h>
+ #else
+  #error Do not know what to do here
+ #endif
 #endif
 
 #if USE_ALLOCATOR==1
@@ -133,10 +133,10 @@ size_t malloc_size(const void *ptr);
 #endif
 /* The default of 64Kb means we spend too much time kernel-side */
 #ifndef DEFAULT_GRANULARITY
-#define DEFAULT_GRANULARITY (1*1024*1024)
-#if DEBUG
-#define DEFAULT_GRANULARITY_ALIGNED
-#endif
+ #define DEFAULT_GRANULARITY (1*1024*1024)
+ #if DEBUG
+  #define DEFAULT_GRANULARITY_ALIGNED
+ #endif
 #endif
 /*#define USE_SPIN_LOCKS 0*/
 
@@ -309,7 +309,7 @@ size_t (*sysblksize)(void *)=
 	malloc_usable_size;
 #elif defined(__APPLE__)
 	/* This is the Apple BSD libc equivalent.  */
-	malloc_size;
+	(size_t (*)(void *)) malloc_size;
 #else
 #error Cannot tolerate the memory allocator of an unknown system!
 #endif
@@ -530,7 +530,7 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 			if(ok_magic(fm))
 				return fm;
 		}
-#else
+#else /* ENABLE_FAST_HEAP_DETECTION */
 #ifdef WIN32
 #ifdef _MSC_VER
 		__try
@@ -538,7 +538,7 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 #if ENABLE_TOLERANT_NEDMALLOC
 #error Lack of SEH support makes nedmalloc unreliable with foreign memory blocks. Make sure ENABLE_TOLERANT_NEDMALLOC is turned off!
 #endif
-#endif
+#endif /* defined(_MSC_VER) */
 #elif ENABLE_TOLERANT_NEDMALLOC
 #warning nedmalloc is unreliable with foreign memory blocks, so make sure you really want ENABLE_TOLERANT_NEDMALLOC turned on!
 #endif
@@ -589,9 +589,10 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 #ifdef _MSC_VER
 		__except(1) { }
 #endif
-#endif
-#endif
-#endif
+#endif /* WIN32 */
+#endif /* ENABLE_FAST_HEAP_DETECTION */
+#endif /* USE_ALLOCATOR */
+#endif /* USE_MAGIC_HEADERS */
 	}
 	return 0;
 }
@@ -2024,10 +2025,9 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size)
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC
 {
 	size_t bytes=no*size;
-	/* Avoid multiplication overflow. */
-	if(size && no!=bytes/size)
-		return 0;
 	unsigned flags=NEDMALLOC_FORCERESERVE(p, 0, bytes);
+	/* Avoid multiplication overflow. */
+	if(size && no!=bytes/size) return 0;
 	return nedpmalloc2(p, bytes, 0, M2_ZERO_MEMORY|flags);
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC

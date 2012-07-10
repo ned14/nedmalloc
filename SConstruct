@@ -65,6 +65,7 @@ if env.GetOption('threadcachemax'):
         env['CPPDEFINES']+=[("THREADCACHEMAXBINS",maxbins)]
 if env.GetOption('threadcachemaxbins'): env['CPPDEFINES']+=[("THREADCACHEMAXBINS",env.GetOption('threadcachemaxbins'))]
 if env.GetOption('threadcachemaxfreespace'): env['CPPDEFINES']+=[("THREADCACHEMAXFREESPACE",env.GetOption('threadcachemaxfreespace'))]
+env['CPPDEFINES']+=[("NEDMALLOCDEPRECATED", "")]
 
 # Am I in a 32 or 64 bit environment? Note that not specifying --sse doesn't set any x86 or x64 specific options
 # so it's good to go for ANY platform
