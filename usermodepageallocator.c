@@ -125,7 +125,7 @@ extern void DebugPrint(const char *fmt, ...) THROWSPEC;
 #define REGION_REMOVE(treetype, treevar, node)    NEDTRIE_REMOVE(treetype, treevar, node)
 #define REGION_FIND(treetype, treevar, node)      NEDTRIE_FIND(treetype, treevar, node)
 #define REGION_EXACTFIND(treetype, treevar, node) NEDTRIE_EXACTFIND(treetype, treevar, node)
-#define REGION_NFIND(treetype, treevar, node)     NEDTRIE_NFIND(treetype, treevar, node)
+#define REGION_CFIND(treetype, treevar, node, rounds) NEDTRIE_CFIND(treetype, treevar, node, rounds)
 #define REGION_MAX(treetype, treevar)             NEDTRIE_MAX(treetype, treevar)
 #define REGION_MIN(treetype, treevar)             NEDTRIE_MIN(treetype, treevar)
 #define REGION_NEXT(treetype, treevar, node)      NEDTRIE_NEXT(treetype, treevar, node)
@@ -1930,7 +1930,7 @@ void *userpage_malloc(size_t toallocate, unsigned flags)
 #if USE_LOCKS
   ACQUIRE_LOCK(&userpagemutex);
 #endif
-  r=REGION_NFIND(regionL_tree_s, &source->regiontreeL, &node);
+  r=REGION_CFIND(regionL_tree_s, &source->regiontreeL, &node, 1);
   if(r)
   {
     size_t rlen=(size_t) r->end - (size_t) r->start;

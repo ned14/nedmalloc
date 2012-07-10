@@ -328,7 +328,11 @@ static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallMalloc(void *
 #if USE_MAGIC_HEADERS
 	size_t _alignment=alignment;
 	size_t *_ret=0;
-	size+=alignment+3*sizeof(size_t);
+	size_t bytes=size+alignment+3*sizeof(size_t);
+	/* Avoid addition overflow. */
+	if(bytes<size)
+		return 0;
+	size=bytes;
 	_alignment=0;
 #endif
 #if USE_ALLOCATOR==0
@@ -530,9 +534,13 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 #ifdef WIN32
 #ifdef _MSC_VER
 		__try
-#elif defined(__MINGW32__)
-		__try1
+#else
+#if ENABLE_TOLERANT_NEDMALLOC
+#error Lack of SEH support makes nedmalloc unreliable with foreign memory blocks. Make sure ENABLE_TOLERANT_NEDMALLOC is turned off!
 #endif
+#endif
+#elif ENABLE_TOLERANT_NEDMALLOC
+#warning nedmalloc is unreliable with foreign memory blocks, so make sure you really want ENABLE_TOLERANT_NEDMALLOC turned on!
 #endif
 		{
 			/* We try to return zero here if it isn't one of our own blocks, however
@@ -580,9 +588,6 @@ static NEDMALLOCNOALIASATTR mstate nedblkmstate(void *RESTRICT mem) THROWSPEC
 #ifdef WIN32
 #ifdef _MSC_VER
 		__except(1) { }
-#elif defined(__MINGW32__)
-		__except1(1) { }
-#endif
 #endif
 #endif
 #endif
@@ -2018,8 +2023,12 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpmalloc(nedpool *p, size_t size)
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedpcalloc(nedpool *p, size_t no, size_t size) THROWSPEC
 {
-	unsigned flags=NEDMALLOC_FORCERESERVE(p, 0, no*size);
-	return nedpmalloc2(p, size*no, 0, M2_ZERO_MEMORY|flags);
+	size_t bytes=no*size;
+	/* Avoid multiplication overflow. */
+	if(size && no!=bytes/size)
+		return 0;
+	unsigned flags=NEDMALLOC_FORCERESERVE(p, 0, bytes);
+	return nedpmalloc2(p, bytes, 0, M2_ZERO_MEMORY|flags);
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void * nedprealloc(nedpool *p, void *mem, size_t size) THROWSPEC
 {
