@@ -47,8 +47,7 @@ dt + dd {
 <body>
 
 <div style="text-align: center">
-	<h1 style="text-decoration: underline">nedalloc v1.10 beta 2 (10th July 
-	2012)</h1>
+	<h1 style="text-decoration: underline">nedalloc v1.10 beta 3 (17th July 2012)</h1>
 	<h2 style="text-decoration: none;">by Niall Douglas</h2>
 	<p>Web site: <a href="http://www.nedprod.com/programs/portable/nedmalloc/">http://www.nedprod.com/programs/portable/nedmalloc/</a></p>
 	<hr /></div>
@@ -443,6 +442,15 @@ process improved performance <strong>threefold</strong> which saved an expensive
 hardware upgrade and deployment. The conclusion can only be that fixing memory bugs 
 now tends to be worth it in the long run.</p>
 <h2><a name="changelog">E. ChangeLog:</a></h2>
+<h3>v1.10 beta 3 17th July 2012:</h3>
+<ul>
+	<li><span class="gitcommit">[master xxxxxxx]</span> Due to a bug introduced
+    in sha 7a9dd5c (17th April 2010), nedmalloc has never allocated more than a
+    single mspace when using the system pool. This effectively had disabled
+    concurrency for any allocation > THREADCACHEMAX (8Kb) which no doubt made
+    nedmalloc v1.10 betas 1 and 2 appear no faster than system allocators. My
+    thanks to the eagle eyes of Gavin Lambert for spotting this.</li>
+</ul>
 <h3>v1.10 beta 2 10th July 2012:</h3>
 <ul>
 	<li><span class="gitcommit">[master 51ab2a2]</span> scons now tests for C++0x

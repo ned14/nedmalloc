@@ -1529,7 +1529,7 @@ static NOINLINE int InitPool(nedpool *RESTRICT p, size_t capacity, int threads) 
 	if(!(p->m[0]=(mstate) create_mspace(capacity, 1))) goto err;
 	p->m[0]->extp=p;
 #endif
-	p->threads=(threads>MAXTHREADSINPOOL) ? MAXTHREADSINPOOL : (!threads) ? DEFAULTMAXTHREADSINPOOL : threads;
+	p->threads=(threads>MAXTHREADSINPOOL) ? MAXTHREADSINPOOL : (threads<=0) ? DEFAULTMAXTHREADSINPOOL : threads;
 done:
 	RELEASE_MALLOC_GLOBAL_LOCK();
 	return 1;
