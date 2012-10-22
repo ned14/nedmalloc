@@ -1652,12 +1652,13 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR nedpool *nedcreatepool(size_t capacity, in
 	if(poollist->length==poollist->size)
 	{
 		PoolList *newpoollist=0;
-		size_t newsize=0;
+		size_t newsize=0, toclearsize;
 		newsize=sizeof(PoolList)+(poollist->size+1)*sizeof(nedpool *);
 		if(!(newpoollist=(PoolList *) nedprealloc(0, poollist, newsize))) goto badexit;
 		poollist=newpoollist;
-		memset(&poollist->list[poollist->size], 0, newsize-((size_t)&poollist->list[poollist->size]-(size_t)&poollist->list[0]));
-		poollist->size=((newsize-((char *)&poollist->list[0]-(char *)poollist))/sizeof(nedpool *))-1;
+		toclearsize=newsize-sizeof(PoolList)-(poollist->size)*sizeof(nedpool *);
+		memset(&poollist->list[poollist->size], 0, toclearsize);
+		poollist->size+=toclearsize/sizeof(nedpool *);
 		assert(poollist->size>poollist->length);
 	}
 	if(!(ret=(nedpool *) nedpcalloc(0, 1, sizeof(nedpool)))) goto badexit;

@@ -54,11 +54,15 @@ int main(void)
     {
       if(pools[n])
       {
-        printf("Destroying pool %u ...\n", count);
+        printf("Destroying pool %u ...\n", count--);
         neddestroypool(pools[n]);
       }
     }
   }
 
+#ifdef _MSC_VER
+		printf("\nPress a key to end\n");
+		getchar();
+#endif
   return 0;
 }
