@@ -100,6 +100,7 @@ size_t malloc_usable_size(void *);
  #define ONLY_MSPACES 1
 #endif
 #define USE_DL_PREFIX 1
+#define USE_RECURSIVE_LOCKS 1
 #ifndef USE_LOCKS
  #define USE_LOCKS 1
 #endif

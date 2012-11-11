@@ -11,10 +11,10 @@
 
 //#define THREADCACHEMAX 0
 
-#define USE_MAGIC_HEADERS 1
-#define USE_ALLOCATOR 0
- #define MSPACES 1
- #define ONLY_MSPACES 1
+//#define USE_MAGIC_HEADERS 1
+//#define USE_ALLOCATOR 0
+// #define MSPACES 1
+// #define ONLY_MSPACES 1
 
 #include "nedmalloc.c"
 
