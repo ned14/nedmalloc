@@ -2139,7 +2139,7 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_calloc(nedpool *p, 
 	GetThreadCache(&p, &tc, &mymspace, &elemsize);
 #if USE_ALLOCATOR==0
     GETMSPACE(m, p, tc, mymspace, elemsno*elemsize,
-              ret=unsupported_operation("independent_calloc"));
+              ret=(void **) unsupported_operation("independent_calloc"));
 #elif USE_ALLOCATOR==1
     GETMSPACE(m, p, tc, mymspace, elemsno*elemsize,
               ret=mspace_independent_calloc(m, elemsno, elemsize, chunks));
@@ -2168,7 +2168,7 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_comalloc(nedpool *p
 	GetThreadCache(&p, &tc, &mymspace, 0);
 #if USE_ALLOCATOR==0
 	GETMSPACE(m, p, tc, mymspace, 0,
-              ret=unsupported_operation("independent_comalloc"));
+              ret=(void **) unsupported_operation("independent_comalloc"));
 #elif USE_ALLOCATOR==1
 	GETMSPACE(m, p, tc, mymspace, 0,
               ret=mspace_independent_comalloc(m, elems, adjustedsizes, chunks));
