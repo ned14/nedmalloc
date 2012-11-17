@@ -848,10 +848,12 @@ namespace nedallocatorI
 
 	/* Roll on variadic templates is all I can say! */
 #ifdef HAVE_CPP0XVARIADICTEMPLATES
-	template<class Base, template<class> class... policies> class policycompositor
+	template<class Impl, template<class> class... policies> class policycompositor;
+	template<class Impl, template<class> class A, template<class> class... policies> class policycompositor<Impl, A, policies...>
 	{
+		typedef policycompositor<Impl, policies...> temp;
 	public:
-		typedef policies<policies...> value;
+		typedef A<typename temp::value> value;
 	};
 #else
 	template<class Impl,

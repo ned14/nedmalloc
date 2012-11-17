@@ -61,6 +61,8 @@ later only). It has the following features:</p>
 	<li>The ability to patch Windows binaries to replace the C memory allocation 
 	API malloc, realloc(), free() et al such that by simply inserting nedmalloc.dll 
 	into a process one realises performance improvements without recompilation.</li>
+	<li>On POSIX, it knows how to talk to valgrind so you can track memory 
+	corruption and/or memory leaks.</li>
 	<li>A unique user mode page allocator implementation which delivers O(1) scaling 
 	for blocks of any size, including an O(1) very fast realloc(). Improves medium 
 	sized block (~1Mb) allocation speeds by about 25 times on current hardware. 
@@ -444,17 +446,21 @@ now tends to be worth it in the long run.</p>
 <h2><a name="changelog">E. ChangeLog:</a></h2>
 <h3>v1.10 beta 4 ?:</h3>
 <ul>
-	<li><span class="gitcommit">[master xxxxxxx]</span> Merged dlmalloc v2.8.6.</li>
 	<li><span class="gitcommit">[master 726d9c7]</span> Fixed memory corruption
 	introduced when creating more than two nedpool's (issue #7). Thanks to mxmauro
 	for reporting this.</li>
+	<li><span class="gitcommit">[master c191ea9]</span> Merged dlmalloc v2.8.6.</li>
+	<li><span class="gitcommit">[master xxxxxxx]</span> Added support for clang, 
+	plus fixed up some compile errors in C++11.</li>
+	<li><span class="gitcommit">[master xxxxxxx]</span> Added support for 
+	valgrind instrumentation so valgrind can track programs using nedmalloc.</li>
 </ul>
 <h3>v1.10 beta 3 17th July 2012:</h3>
 <ul>
 	<li><span class="gitcommit">[master 5f26c1a]</span> Due to a bug introduced
     in sha 7a9dd5c (17th April 2010), nedmalloc has never allocated more than a
     single mspace when using the system pool. This effectively had disabled
-    concurrency for any allocation > THREADCACHEMAX (8Kb) which no doubt made
+    concurrency for any allocation &gt; THREADCACHEMAX (8Kb) which no doubt made
     nedmalloc v1.10 betas 1 and 2 appear no faster than system allocators. My
     thanks to the eagle eyes of Gavin Lambert for spotting this.</li>
 </ul>
