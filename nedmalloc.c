@@ -81,6 +81,7 @@ DEALINGS IN THE SOFTWARE.
 #include <errno.h>
 #ifdef HAVE_VALGRIND
 #include <valgrind/valgrind.h>
+#include <valgrind/memcheck.h>
 #endif
 #if defined(WIN32)
  #include <malloc.h>
@@ -476,6 +477,8 @@ static FORCEINLINE void CallFree(void *RESTRICT mspace, void *RESTRICT mem, int 
 		void *m=mspace ? mspace : get_mstate_for(mem2chunk(mem));
 		mspace_free((mstate) mspace, mem);
 		VALGRIND_MEMPOOL_FREE(m, mem);
+		/* Mark the first two pointers in the newly freed block as used (linked list of freed blocks) */
+		VALGRIND_MAKE_MEM_DEFINED(mem, 2*sizeof(void *));
 	}
 #else
 	mspace_free((mstate) mspace, mem);
