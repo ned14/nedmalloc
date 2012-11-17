@@ -118,7 +118,7 @@ else:
     conf=Configure(env, { "CheckHaveClang" : CheckHaveClang, "CheckGCCHasVisibility" : CheckGCCHasVisibility, "CheckGCCHasCPP0xFeatures" : CheckGCCHasCPP0xFeatures, "CheckHaveValgrind" : CheckHaveValgrind } )
     if env.GetOption('useclang') and conf.CheckHaveClang():
         env['CC']="clang"
-        env['CCXX']="clang++"
+        env['CXX']="clang++"
     assert conf.CheckCHeader("pthread.h")
     if not conf.CheckLib("rt", "clock_gettime") and not conf.CheckLib("c", "clock_gettime"):
         print "WARNING: Can't find clock_gettime() in librt or libc, code may not fully compile if your system headers say that this function is available"

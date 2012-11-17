@@ -1,5 +1,5 @@
 /* Alternative malloc implementation for multiple threads without
-lock contention based on dlmalloc. (C) 2005-2010 Niall Douglas
+lock contention based on dlmalloc. (C) 2005-2012 Niall Douglas
 
 Boost Software License - Version 1.0 - August 17th, 2003
 
@@ -64,6 +64,8 @@ DEALINGS IN THE SOFTWARE.
 
 /*#define FULLSANITYCHECKS*/
 
+/*#define FORCEINLINE*/
+
 /* There is only support for the user mode page allocator on Windows at present */
 #if !defined(ENABLE_USERMODEPAGEALLOCATOR)
 #define ENABLE_USERMODEPAGEALLOCATOR 0
@@ -77,6 +79,9 @@ DEALINGS IN THE SOFTWARE.
 
 #include "nedmalloc.h"
 #include <errno.h>
+#ifdef HAVE_VALGRIND
+#include <valgrind/valgrind.h>
+#endif
 #if defined(WIN32)
  #include <malloc.h>
 #else
@@ -340,6 +345,9 @@ static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallMalloc(void *
 	ret=(flags & M2_ZERO_MEMORY) ? syscalloc(1, size) : sysmalloc(size);	/* magic headers takes care of alignment */
 #elif USE_ALLOCATOR==1
 	ret=mspace_malloc2((mstate) mspace, size, alignment, flags);
+#ifdef HAVE_VALGRIND
+	if(ret) VALGRIND_MEMPOOL_ALLOC(mspace, ret, size);
+#endif
 #ifndef ENABLE_FAST_HEAP_DETECTION
 	if(ret)
 	{
@@ -406,6 +414,9 @@ static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void *CallRealloc(void 
 	ret=sysrealloc(mem, newsize);
 #elif USE_ALLOCATOR==1
 	ret=mspace_realloc2((mstate) mspace, mem, newsize, alignment, flags);
+#ifdef HAVE_VALGRIND
+	if(ret) VALGRIND_MEMPOOL_CHANGE(mspace, mem, ret, newsize);
+#endif
 #ifndef ENABLE_FAST_HEAP_DETECTION
 	if(ret)
 	{
@@ -460,7 +471,15 @@ static FORCEINLINE void CallFree(void *RESTRICT mspace, void *RESTRICT mem, int 
 #if USE_ALLOCATOR==0
 	sysfree(mem);
 #elif USE_ALLOCATOR==1
+#ifdef HAVE_VALGRIND
+	{
+		void *m=mspace ? mspace : get_mstate_for(mem2chunk(mem));
+		mspace_free((mstate) mspace, mem);
+		VALGRIND_MEMPOOL_FREE(m, mem);
+	}
+#else
 	mspace_free((mstate) mspace, mem);
+#endif
 #endif
 }
 
@@ -1528,6 +1547,9 @@ static NOINLINE int InitPool(nedpool *RESTRICT p, size_t capacity, int threads) 
 	p->m[0]=(mstate) mspacecounter++;
 #elif USE_ALLOCATOR==1
 	if(!(p->m[0]=(mstate) create_mspace(capacity, 1))) goto err;
+#ifdef HAVE_VALGRIND
+	VALGRIND_CREATE_MEMPOOL(p->m[0], 0, 1);
+#endif
 	p->m[0]->extp=p;
 #endif
 	p->threads=(threads>MAXTHREADSINPOOL) ? MAXTHREADSINPOOL : (threads<=0) ? DEFAULTMAXTHREADSINPOOL : threads;
@@ -1541,6 +1563,9 @@ err:
 	if(p->m[0])
 	{
 #if USE_ALLOCATOR==1
+#ifdef HAVE_VALGRIND
+		VALGRIND_DESTROY_MEMPOOL(p->m[0]);
+#endif
 		destroy_mspace(p->m[0]);
 #endif
 		p->m[0]=0;
@@ -1596,6 +1621,9 @@ static NOINLINE mstate FindMSpace(nedpool *RESTRICT p, threadcache *RESTRICT tc,
 			volatile struct malloc_state **_m=(volatile struct malloc_state **) &p->m[end];
 			*_m=(p->m[end]=temp);
 		}
+#if USE_ALLOCATOR==1 && defined(HAVE_VALGRIND)
+		VALGRIND_CREATE_MEMPOOL(temp, 0, 1);
+#endif
 		ACQUIRE_LOCK(&p->m[end]->mutex);
 		/*printf("Created mspace idx %d\n", end);*/
 		RELEASE_LOCK(&p->mutex);
@@ -1687,6 +1715,9 @@ void neddestroypool(nedpool *p) THROWSPEC
 	for(n=0; p->m[n]; n++)
 	{
 #if USE_ALLOCATOR==1
+#ifdef HAVE_VALGRIND
+		VALGRIND_DESTROY_MEMPOOL(p->m[n]);
+#endif
 		destroy_mspace(p->m[n]);
 #endif
 		p->m[n]=0;
@@ -1725,6 +1756,9 @@ void neddestroysyspool() THROWSPEC
 	for(n=0; p->m[n]; n++)
 	{
 #if USE_ALLOCATOR==1
+#ifdef HAVE_VALGRIND
+		VALGRIND_DESTROY_MEMPOOL(p->m[n]);
+#endif
 		destroy_mspace(p->m[n]);
 #endif
 		p->m[n]=0;
@@ -2132,19 +2166,32 @@ size_t nedpmalloc_footprint(nedpool *p) THROWSPEC
 	}
 	return ret;
 }
+static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void ** CallIndependentCalloc(void *RESTRICT m, size_t elemsno, size_t elemsize, void **chunks) THROWSPEC
+{
+    void **ret;
+#if USE_ALLOCATOR==0
+    ret=(void **) unsupported_operation("independent_calloc");
+#elif USE_ALLOCATOR==1
+    ret=mspace_independent_calloc(m, elemsno, elemsize, chunks);
+#ifdef HAVE_VALGRIND
+    if(ret)
+    {
+        size_t n;
+        for(n=0; n<elemsno; n++)
+            VALGRIND_MEMPOOL_ALLOC(m, ret[n], elemsize);
+    }
+#endif
+#endif
+    return ret;
+}
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_calloc(nedpool *p, size_t elemsno, size_t elemsize, void **chunks) THROWSPEC
 {
 	void **ret;
 	threadcache *tc;
 	int mymspace;
 	GetThreadCache(&p, &tc, &mymspace, &elemsize);
-#if USE_ALLOCATOR==0
-    GETMSPACE(m, p, tc, mymspace, elemsno*elemsize,
-              ret=(void **) unsupported_operation("independent_calloc"));
-#elif USE_ALLOCATOR==1
-    GETMSPACE(m, p, tc, mymspace, elemsno*elemsize,
-              ret=mspace_independent_calloc(m, elemsno, elemsize, chunks));
-#endif
+	GETMSPACE(m, p, tc, mymspace, elemsno*elemsize,
+		ret=CallIndependentCalloc(m, elemsno, elemsize, chunks));
 #if ENABLE_LOGGING
 	if(ret && (ENABLE_LOGGING & LOGENTRY_POOL_MALLOC))
 	{
@@ -2157,23 +2204,36 @@ NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_calloc(nedpool *p, 
 #endif
 	return ret;
 }
+static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **CallIndependentComalloc(void *RESTRICT m, size_t elems, size_t *RESTRICT sizes, void **chunks) THROWSPEC
+{
+	void **ret;
+#if USE_ALLOCATOR==0
+	ret=(void **) unsupported_operation("independent_comalloc");
+#elif USE_ALLOCATOR==1
+	ret=mspace_independent_comalloc(m, elems, sizes, chunks);
+#ifdef HAVE_VALGRIND
+	if(ret)
+	{
+		size_t n;
+		for(n=0; n<elems; n++)
+			VALGRIND_MEMPOOL_ALLOC(m, ret[n], sizes[n]);
+	}
+#endif
+#endif
+	return ret;
+}
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_comalloc(nedpool *p, size_t elems, size_t *sizes, void **chunks) THROWSPEC
 {
 	void **ret;
 	threadcache *tc;
 	int mymspace;
-    size_t i, *adjustedsizes=(size_t *) alloca(elems*sizeof(size_t));
-    if(!adjustedsizes) return 0;
-    for(i=0; i<elems; i++)
-        adjustedsizes[i]=sizes[i]<sizeof(threadcacheblk) ? sizeof(threadcacheblk) : sizes[i];
+	size_t i, *adjustedsizes=(size_t *) alloca(elems*sizeof(size_t));
+	if(!adjustedsizes) return 0;
+	for(i=0; i<elems; i++)
+		adjustedsizes[i]=sizes[i]<sizeof(threadcacheblk) ? sizeof(threadcacheblk) : sizes[i];
 	GetThreadCache(&p, &tc, &mymspace, 0);
-#if USE_ALLOCATOR==0
 	GETMSPACE(m, p, tc, mymspace, 0,
-              ret=(void **) unsupported_operation("independent_comalloc"));
-#elif USE_ALLOCATOR==1
-	GETMSPACE(m, p, tc, mymspace, 0,
-              ret=mspace_independent_comalloc(m, elems, adjustedsizes, chunks));
-#endif
+              ret=CallIndependentComalloc(m, elems, adjustedsizes, chunks));
 #if ENABLE_LOGGING
 	if(ret && (ENABLE_LOGGING & LOGENTRY_POOL_MALLOC))
 	{
