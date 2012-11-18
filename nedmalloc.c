@@ -111,6 +111,7 @@ size_t malloc_usable_size(void *);
  #define USE_LOCKS 1
 #endif
 #define FOOTERS 1           /* Need to enable footers so frees lock the right mspace */
+#define INSECURE 0          /* nedblkmstate works a lot better with magic enabled */
 #ifndef NEDMALLOC_DEBUG
  #if defined(DEBUG) || defined(_DEBUG)
   #define NEDMALLOC_DEBUG 1
@@ -2185,6 +2186,11 @@ static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void ** CallIndependent
     }
 #endif
 #endif
+    if(ret)
+    {
+  		if(!leastusedaddress || (void *)((mstate) m)->least_addr<leastusedaddress) leastusedaddress=(void *)((mstate) m)->least_addr;
+	  	/*if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);*/
+    }
     return ret;
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_calloc(nedpool *p, size_t elemsno, size_t elemsize, void **chunks) THROWSPEC
@@ -2223,6 +2229,11 @@ static FORCEINLINE NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **CallIndependentC
 	}
 #endif
 #endif
+	if(ret)
+	{
+		if(!leastusedaddress || (void *)((mstate) m)->least_addr<leastusedaddress) leastusedaddress=(void *)((mstate) m)->least_addr;
+		/*if(!largestusedblock || truesize>largestusedblock) largestusedblock=(truesize+mparams.page_size) & ~(mparams.page_size-1);*/
+	}
 	return ret;
 }
 NEDMALLOCNOALIASATTR NEDMALLOCPTRATTR void **nedpindependent_comalloc(nedpool *p, size_t elems, size_t *sizes, void **chunks) THROWSPEC

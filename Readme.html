@@ -450,10 +450,13 @@ now tends to be worth it in the long run.</p>
 	introduced when creating more than two nedpool's (issue #7). Thanks to mxmauro
 	for reporting this.</li>
 	<li><span class="gitcommit">[master c191ea9]</span> Merged dlmalloc v2.8.6.</li>
-	<li><span class="gitcommit">[master xxxxxxx]</span> Added support for clang, 
+	<li><span class="gitcommit">[master 06f1c70]</span> Added support for clang, 
 	plus fixed up some compile errors in C++11.</li>
-	<li><span class="gitcommit">[master xxxxxxx]</span> Added support for 
+	<li><span class="gitcommit">[master 8f8256c]</span> Added support for 
 	valgrind instrumentation so valgrind can track programs using nedmalloc.</li>
+	<li><span class="gitcommit">[master xxxxxxx]</span> Fixed issue #8 where 
+	memory allocated via the independent_*() functions was being incorrectly 
+	identified as system allocated. Thanks to Geri for reporting this.</li>
 </ul>
 <h3>v1.10 beta 3 17th July 2012:</h3>
 <ul>
