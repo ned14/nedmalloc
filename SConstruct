@@ -12,6 +12,7 @@ AddOption('--static', dest='static', nargs='?', const=True, help='build a static
 AddOption('--pgo', dest='pgo', nargs='?', const=True, help='build PGO instrumentation')
 AddOption('--debugprint', dest='debugprint', nargs='?', const=True, help='enable lots of debug printing (windows only)')
 AddOption('--fullsanitychecks', dest='fullsanitychecks', nargs='?', const=True, help='enable full sanity checking on every memory op')
+AddOption('--useclang', dest='useclang', nargs='?', const=True, help='use clang if it is available')
 AddOption('--force32', dest='force32', help='force 32 bit build on 64 bit machine')
 AddOption('--sse', dest='sse', nargs=1, type='int', default=1, help='set SSE used (0-4) on 32 bit x86. Defaults to 1 (SSE1).')
 AddOption('--replacesystemallocator', dest='replacesystemallocator', nargs='?', const=True, help='replace all usage of the system allocator in the process when loaded')
@@ -76,8 +77,19 @@ if sys.platform=="win32":
     env['ENV']['PATH']=os.environ['PATH']
 else:
     # Test the build environment
+    def CheckHaveClang(cc):
+        cc.Message("Checking if clang is available ...")
+        try:
+            temp=env['CC']
+        except:
+            temp=[]
+        cc.env['CC']="clang"
+        result=cc.TryLink('int main(void) { return 0; }\n', '.c')
+        cc.env['CC']=temp
+        cc.Result(result)
+        return result
     def CheckGCCHasVisibility(cc):
-        cc.Message("Checking for GCC global symbol visibility support...")
+        cc.Message("Checking for GCC global symbol visibility support ...")
         try:
             temp=cc.env['CPPFLAGS']
         except:
@@ -98,7 +110,15 @@ else:
         cc.env['CPPFLAGS']=temp
         cc.Result(result)
         return result
-    conf=Configure(env, { "CheckGCCHasVisibility" : CheckGCCHasVisibility, "CheckGCCHasCPP0xFeatures" : CheckGCCHasCPP0xFeatures } )
+    def CheckHaveValgrind(cc):
+        cc.Message("Checking if valgrind is available ...")
+        result=cc.TryLink('#include <valgrind/valgrind.h>\nint main(void) { VALGRIND_CREATE_MEMPOOL(0,0,0); return 0; }\n', '.c')
+        cc.Result(result)
+        return result
+    conf=Configure(env, { "CheckHaveClang" : CheckHaveClang, "CheckGCCHasVisibility" : CheckGCCHasVisibility, "CheckGCCHasCPP0xFeatures" : CheckGCCHasCPP0xFeatures, "CheckHaveValgrind" : CheckHaveValgrind } )
+    if env.GetOption('useclang') and conf.CheckHaveClang():
+        env['CC']="clang"
+        env['CXX']="clang++"
     assert conf.CheckCHeader("pthread.h")
     if not conf.CheckLib("rt", "clock_gettime") and not conf.CheckLib("c", "clock_gettime"):
         print "WARNING: Can't find clock_gettime() in librt or libc, code may not fully compile if your system headers say that this function is available"
@@ -113,6 +133,11 @@ else:
         env['CXXFLAGS']+=["-std=c++0x"]
     else:
         print "Disabling C++0x support"
+
+    if conf.CheckHaveValgrind():
+        env['CPPDEFINES']+=["HAVE_VALGRIND"]
+    else:
+        print "Disabling valgrind support"
 
     env=conf.Finish()
 

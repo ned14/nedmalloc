@@ -96,17 +96,17 @@ public:
 	SSEVectorType(SSEVectorType &&o)
 	{
 #if defined(_M_X64) || defined(__x86_64__) || (defined(_M_IX86) && _M_IX86_FP>=2) || (defined(__i386__) && defined(__SSE2__))
-		vec=std::move(o.vec);
+		data.vec=std::move(o.data.vec);
 #else
-		ints=std::move(o.ints);
+		data.ints=std::move(o.data.ints);
 #endif
 	}
-	SSEVectorType &&operator=(SSEVectorType &&o)
+	SSEVectorType &operator=(SSEVectorType &&o)
 	{
 #if defined(_M_X64) || defined(__x86_64__) || (defined(_M_IX86) && _M_IX86_FP>=2) || (defined(__i386__) && defined(__SSE2__))
-		vec=std::move(o.vec);
+		data.vec=std::move(o.data.vec);
 #else
-		ints=std::move(o.ints);
+		data.ints=std::move(o.data.ints);
 #endif
 		return *this;
 	}
@@ -130,8 +130,10 @@ struct UIntish
 	unsigned int value;
 	UIntish() : value(5) { }
 	UIntish(const UIntish &o) : value(o.value) { }
+	UIntish &operator=(const UIntish &o) { value=o.value; return *this; }
 #ifdef HAVE_CPP0XRVALUEREFS
-	UIntish(UIntish &&o) : value(std::move(o)) { }
+	UIntish(UIntish &&o) : value(std::move(o.value)) { }
+	UIntish &operator=(UIntish &&o) { value=std::move(o.value); return *this; }
 #endif
 };
 

@@ -129,4 +129,10 @@ objects = env.Object(source = sources) # + [nedmallocliblib]
 scalingtest = env.Program("scalingtest", source = objects, LINKFLAGS=env['LINKFLAGSEXE'])
 outputs['scalingtest']=(scalingtest, sources)
 
+# issue 8
+sources = [ "issue8.cpp" ]
+objects = env.Object(source = sources) # + [nedmallocliblib]
+issue8 = env.Program("issue8", source = objects, LINKFLAGS=env['LINKFLAGSEXE'])
+outputs['issue8']=(issue8, sources)
+
 Return("outputs")

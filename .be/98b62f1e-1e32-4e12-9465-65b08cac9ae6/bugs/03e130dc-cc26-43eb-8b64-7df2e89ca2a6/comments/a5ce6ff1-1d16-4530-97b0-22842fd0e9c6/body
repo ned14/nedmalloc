@@ -1,0 +1,1 @@
+Block list would need in-place sorting into per-mspace lists before calling mspace_bulk_free(). This could be slow and subject to race problems.

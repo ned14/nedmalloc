@@ -1,0 +1,60 @@
+{
+   insert_large_chunk
+   Memcheck:Addr4
+   fun:mspace_free
+}
+{
+   tmalloc_large
+   Memcheck:Addr4
+   fun:_ZL13tmalloc_largeP12malloc_statej
+}
+{
+   ialloc
+   Memcheck:Addr4
+   fun:_ZL6iallocP12malloc_statejPjiPPv
+}
+{
+   do_check_inuse_chunk
+   Memcheck:Addr4
+   fun:_ZL20do_check_inuse_chunkP12malloc_stateP12malloc_chunk
+}
+{
+   mspace_malloc_implementation
+   Memcheck:Addr4
+   fun:_ZL28mspace_malloc_implementationP12malloc_statejj
+}
+{
+   do_check_malloced_chunk
+   Memcheck:Addr4
+   fun:_ZL23do_check_malloced_chunkP12malloc_statePvj
+}
+{
+   CallMalloc
+   Memcheck:Addr4
+   fun:CallMalloc
+}
+{
+   tmalloc_small
+   Memcheck:Addr4
+   fun:_ZL13tmalloc_smallP12malloc_statej
+}
+{
+   nedblkmstate
+   Memcheck:Addr4
+   fun:nedblkmstate
+}
+{
+   nedblksize
+   Memcheck:Addr4
+   fun:nedblksize
+}
+{
+   do_check_free_chunk
+   Memcheck:Addr4
+   fun:_ZL19do_check_free_chunkP12malloc_stateP12malloc_chunk
+}
+{
+   CallFree
+   Memcheck:Addr4
+   fun:CallFree
+}
