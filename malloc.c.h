@@ -1658,7 +1658,7 @@ static FORCEINLINE void* posix_mmap(size_t size) {
   if(largepagesize && size >= largepagesize && !(size & (largepagesize-1)))
     ptr = mmap(baseaddress, size, MMAP_PROT, flags|MMAP_FLAGS_LARGEPAGE, fd, 0);
 #endif
-  if (!ptr) {
+  if (MFAIL==ptr) {
     ptr = mmap(baseaddress, size, MMAP_PROT, flags, fd, 0);
   }
 #if DEBUG && 0
@@ -1687,7 +1687,7 @@ static FORCEINLINE void* posix_direct_mmap(size_t size) {
 #if DEBUG && 0
   printf("Direct mmap returns %p size %u\n", ptr, (unsigned)size);
 #endif
-  return (ptr != 0)? ptr: MFAIL;
+  return ptr;
 }
 
 #define MMAP_DEFAULT(s)                     posix_mmap(s)
