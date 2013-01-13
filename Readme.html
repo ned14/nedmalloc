@@ -454,9 +454,12 @@ now tends to be worth it in the long run.</p>
 	plus fixed up some compile errors in C++11.</li>
 	<li><span class="gitcommit">[master 8f8256c]</span> Added support for 
 	valgrind instrumentation so valgrind can track programs using nedmalloc.</li>
-	<li><span class="gitcommit">[master xxxxxxx]</span> Fixed issue #8 where 
+	<li><span class="gitcommit">[master 69825ca]</span> Fixed issue #8 where 
 	memory allocated via the independent_*() functions was being incorrectly 
 	identified as system allocated. Thanks to Geri for reporting this.</li>
+	<li><span class="gitcommit">[master a6a0dec]</span> Fixed issue #10 where 
+    a failure to allocate memory on POSIX was not being trapped correctly. Thanks
+    to btaudul for reporting this.</li>
 </ul>
 <h3>v1.10 beta 3 17th July 2012:</h3>
 <ul>
