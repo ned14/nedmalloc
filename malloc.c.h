@@ -1640,7 +1640,7 @@ static int dev_zero_fd = -1; /* Cached file descriptor for /dev/zero. */
 
 static FORCEINLINE void* posix_mmap(size_t size) {
   void* baseaddress = 0;
-  void* ptr = 0;
+  void* ptr = MFAIL;
   int flags = MMAP_FLAGS, fd = -1;
 #ifndef MAP_ANONYMOUS
   if (dev_zero_fd < 0)
