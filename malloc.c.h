@@ -1549,9 +1549,6 @@ unsigned char _BitScanReverse(unsigned long *index, unsigned long mask);
 #    endif
 #  endif
 #endif
-#ifdef ENABLE_LARGE_PAGES
-#include <dlfcn.h> /* for dlsym */
-#endif
 #endif
 
 
@@ -3367,14 +3364,31 @@ static int init_mparams(void) {
 #endif /* WIN32 */
 #ifdef ENABLE_LARGE_PAGES
 #ifndef WIN32
-    { /* gethugepagesize() is part of the portable libhugetlbfs
-      (http://sourceforge.net/projects/libhugetlbfs/). However we
-      want to avoid requiring a dependency on that library if
-      possible, so if it's in our process then great and if not
-      then that's okay too. */
-      gethugepagesize_t gethugepagesize_ = (gethugepagesize_t) dlsym(RTLD_DEFAULT, "gethugepagesize");
-      if(gethugepagesize_)
-        largepagesize = gethugepagesize_();
+    {
+      FILE *ih=fopen("/proc/meminfo", "r");
+      if(ih)
+      {
+        char buffer[4096], *hugepagesize, *hugepages;
+        buffer[fread(buffer, sizeof(buffer)-1, 1, ih)]=0;
+        fclose(ih);
+        hugepagesize=strstr(buffer, "Hugepagesize:");
+        hugepages=strstr(buffer, "HugePages_Total:");
+        if(hugepagesize && hugepages)
+        {
+          unsigned _hugepages=0, _hugepagesize=0;
+          while((*++hugepagesize!=' '));
+          while((*++hugepages!=' '));
+          while((*++hugepagesize==' '));
+          while((*++hugepages==' '));
+          sscanf(hugepagesize, "%u", &_hugepagesize);
+          sscanf(hugepages, "%u", &_hugepages);
+#ifdef DEBUG
+          printf("Hugepages=%u, size=%u\n", _hugepages, _hugepagesize);
+#endif
+          if(_hugepages && _hugepagesize)
+            largepagesize = ((size_t)_hugepagesize)*1024;
+        }
+      }
     }
 #else /* WIN32 */
     { 
