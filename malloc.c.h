@@ -1549,6 +1549,9 @@ unsigned char _BitScanReverse(unsigned long *index, unsigned long mask);
 #    endif
 #  endif
 #endif
+#ifdef ENABLE_LARGE_PAGES
+#include <dlfcn.h> /* for dlsym */
+#endif
 #endif
 
 
