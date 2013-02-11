@@ -3365,12 +3365,12 @@ static int init_mparams(void) {
 #ifdef ENABLE_LARGE_PAGES
 #ifndef WIN32
     {
-      FILE *ih=fopen("/proc/meminfo", "r");
-      if(ih)
+      int ih=open("/proc/meminfo", O_RDONLY);
+      if(-1!=ih)
       {
         char buffer[4096], *hugepagesize, *hugepages;
-        buffer[fread(buffer, sizeof(buffer)-1, 1, ih)]=0;
-        fclose(ih);
+        buffer[read(ih, buffer, sizeof(buffer)-1)]=0;
+        close(ih);
         hugepagesize=strstr(buffer, "Hugepagesize:");
         hugepages=strstr(buffer, "HugePages_Total:");
         if(hugepagesize && hugepages)
