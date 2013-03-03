@@ -3382,7 +3382,7 @@ static int init_mparams(void) {
           while((*++hugepages==' '));
           sscanf(hugepagesize, "%u", &_hugepagesize);
           sscanf(hugepages, "%u", &_hugepages);
-#ifdef DEBUG
+#if DEBUG
           printf("Hugepages=%u, size=%u\n", _hugepages, _hugepagesize);
 #endif
           if(_hugepages && _hugepagesize)
