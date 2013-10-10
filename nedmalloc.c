@@ -1342,7 +1342,7 @@ static NOINLINE threadcache *AllocCache(nedpool *RESTRICT p) THROWSPEC
 #else
 		1;
 #endif
-	for(end=0; p->m[end]; end++);
+	for(end=1; p->m[end]; end++);
 	tc->mymspace=abs(tc->threadid) % end;
 #if ENABLE_LOGGING
 	{
