@@ -1,21 +1,37 @@
 import os, sys, platform
 
-Import("env")
-env=env.Clone()
+Import("importedenv", "ARMcrosscompiler")
+env=importedenv.Clone()
 architecture=env['VARIANT'][:env['VARIANT'].find('/')]
 debugbuild="Debug" in env['VARIANT']
-if sys.platform=="win32":
+if env['CC']=='cl':
     if architecture=="x86":
         if   env.GetOption('sse')==1: env['CCFLAGS']+=[ "/arch:SSE" ]
         elif env.GetOption('sse')>=2: env['CCFLAGS']+=[ "/arch:SSE2" ]
         if   env.GetOption('sse')>=3: env['CPPDEFINES']+=[("__SSE3__", 1)]
         if   env.GetOption('sse')>=4: env['CPPDEFINES']+=[("__SSE4__", 1)]
+    if architecture=="x86" or architecture=="x64":
+        if   env.GetOption('avx')==1: env['CCFLAGS']+=[ "/arch:AVX" ]
 else:
     if architecture=="x86":
+        env['CCFLAGS']+=["-m32"]
+        env['LINKFLAGS']+=["-m32"]
         if env.GetOption('sse'):
             env['CCFLAGS']+=["-mfpmath=sse"]
             if env.GetOption('sse')>1: env['CCFLAGS']+=["-msse%s" % str(env.GetOption('sse'))]
             else: env['CCFLAGS']+=["-msse"]
+    if architecture=="x86" or architecture=="x64":
+        if env.GetOption('avx'):
+            env['CCFLAGS']+=["-mfpmath=avx"]
+            if env.GetOption('avx')>1: env['CCFLAGS']+=["-mavx%s" % str(env.GetOption('avx'))]
+            else: env['CCFLAGS']+=["-mavx"]
+    if architecture=='ARMv7':
+        if ARMcrosscompiler:
+            env['CC']='arm-linux-gnueabi-gcc'
+            env['CXX']='arm-linux-gnueabi-g++'
+        env['CCFLAGS']+=['-mfpu=%s' % env.GetOption('fpu')]
+        if env.GetOption('thumb'):
+	    env['CCFLAGS']+=['-mthumb']
 
 # Am I building a debug or release build?
 if debugbuild:
@@ -24,13 +40,15 @@ else:
     env['CPPDEFINES']+=["NDEBUG"]
 
 # Am I building for Windows or POSIX?
-if sys.platform=='win32':
+if env['CC']=='cl':
     env['CPPDEFINES']+=["WIN32", "_WINDOWS", "UNICODE", "_UNICODE"]
     env['CXXFLAGS']+=["/EHsc"]
     env['CCFLAGS']+=["/GF"]             # Eliminate duplicate strings
     env['CCFLAGS']+=["/Gy"]             # Seperate COMDATs
     env['CCFLAGS']+=["/Zi"]             # Program database debug info
-    if debugbuild:
+    if env.GetOption('debug')==2:       # Optimised debug build
+        env['CCFLAGS']+=["/O1", "/MTd", "/Oy-"]
+    elif debugbuild:
         env['CCFLAGS']+=["/Od", "/MTd"]
     else:
         env['CCFLAGS']+=["/O2", "/MT"]
@@ -47,7 +65,7 @@ if sys.platform=='win32':
 
 
     env['LINKFLAGS']+=["/ENTRY:DllPreMainCRTStartup"]
-    env['LINKFLAGS']+=["/VERSION:1.10.0"]        # Version
+    env['LINKFLAGS']+=["/VERSION:1.10"]        # Version
 
     if not debugbuild:
         env['LINKFLAGS']+=["/OPT:ICF"]  # Eliminate redundants
@@ -59,9 +77,17 @@ if sys.platform=='win32':
                 env['LINKFLAGS']+=["/LTCG:PGUPDATE"]
 else:
     env['CPPDEFINES']+=[]
-    env['CCFLAGS']+=["-fstrict-aliasing", "-fargument-noalias", "-Wstrict-aliasing"]
+    env['CCFLAGS']+=["-fstrict-aliasing", "-Wstrict-aliasing"]
     env['CCFLAGS']+=["-Wall", "-Wno-unused"]
-    if debugbuild:
+    if env.GetOption('useclang'):
+        env['CCFLAGS']+=["-Wno-mismatched-tags"]
+    else:
+        env['CCFLAGS']+=["-fargument-noalias"]
+    if env.GetOption('debug')==2:       # Optimised debug build
+        env['CCFLAGS']+=["-O1", "-g", "-fno-omit-frame-pointer"]
+        if architecture=='ARMv7':
+            env['CCFLAGS']+=["-mapcs-frame", "-mtpcs-frame", "-mtpcs-leaf-frame"]
+    elif debugbuild:
         env['CCFLAGS']+=["-O0", "-g"]
     else:
         env['CCFLAGS']+=["-O2", "-g"]
