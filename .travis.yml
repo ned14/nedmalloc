@@ -29,7 +29,7 @@ before_install:
  - sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
  - if [ $CXX = "clang++" ]; then sudo add-apt-repository -y ppa:h-rayflood/llvm; fi
  - sudo apt-get update -qq
- - if [ $CXX = "clang++" ]; then sudo apt-get install -qq libstdc++-4.8-dev clang-3.2; fi
+ - if [ $CXX = "clang++" ]; then sudo apt-get install -qq libstdc++-4.8-dev clang-3.3; fi
  - if [ $GCCVER != "" ]; then sudo apt-get install -qq g++-$GCCVER; fi
  - if [ $VALGRIND != "0" ]; then sudo apt-get install -qq valgrind; fi
  - git submodule update --init
@@ -38,7 +38,7 @@ script:
  - if [ $DEBUG -eq 0 ]; then PREFIXPATH="x64/Release"; DEBUGBUILD=""; fi
  - if [ $DEBUG -eq 1 ]; then PREFIXPATH="x64/Debug"; DEBUGBUILD="--debugbuild"; fi
  - if [ $DEBUG -eq 2 ]; then PREFIXPATH="x64/Debug"; DEBUGBUILD="--optdebugbuild"; fi
- - if [ $CC = "clang" ]; then scons -k --useclang=clang++-3.2 $DEBUGBUILD $CCFLAGS; else scons -k $DEBUGBUILD $CCFLAGS; fi
+ - if [ $CC = "clang" ]; then scons -k --useclang=clang++-3.3 $DEBUGBUILD $CCFLAGS; else scons -k $DEBUGBUILD $CCFLAGS; fi
  - if [ $VALGRIND = "memcheck" ]; then PREFIXTEST="valgrind --tool=memcheck --suppressions=unittests/memcheck.supp --track-origins=yes --track-fds=yes --leak-check=full --show-reachable=yes --error-exitcode=1"; fi
  - if [ $VALGRIND = "drd" ]; then PREFIXTEST="valgrind --tool=drd --suppressions=unittests/drd.supp --error-exitcode=1"; fi
  - if [ $VALGRIND = "0" ]; then PREFIXTEST=""; fi

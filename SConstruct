@@ -69,6 +69,7 @@ AddOption('--pgo', dest='pgo', nargs='?', const=True, help='build PGO instrument
 AddOption('--debugprint', dest='debugprint', nargs='?', const=True, help='enable lots of debug printing (windows only)')
 AddOption('--fullsanitychecks', dest='fullsanitychecks', nargs='?', const=True, help='enable full sanity checking on every memory op')
 AddOption('--useclang', dest='useclang', nargs=1, type='str', help='use clang if it is available')
+AddOption('--analyze', dest='analyze', nargs='?', const=True, help='have the compiler do static analysis')
 AddOption('--usegcc', dest='usegcc', nargs=1, type='str', help='use gcc if it is available')
 AddOption('--usethreadsanitize', dest='usethreadsanitize', nargs='?', const=True, help='use thread sanitiser')
 AddOption('--usegcov', dest='usegcov', nargs='?', const=True, help='use GCC coverage')
@@ -120,6 +121,7 @@ env['NEDMALLOCLIBRARYNAME']="nedmalloc"+('_ptchg' if env.GetOption('replacesyste
 env['UMPALIBRARYNAME']="nedumpa"+('_ptchg' if env.GetOption('replacesystemallocator') else '')+env.GetOption('postfix')
 if env.GetOption('debugprint'): env['CPPDEFINES']+=["USE_DEBUGGER_OUTPUT"]
 if env.GetOption('fullsanitychecks'): env['CPPDEFINES']+=["FULLSANITYCHECKS"]
+if env.GetOption('analyze'): env['CPPFLAGS']+=["--analyze"]
 if env.GetOption('replacesystemallocator'): env['CPPDEFINES']+=["REPLACE_SYSTEM_ALLOCATOR"]
 if env.GetOption('tolerant'): env['CPPDEFINES']+=["ENABLE_TOLERANT_NEDMALLOC"]
 if env.GetOption('magicheaders'): env['CPPDEFINES']+=["USE_MAGIC_HEADERS"]
