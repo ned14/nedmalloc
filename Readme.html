@@ -461,9 +461,14 @@ now tends to be worth it in the long run.</p>
 	<li><span class="gitcommit">[master a6a0dec]</span> Fixed issue #10 where 
     a failure to allocate memory on POSIX was not being trapped correctly. Thanks
     to btaudul for reporting this.</li>
-	<li><span class="gitcommit">[master xxxxxxx]</span> Fixed issue #12 where 
+	<li><span class="gitcommit">[master a559f9e]</span> Fixed issue #12 where 
 	RTLD_DEFAULT was undefined. Replaced this code entirely with new code which
     parses /proc/meminfo for huge page size. Thanks to Geri for reporting this.</li>
+	<li><span class="gitcommit">[master 9119158]</span> Added Travis CI build bot
+  support to nedalloc, testing gcc, clang and clang static analyser.</li>
+	<li><span class="gitcommit">[master xxxxxxx]</span> Fixed issue #14 where 
+	nedalloc was using is_pod&lt;&gt; instead of is_trivially_copyable&lt;&gt;.
+  Thanks to JustSid for reporting this.</li>
 </ul>
 <h3>v1.10 beta 3 17th July 2012:</h3>
 <ul>

@@ -986,10 +986,10 @@ policies...
 		{
 			throw std::bad_alloc();
 		}
-		//! \brief Specifies if the type is POD. Is std::is_pod<T>::value on C++0x compilers, otherwise false.
+		//! \brief Specifies if the type is POD. Is std::is_trivially_copyable<T>::value on C++0x compilers, otherwise false.
 		static const bool policy_typeIsPOD=
 #ifdef HAVE_CPP0XTYPETRAITS
-			is_pod<T>::value;
+			is_trivially_copyable<T>::value;
 #else
 			false;
 #endif
@@ -1215,11 +1215,8 @@ namespace nedpolicy
 	\ingroup C++
 	\brief A policy forcing the treatment of the type as Plain Old Data (POD)
 
-	On C++0x compilers, the &lt;type_traits&gt; is_pod<type>::value is used by default.
-	However, for earlier compilers and for types where is_pod<>::value returns false
-	even though the type actually is POD (for example, if you declare a
-	constructor you lose PODness even if the data contents are still POD), you can
-	force PODness one way or another. When treated as POD, memcpy() is used instead
+	On C++0x compilers, the &lt;type_traits&gt; is_trivially_copyable<type>::value is used by default.
+	When treated as POD, memcpy() is used instead
 	of copy construction and realloc() is permitted to move the memory contents when
 	resizing.
 	*/
