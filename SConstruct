@@ -121,7 +121,6 @@ env['NEDMALLOCLIBRARYNAME']="nedmalloc"+('_ptchg' if env.GetOption('replacesyste
 env['UMPALIBRARYNAME']="nedumpa"+('_ptchg' if env.GetOption('replacesystemallocator') else '')+env.GetOption('postfix')
 if env.GetOption('debugprint'): env['CPPDEFINES']+=["USE_DEBUGGER_OUTPUT"]
 if env.GetOption('fullsanitychecks'): env['CPPDEFINES']+=["FULLSANITYCHECKS"]
-if env.GetOption('analyze'): env['CPPFLAGS']+=["--analyze"]
 if env.GetOption('replacesystemallocator'): env['CPPDEFINES']+=["REPLACE_SYSTEM_ALLOCATOR"]
 if env.GetOption('tolerant'): env['CPPDEFINES']+=["ENABLE_TOLERANT_NEDMALLOC"]
 if env.GetOption('magicheaders'): env['CPPDEFINES']+=["USE_MAGIC_HEADERS"]
@@ -220,6 +219,7 @@ else:
     if env.GetOption('useclang') and conf.CheckHaveClang():
         env['CC']="clang"
         env['CXX']=env.GetOption('useclang')
+        if env.GetOption('analyze'): env['CPPFLAGS']+=["--analyze"]
     if env.GetOption('usegcc') and conf.CheckHaveGCC():
         env['CC']="gcc"
         env['CXX']=env.GetOption('usegcc')
