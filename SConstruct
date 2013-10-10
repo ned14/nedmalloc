@@ -219,9 +219,6 @@ else:
     if env.GetOption('useclang') and conf.CheckHaveClang():
         env['CC']="clang"
         env['CXX']=env.GetOption('useclang')
-        if env.GetOption('analyze'):
-            env['CPPFLAGS']+=["--analyze"]
-            env['LINKFLAGS']+=["--analyze"]
     if env.GetOption('usegcc') and conf.CheckHaveGCC():
         env['CC']="gcc"
         env['CXX']=env.GetOption('usegcc')

@@ -101,6 +101,9 @@ outputs={}
 # Build the nedmalloc DLL
 sources = ["nedmalloc.c"]
 libobjects = env.SharedObject("nedmalloc.c", CPPDEFINES=env['CPPDEFINES']+["NEDMALLOC_DLL_EXPORTS"], CCFLAGS=env['CCFLAGS']+env['CCFLAGSFORNEDMALLOC'])
+if env.GetOption('analyze'):
+    libobjects2 = env.SharedObject("nedmalloc.analysis", "nedmalloc.c", CPPDEFINES=env['CPPDEFINES']+["NEDMALLOC_DLL_EXPORTS"], CCFLAGS=env['CCFLAGS']+env['CCFLAGSFORNEDMALLOC']+['--analyze'])
+    env.Depends(libobjects, libobjects2)
 if sys.platform=='win32':
     if not env.GetOption("static"): libobjects+=env.SharedObject("winpatcher_nedmalloc", "winpatcher.c", CPPDEFINES=env['CPPDEFINES']+["NEDMALLOC_DLL_EXPORTS"])
     libobjects+=env.RES("nedmalloc.res", "nedmalloc_dll.rc")
