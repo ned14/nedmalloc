@@ -989,7 +989,11 @@ policies...
 		//! \brief Specifies if the type is POD. Is std::is_trivially_copyable<T>::value on C++0x compilers, otherwise false.
 		static const bool policy_typeIsPOD=
 #ifdef HAVE_CPP0XTYPETRAITS
+#if __GLIBCXX__ < 20120322 /* < libstdc++ 4.7 */
+			is_pod<T>::value;
+#else
 			is_trivially_copyable<T>::value;
+#endif
 #else
 			false;
 #endif
