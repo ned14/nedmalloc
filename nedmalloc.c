@@ -1736,7 +1736,8 @@ void neddestroypool(nedpool *p) THROWSPEC
 	ACQUIRE_LOCK(&poollistlock);
 #endif
 	assert(poollist);
-	for(n=0; n<poollist->length && poollist->list[n]!=p; n++);
+	for(n=0; n<poollist->length && poollist->list[n]!=p; n++)
+		/* empty */;
 	assert(n!=poollist->length);
 	memmove(&poollist->list[n], &poollist->list[n+1], (size_t)&poollist->list[poollist->length]-(size_t)&poollist->list[n]);
 	if(!--poollist->length)

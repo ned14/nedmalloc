@@ -140,7 +140,7 @@ int main(void)
 		printf("   %u. %s\n", n+1, allocators[n].name);
 	}
 	unsigned allocatoridx=getchar()-'1';
-	if(allocatoridx<0 || allocatoridx>sizeof(allocators)/sizeof(Allocator)) return 1;
+	if(allocatoridx>sizeof(allocators)/sizeof(Allocator)) return 1;
 	Allocator &allocator=allocators[allocatoridx];
 	allocator.minsizeshift=allocator.minsize ? nedtriebitscanr(allocator.minsize) : (allocator.minsize=1<<3, 3);
 	printf("\nYou chose allocator %u (%s) with minsizeshift=%lu\n", allocatoridx+1, allocator.name, (unsigned long) allocator.minsizeshift);
