@@ -164,4 +164,10 @@ objects = env.Object(source = sources) # + [nedmallocliblib]
 issue8 = env.Program("issue8", source = objects, LINKFLAGS=env['LINKFLAGSEXE'])
 outputs['issue8']=(issue8, sources)
 
+# issue 15
+sources = [ "issue15.cpp" ]
+objects = env.Object(source = sources) # + [nedmallocliblib]
+issue15 = env.Program("issue15", source = objects, LINKFLAGS=env['LINKFLAGSEXE'])
+outputs['issue15']=(issue15, sources)
+
 Return("outputs")
