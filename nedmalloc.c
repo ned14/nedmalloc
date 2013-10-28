@@ -95,7 +95,11 @@ extern
 /* Sadly we can't include <malloc.h> as it causes a redefinition error */
 size_t malloc_usable_size(void *);
  #elif defined(__APPLE__)
-  #include <malloc.h>
+  #if TARGET_OS_IPHONE
+   #include <malloc/malloc.h>
+  #else
+   #include <malloc.h>
+  #endif
  #else
   #error Do not know what to do here
  #endif
