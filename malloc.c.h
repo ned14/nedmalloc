@@ -2231,7 +2231,7 @@ static MLOCK_T malloc_global_mutex = PTHREAD_MUTEX_INITIALIZER;
 /* skipped internal declaration from pthread.h */
 #ifdef linux
 #ifndef PTHREAD_MUTEX_RECURSIVE
-extern int pthread_mutexattr_setkind_np __P ((pthread_mutexattr_t *__attr,
+extern "C" int pthread_mutexattr_setkind_np __P ((pthread_mutexattr_t *__attr,
 					   int __kind));
 #define PTHREAD_MUTEX_RECURSIVE PTHREAD_MUTEX_RECURSIVE_NP
 #define pthread_mutexattr_settype(x,y) pthread_mutexattr_setkind_np(x,y)
